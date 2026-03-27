@@ -1,0 +1,51 @@
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Variáveis de ambiente (nunca versionar segredos)
+.env
+
+# Outputs gerados em runtime
+outputs/plots/*.png
+outputs/plots/*.jpg
+outputs/models/*.pkl
+outputs/models/*.json
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Dados (arquivo grande — use Git LFS ou distribua separadamente)
+*.xlsx
+*.xls
+*.csv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Distribuição / build
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
