@@ -32,15 +32,23 @@ CONFIG = {
     # Bateria
     "bateria_cap_kwh": 24.0,
     "soc_inicial_pct": 50.0,
-    "soc_min_pct": 15.0,    # abaixo disso → estado crítico
-    "soc_max_pct": 95.0,    # acima disso  → para de carregar
-    "eficiencia": 0.92,
+    "soc_min_pct": 15.0,        # abaixo disso → estado crítico
+    "soc_max_pct": 95.0,        # acima disso  → para de carregar
+    "eficiencia_carga": 0.92,   # η carga
+    "eficiencia_descarga": 0.95, # η descarga
+    "bat_throughput_max_kwh": 48.0,  # ciclo máximo diário (kWh)
+
+    # Limites de conexão e geração
+    "pcc_max_kw": 65.8,          # limite PCC importação/exportação
+    "inversor_fv_max_kw": 50.0,  # teto do inversor fotovoltaico
+    "eolico_nominal_kw": 10.0,   # potência nominal do aerogerador
 
     # Pesos do reward cooperativo
     "w_custo": 1.0,
     "pen_soc": 10.0,        # violação SOC crítico
     "pen_teto": 5.0,        # consumo acima do teto
     "pen_producao": 8.0,    # corte de bomba de captação
+    "pen_pcc": 8.0,         # violação do limite PCC
     "bonus_excedente": 0.3, # kWh excedente (crédito)
     "bonus_soc_ok": 1.0,    # SOC entre 30 % e 80 %
 }

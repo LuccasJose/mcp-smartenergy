@@ -12,6 +12,13 @@ Ações por agente:
   Armazenamento : 0=carregar  1=manter  2=descarregar
   Consumo       : 0=nada  1=corta_pivo  2=corta_captacao  3=corta_ambos
   Gerente       : 0=conservador(20kW)  1=moderado(30kW)  2=liberal(40kW)
+
+Restrições implementadas:
+  R1. Balanço de potência horário (fechamento energético)
+  R2. Limite PCC ≤ 65,8 kW (importação e exportação)
+  R3. Inversor FV ≤ 50 kW + eólico ≤ nominal
+  R4. Não simultaneidade: importação/exportação mutuamente exclusivos
+  R5. Dinâmica da bateria: η carga/descarga, SoC, throughput diário
 """
 
 import pandas as pd
@@ -31,7 +38,8 @@ class FazendaEnergyEnv:
     def reset(self) -> dict:
         self.hora      = 0
         self.soc       = self.cfg["soc_inicial_pct"]
-        self.historico = []
+        self.historico  = []
+        self.bat_throughput_dia = 0.0   # R5: acumulador de ciclo diário
         return self._estado()
 
     def _estado(self) -> dict:
@@ -67,68 +75,99 @@ class FazendaEnergyEnv:
         cfg = self.cfg
         cap = cfg["bateria_cap_kwh"]
 
-        # Gerente: define teto
+        # ── Gerente: define teto ──────────────────────────────────
         teto = TETOS_KW[a_ger]
 
-        # Geração total
-        geracao = float(r["solar_kw"]) + float(r["eolico_kw"])
+        # ── R3: Geração com limites de inversor/nominal ───────────
+        solar_kw  = min(float(r["solar_kw"]),  cfg["inversor_fv_max_kw"])
+        eolico_kw = min(float(r["eolico_kw"]), cfg["eolico_nominal_kw"])
+        geracao   = solar_kw + eolico_kw
 
-        # Consumo após cortes
-        fixo     = float(r["sede_kw"]) + float(r["silo_kw"])  # não cortável
+        # ── Consumo após cortes ───────────────────────────────────
+        fixo     = float(r["sede_kw"]) + float(r["silo_kw"])
         pivo     = float(r["pivo_kw"])
         captacao = float(r["captacao_kw"])
 
         cortes = {0: (0, 0), 1: (pivo, 0), 2: (0, captacao), 3: (pivo, captacao)}
         c_pivo, c_cap = cortes[a_cons]
-        corte_producao = c_cap > 0  # captação = bomba principal
+        corte_producao = c_cap > 0
 
         consumo       = min(fixo + (pivo - c_pivo) + (captacao - c_cap), teto)
         teto_excedido = consumo >= teto * 0.99
 
-        # Bateria
+        # ── R5: Bateria com η carga/descarga + throughput diário ──
         soc_kwh     = (self.soc / 100.0) * cap
         soc_min_kwh = (cfg["soc_min_pct"] / 100.0) * cap
         soc_max_kwh = (cfg["soc_max_pct"] / 100.0) * cap
-        efic        = cfg["eficiencia"]
+        eta_c       = cfg["eficiencia_carga"]
+        eta_d       = cfg["eficiencia_descarga"]
+        tp_restante = cfg["bat_throughput_max_kwh"] - self.bat_throughput_dia
+
+        bat_carga    = 0.0  # kWh entrando na bateria (lado DC)
+        bat_descarga = 0.0  # kWh saindo da bateria (lado DC)
 
         if a_arm == 0:    # carregar
-            disponivel = max(0.0, geracao - consumo)
-            carga      = min(disponivel * efic, soc_max_kwh - soc_kwh)
-            soc_kwh   += carga
-            bat_delta  = carga
+            disponivel  = max(0.0, geracao - consumo)
+            carga_dc    = min(disponivel * eta_c, soc_max_kwh - soc_kwh, tp_restante)
+            soc_kwh    += carga_dc
+            bat_carga   = carga_dc
         elif a_arm == 2:  # descarregar
-            falta      = max(0.0, consumo - geracao)
-            descarga   = min(falta, soc_kwh - soc_min_kwh)
-            soc_kwh   -= descarga
-            bat_delta  = -descarga
-        else:             # manter
-            bat_delta  = 0.0
+            falta       = max(0.0, consumo - geracao)
+            descarga_dc = min(falta / eta_d, soc_kwh - soc_min_kwh, tp_restante)
+            soc_kwh    -= descarga_dc
+            bat_descarga = descarga_dc
 
+        self.bat_throughput_dia += bat_carga + bat_descarga
         self.soc    = max(0.0, min(100.0, (soc_kwh / cap) * 100.0))
         soc_critico = self.soc < cfg["soc_min_pct"]
 
-        # Energia da rede
-        descarga_util = abs(bat_delta) if bat_delta < 0 else 0.0
-        rede_kwh      = max(0.0, consumo - geracao - descarga_util)
-        excedente     = max(0.0, geracao - consumo - max(0.0, bat_delta))
-        custo         = rede_kwh * est["tarifa"]
+        # ── R1 + R4: Balanço de potência (fechamento energético) ──
+        # Energia útil entregue pela bateria à carga (lado AC)
+        descarga_util = bat_descarga * eta_d
+        # Energia consumida da geração para carregar (lado AC)
+        carga_consumida = bat_carga / eta_c if eta_c > 0 else 0.0
 
-        # Reward cooperativo
+        # Balanço: o que sobra/falta após geração atender consumo e bateria
+        saldo = geracao - consumo - carga_consumida + descarga_util
+
+        # R4: importação e exportação mutuamente exclusivos
+        if saldo >= 0:
+            importacao = 0.0
+            exportacao = saldo
+        else:
+            importacao = -saldo
+            exportacao = 0.0
+
+        # ── R2: Limite PCC ────────────────────────────────────────
+        pcc_max      = cfg["pcc_max_kw"]
+        pcc_violado  = importacao > pcc_max or exportacao > pcc_max
+        importacao   = min(importacao, pcc_max)
+        exportacao   = min(exportacao, pcc_max)
+
+        rede_kwh  = importacao
+        excedente = exportacao
+        custo     = rede_kwh * est["tarifa"]
+
+        # ── Reward cooperativo ────────────────────────────────────
         reward = (
             - cfg["w_custo"]         * custo
             - cfg["pen_soc"]         * float(soc_critico)
             - cfg["pen_teto"]        * float(teto_excedido)
             - cfg["pen_producao"]    * float(corte_producao)
+            - cfg["pen_pcc"]         * float(pcc_violado)
             + cfg["bonus_excedente"] * excedente
-            + cfg["bonus_soc_ok"]   * float(30 < self.soc < 80)
+            + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
         )
 
         self.historico.append({
             "hora": self.hora, "soc": self.soc,
             "geracao_kw": geracao, "consumo_kw": consumo,
             "rede_kwh": rede_kwh, "excedente": excedente,
+            "importacao": importacao, "exportacao": exportacao,
             "custo_r": custo, "tarifa": est["tarifa"], "reward": reward,
             "a_arm": a_arm, "a_cons": a_cons, "a_ger": a_ger,
+            "bat_carga": bat_carga, "bat_descarga": bat_descarga,
+            "pcc_violado": pcc_violado,
         })
 
         self.hora += 1

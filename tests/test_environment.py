@@ -154,8 +154,10 @@ def test_config_chaves_obrigatorias():
     chaves = [
         "n_episodios", "alpha", "gamma", "epsilon_inicial", "epsilon_final",
         "epsilon_decay", "bateria_cap_kwh", "soc_inicial_pct", "soc_min_pct",
-        "soc_max_pct", "eficiencia", "w_custo", "pen_soc", "pen_teto",
-        "pen_producao", "bonus_excedente", "bonus_soc_ok",
+        "soc_max_pct", "eficiencia_carga", "eficiencia_descarga",
+        "bat_throughput_max_kwh", "pcc_max_kw", "inversor_fv_max_kw",
+        "eolico_nominal_kw", "w_custo", "pen_soc", "pen_teto",
+        "pen_producao", "pen_pcc", "bonus_excedente", "bonus_soc_ok",
     ]
     for chave in chaves:
         assert chave in CONFIG, f"Chave ausente em CONFIG: {chave}"
