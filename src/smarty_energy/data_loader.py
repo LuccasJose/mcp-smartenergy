@@ -1,9 +1,28 @@
+import io
+import urllib.request
+
 import numpy as np
 import pandas as pd
 
+from .config import SHEET_ID
 
-def carregar_dados(path: str) -> tuple[list[pd.DataFrame], np.ndarray]:
-    """Carrega dados de geração, consumo e tarifa do arquivo Excel.
+_EXPORT_URL = "https://docs.google.com/spreadsheets/d/{}/export?format=xlsx"
+
+
+def _baixar_excel_drive(sheet_id: str) -> dict[str, pd.DataFrame]:
+    """Baixa a planilha do Google Sheets e retorna todas as abas."""
+    url = _EXPORT_URL.format(sheet_id)
+    print(f"  Baixando planilha do Google Drive...")
+    dados = urllib.request.urlopen(url).read()
+    return pd.read_excel(io.BytesIO(dados), sheet_name=None)
+
+
+def carregar_dados(path: str | None = None) -> tuple[list[pd.DataFrame], np.ndarray]:
+    """Carrega dados de geração, consumo e tarifa.
+
+    Prioridade:
+        1. Google Sheets (se SHEET_ID configurado)
+        2. Arquivo local (path)
 
     Retorna:
         dias      — lista de DataFrames, um por dia do mês, com colunas:
@@ -11,7 +30,10 @@ def carregar_dados(path: str) -> tuple[list[pd.DataFrame], np.ndarray]:
                     sede_kw, silo_kw, data
         tarifa_24 — array (24,) com a tarifa em R$/kWh por hora
     """
-    xl = pd.read_excel(path, sheet_name=None)
+    if SHEET_ID:
+        xl = _baixar_excel_drive(SHEET_ID)
+    else:
+        xl = pd.read_excel(path, sheet_name=None)
 
     # Tarifa azul (pico 18h–21h)
     t_row = xl["Tarifa"][xl["Tarifa"]["Tipo_Tarifa"] == "Tarifa azul"].iloc[0]

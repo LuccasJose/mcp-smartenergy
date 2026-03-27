@@ -3,6 +3,10 @@
 venv/
 env/
 
+# Claude caso use
+.claude/
+CLAUDE.md
+
 # Cache Python
 __pycache__/
 *.py[cod]

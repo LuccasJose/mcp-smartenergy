@@ -7,6 +7,13 @@ load_dotenv()
 # Caminhos resolvidos a partir da raiz do projeto
 _ROOT = Path(__file__).resolve().parents[2]
 
+# Google Sheets — ID extraído do link de compartilhamento
+SHEET_ID = os.getenv(
+    "SHEET_ID",
+    "1Ih71F74ugD7aZvHk8P56sYPXoClKcNZC1dWq2G5fdSk",
+)
+
+# Fallback local (usado apenas se SHEET_ID estiver vazio)
 DATA_PATH = _ROOT / os.getenv("DATA_PATH", "data/modelo_dados_gestao_energia_fazenda.xlsx")
 OUTPUT_DIR = _ROOT / os.getenv("OUTPUT_DIR", "outputs")
 

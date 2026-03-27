@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import numpy as np
 
-from smarty_energy.config import CONFIG, DATA_PATH, OUTPUT_DIR
+from smarty_energy.config import CONFIG, OUTPUT_DIR
 from smarty_energy.data_loader import carregar_dados
 from smarty_energy.agents import AgenteQL
 from smarty_energy.training import treinar
@@ -41,8 +41,8 @@ from smarty_energy import visualization as viz
 
 def main() -> None:
     # ── 1. Dados ──────────────────────────────────────────────────
-    print(f"Carregando dados de: {DATA_PATH}")
-    DIAS, TARIFA = carregar_dados(DATA_PATH)
+    print("Carregando dados...")
+    DIAS, TARIFA = carregar_dados()
     print(f"  {len(DIAS)} dias carregados (Janeiro 2025 — Fazenda Buritis)")
 
     sol_med  = np.mean([d["solar_kw"].mean() for d in DIAS])
