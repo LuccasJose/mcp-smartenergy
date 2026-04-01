@@ -35,9 +35,16 @@ class FazendaEnergyEnv:
         self.cfg    = cfg
         self.reset()
 
-    def reset(self) -> dict:
+    def reset(self, soc_inicial: float | None = None) -> dict:
+        """Reinicia o ambiente para um novo dia.
+
+        Args:
+            soc_inicial: SOC (%) com que a bateria começa o dia.
+                         Se None, usa cfg["soc_inicial_pct"] (padrão: 50%).
+                         Passe env.soc do dia anterior para simular continuidade real.
+        """
         self.hora      = 0
-        self.soc       = self.cfg["soc_inicial_pct"]
+        self.soc       = soc_inicial if soc_inicial is not None else self.cfg["soc_inicial_pct"]
         self.historico  = []
         self.bat_throughput_dia = 0.0   # R5: acumulador de ciclo diário
         return self._estado()
@@ -155,7 +162,7 @@ class FazendaEnergyEnv:
             - cfg["pen_teto"]        * float(teto_excedido)
             - cfg["pen_producao"]    * float(corte_producao)
             - cfg["pen_pcc"]         * float(pcc_violado)
-            + cfg["bonus_excedente"] * excedente
+            + cfg["bonus_excedente"] * excedente * est["tarifa"]
             + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
         )
 

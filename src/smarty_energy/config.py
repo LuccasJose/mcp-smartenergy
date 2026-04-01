@@ -44,13 +44,14 @@ CONFIG = {
     "eolico_nominal_kw": 10.0,   # potência nominal do aerogerador
 
     # Pesos do reward cooperativo
+    # Referência: custo pico ≈ 30 kW × R$1,10 = R$33/h → penalidades na mesma ordem
     "w_custo": 1.0,
-    "pen_soc": 10.0,        # violação SOC crítico
-    "pen_teto": 5.0,        # consumo acima do teto
-    "pen_producao": 8.0,    # corte de bomba de captação
-    "pen_pcc": 8.0,         # violação do limite PCC
-    "bonus_excedente": 0.3, # kWh excedente (crédito)
-    "bonus_soc_ok": 1.0,    # SOC entre 30 % e 80 %
+    "pen_soc": 30.0,        # violação SOC crítico    (era 10)
+    "pen_teto": 15.0,       # consumo acima do teto   (era  5)
+    "pen_producao": 20.0,   # corte de bomba captação (era  8)
+    "pen_pcc": 20.0,        # violação do limite PCC  (era  8)
+    "bonus_excedente": 0.8, # fator sobre tarifa vigente — convertido para R$ no step() (era 0.3 kWh)
+    "bonus_soc_ok": 2.0,    # SOC entre 30 % e 80 %  (era  1)
 }
 
 # Tetos de consumo por decisão do Gerente de Carga

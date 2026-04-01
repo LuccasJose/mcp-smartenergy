@@ -19,6 +19,11 @@ def treinar(
     aprendem de forma independente mas compartilham o mesmo reward
     cooperativo do ambiente.
 
+    O SOC da bateria é propagado entre episódios consecutivos, simulando
+    a continuidade real: o dia seguinte começa com a carga deixada pelo
+    dia anterior. Os dias são percorridos em ordem (ep % len(dias)),
+    reiniciando o ciclo após o último dia do mês.
+
     Args:
         dias       : lista de DataFrames diários (saída de carregar_dados)
         tarifa_24h : array (24,) com tarifa em R$/kWh
@@ -31,11 +36,12 @@ def treinar(
     rewards_hist = []
     custos_hist  = []
     n_ep         = cfg["n_episodios"]
+    soc_proximo  = cfg["soc_inicial_pct"]   # SOC inicial do 1º episódio
 
     for ep in range(n_ep):
-        dados_dia = dias[np.random.randint(len(dias))]
+        dados_dia = dias[ep % len(dias)]            # sequencial, com wrap-around
         env       = FazendaEnergyEnv(dados_dia, tarifa_24h, cfg)
-        est       = env.reset()
+        est       = env.reset(soc_inicial=soc_proximo)
         s_disc    = env.discretizar(est)
 
         ep_reward = 0.0
@@ -57,6 +63,8 @@ def treinar(
             s_disc    = s2_disc
             ep_reward += reward
             ep_custo  += info["custo"]
+
+        soc_proximo = env.soc                   # propaga SOC para o próximo dia
 
         for ag in agentes.values():
             ag.decair_epsilon()
