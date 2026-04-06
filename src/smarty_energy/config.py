@@ -22,12 +22,12 @@ OUTPUT_DIR = _ROOT / os.getenv("OUTPUT_DIR", "outputs")
 # ──────────────────────────────────────────────────────────────
 CONFIG = {
     # Treinamento
-    "n_episodios": 2000,    # dias simulados no treino
+    "n_episodios": 6000,    # dias simulados no treino
     "alpha": 0.1,           # taxa de aprendizado
-    "gamma": 0.95,          # fator de desconto futuro
+    "gamma": 0.98,          # fator de desconto futuro
     "epsilon_inicial": 1.0, # exploração inicial (100 %)
-    "epsilon_final": 0.05,  # exploração mínima  (5 %)
-    "epsilon_decay": 0.9975,# decaimento por episódio
+    "epsilon_final": 0.01,  # exploração mínima  (5 %)
+    "epsilon_decay": 0.9985,# decaimento por episódio
 
     # Bateria
     "bateria_cap_kwh": 24.0,
@@ -45,13 +45,13 @@ CONFIG = {
 
     # Pesos do reward cooperativo
     # Referência: custo pico ≈ 30 kW × R$1,10 = R$33/h → penalidades na mesma ordem
-    "w_custo": 1.0,
+    "w_custo": 1.5,
     "pen_soc": 30.0,        # violação SOC crítico    (era 10)
     "pen_teto": 15.0,       # consumo acima do teto   (era  5)
-    "pen_producao": 20.0,   # corte de bomba captação (era  8)
+    "pen_producao": 10.0,   # corte de bomba captação (era  8)
     "pen_pcc": 20.0,        # violação do limite PCC  (era  8)
-    "bonus_excedente": 0.8, # fator sobre tarifa vigente — convertido para R$ no step() (era 0.3 kWh)
-    "bonus_soc_ok": 2.0,    # SOC entre 30 % e 80 %  (era  1)
+    "bonus_excedente": 0.2, # fator sobre tarifa vigente — convertido para R$ no step() (era 0.3 kWh)
+    "bonus_soc_ok": 5.0,    # SOC entre 30 % e 80 %  (era  1)
 }
 
 # Tetos de consumo por decisão do Gerente de Carga
