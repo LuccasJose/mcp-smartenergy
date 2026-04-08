@@ -98,7 +98,8 @@ def plot_comparacao_dia(
     # 4. Mapa de decisões do RL
     ax = axes[1, 1]
     cores_arm  = ["#3498db", "#95a5a6", "#e67e22"]
-    cores_cons = ["#27ae60", "#f1c40f", "#e67e22", "#e74c3c"]
+    # cores_cons: 8 níveis (bitmask pivo, bomba, secador)
+    cores_cons = ["#27ae60", "#f1c40f", "#e67e22", "#d35400", "#c0392b", "#e74c3c", "#962d22", "#2c3e50"]
     cores_ger  = ["#e74c3c", "#e67e22", "#27ae60"]
 
     for h in range(24):

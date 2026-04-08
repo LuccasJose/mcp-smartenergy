@@ -54,7 +54,7 @@ def main() -> None:
     # ── 2. Agentes ────────────────────────────────────────────────
     AGENTES = {
         "armazenamento": AgenteQL(3, "Armazenamento", CONFIG),
-        "consumo"      : AgenteQL(4, "Consumo",       CONFIG),
+        "consumo"      : AgenteQL(8, "Consumo",       CONFIG),
         "gerente"      : AgenteQL(3, "Gerente",        CONFIG),
     }
 

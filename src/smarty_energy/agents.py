@@ -71,6 +71,38 @@ class AgenteQL:
         self.n_updates = data["n_updates"]
 
 
+class AgenteFinanceiro:
+    """Implementa a lógica de monitoramento de custos e créditos solares.
+
+    Traduz o cenário econômico em um 'Índice de Estresse Financeiro' (0-100).
+    """
+
+    def __init__(self, cfg: dict = CONFIG):
+        self.cfg = cfg
+        self.saldo_creditos = cfg["credito_inicial_kwh"]
+
+    def calcular_estresse(self, tarifa: float, consumo_atual: float) -> float:
+        """Calcula o estresse financeiro baseado na tarifa e saldo de créditos."""
+        # Baseline de estresse pela tarifa
+        limiar = self.cfg["tarifa_estresse_limiar"]
+        stress_tarifa = 70.0 if tarifa >= limiar else (tarifa / limiar) * 50.0
+
+        # Penalidade por baixo saldo de créditos
+        pen_credito = 30.0 if self.saldo_creditos < 20 else 0.0
+
+        # Agrava se consumo está alto no pico
+        agravante = 10.0 if (tarifa >= limiar and consumo_atual > 25.0) else 0.0
+
+        return min(100.0, stress_tarifa + pen_credito + agravante)
+
+    def atualizar_saldo(self, rede_kwh: float, excedente_kwh: float) -> None:
+        """Atualiza o saldo de créditos (simplificado: 1 para 1)."""
+        # Em um cenário real, haveria taxas de disponibilidade e impostos (TUSD/TE)
+        self.saldo_creditos += excedente_kwh
+        self.saldo_creditos -= rede_kwh
+        self.saldo_creditos = max(0.0, self.saldo_creditos)
+
+
 class AgentesHeuristicos:
     """Baseline com regras fixas para comparação com o RL.
 
@@ -104,13 +136,19 @@ class AgentesHeuristicos:
         return 1                          # default: manter
 
     def consumo(self, est: dict, stress: float) -> int:
-        """Regra: corta cargas pelo nível de estresse financeiro."""
-        if stress > 75:
-            return 3                      # corta pivô + captação
+        """Regra: corta cargas pelo nível de estresse financeiro.
+        
+        Mapeamento 0-7:
+        bit 0: pivo, bit 1: bomba, bit 2: secador
+        """
+        if stress > 85:
+            return 7                      # corta tudo (4+2+1)
+        if stress > 70:
+            return 3                      # corta pivô + bomba (2+1)
         if stress > 50:
-            return 2                      # corta só captação (maior carga)
-        if stress > 25:
-            return 1                      # corta só pivô
+            return 2                      # corta bomba (2)
+        if stress > 30:
+            return 1                      # corta pivô (1)
         return 0                          # sem corte
 
     def gerente(self, est: dict, stress: float) -> int:
