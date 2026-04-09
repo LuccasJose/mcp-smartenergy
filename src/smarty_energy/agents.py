@@ -26,6 +26,7 @@ class AgenteQL:
         self.nome      = nome
         self.epsilon   = cfg["epsilon_inicial"]
         self.alpha     = cfg["alpha"]
+        self.beta      = cfg.get("beta", 0.01)  # taxa de aprendizado pessimista (Hysteretic)
         self.gamma     = cfg["gamma"]
         self.eps_min   = cfg["epsilon_final"]
         self.eps_decay = cfg["epsilon_decay"]
@@ -42,7 +43,9 @@ class AgenteQL:
         """Atualização Q-Learning: Q[s][a] += α(r + γ·max(Q[s']) - Q[s][a])."""
         q_atual = self.q_table[s][a]
         q_alvo  = r if done else r + self.gamma * np.max(self.q_table[s2])
-        self.q_table[s][a] += self.alpha * (q_alvo - q_atual)
+        td_error = q_alvo - q_atual
+        lr = self.alpha if td_error >= 0 else self.beta  # Hysteretic: otimista sobe rápido, pessimista desce devagar
+        self.q_table[s][a] += lr * td_error
         self.n_updates += 1
 
     def decair_epsilon(self) -> None:

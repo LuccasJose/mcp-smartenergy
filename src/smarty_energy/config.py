@@ -54,21 +54,21 @@ CONFIG = {
     "secador_meta_kwh": 20.0,
     "sede_desvio_max": 0.20,     # 20%
 
-    # Pesos do reward cooperativo
-    "w_custo": 1.5,
-    "w_estresse": 1.0,      # penalidade por estresse financeiro alto
-    "pen_soc": 30.0,        # violação SOC crítico
-    "pen_teto": 15.0,       # consumo acima do teto
-    "pen_producao": 10.0,   # corte de bomba captação
-    "pen_pcc": 20.0,        # violação do limite PCC
-    "bonus_excedente": 0.2, # fator sobre tarifa vigente
-    "bonus_soc_ok": 5.0,    # SOC entre 30% e 80%
+    # Pesos do reward cooperativo (rebalanceados — custo como sinal dominante)
+    "w_custo": 8.0,             # ↑ era 1.5: agora custo diário pesa ~320 pts
+    "w_estresse": 0.5,          # ↓ era 1.0: reduzido para não competir com custo
+    "pen_soc": 15.0,            # ↓ era 30: ainda forte, mas não esmaga o sinal de custo
+    "pen_teto": 8.0,            # ↓ era 15: idem
+    "pen_producao": 5.0,        # ↓ era 10
+    "pen_pcc": 10.0,            # ↓ era 20
+    "bonus_excedente": 0.5,     # ↑ era 0.2: mais incentivo para exportar energia
+    "bonus_soc_ok": 1.0,        # ↓ era 5.0: evita que agentes "gamifiquem" o SOC
 
-    # Novas Penalidades Operacionais
-    "pen_pivo_quebra": 25.0,   # quebra das 8h consecutivas
-    "pen_bomba_ciclo": 15.0,   # violação do ciclo ON/OFF
-    "pen_secador_meta": 40.0,  # não atingir 20kWh no dia
-    "pen_sede_desvio": 10.0,   # desvio > 20% na sede
+    # Penalidades Operacionais (proporcionalmente reduzidas)
+    "pen_pivo_quebra": 12.0,    # ↓ era 25
+    "pen_bomba_ciclo": 8.0,     # ↓ era 15
+    "pen_secador_meta": 20.0,   # ↓ era 40
+    "pen_sede_desvio": 5.0,     # ↓ era 10
 }
 
 # Tetos de consumo por decisão do Gerente de Carga
