@@ -37,6 +37,7 @@ from smarty_energy.evaluation import (
     identificar_cenarios,
 )
 from smarty_energy import visualization as viz
+from smarty_energy.dashboard import abrir_dashboard
 
 
 def main() -> None:
@@ -74,7 +75,7 @@ def main() -> None:
 
     # ── 4. Curvas de aprendizado ──────────────────────────────────
     print("\nGerando curvas de aprendizado...")
-    viz.plot_curvas_aprendizado(REWARDS_HIST, CUSTOS_HIST)
+    fig_aprendizado = viz.plot_curvas_aprendizado(REWARDS_HIST, CUSTOS_HIST)
 
     # ── 5. Avaliação mensal ───────────────────────────────────────
     print("\nAvaliando em todos os 31 dias...")
@@ -101,7 +102,7 @@ def main() -> None:
     idx_melhor = int(np.argmax(difs))
     data_str   = DIAS[idx_melhor]["data"].iloc[0].strftime("%d/%m/%Y")
     print(f"\nGerando comparativo do dia {data_str} (maior diferença de custo)...")
-    viz.plot_comparacao_dia(RES_H[idx_melhor], RES_R[idx_melhor], data_str)
+    fig_dia = viz.plot_comparacao_dia(RES_H[idx_melhor], RES_R[idx_melhor], data_str)
 
     # ── 7. Cenários ───────────────────────────────────────────────
     print("\nAnalisando cenários...")
@@ -131,7 +132,12 @@ def main() -> None:
         print(f"  {nome:<18} {data_s:>5} {ger_dia[idx]:>9.1f} kWh {c_h:>10.2f} R$ {c_r:>8.2f} R$ {delt:>+6.1f} %")
     print(f"{'═'*68}")
 
-    viz.plot_cenarios(DIAS, resultados_cenarios)
+    fig_cenarios = viz.plot_cenarios(DIAS, resultados_cenarios)
+
+    # ── 7b. Visualizações operacionais ────────────────────────────
+    print("\nGerando visão por máquina e resumo mensal...")
+    fig_maquinas = viz.plot_uso_maquinas(DIAS)
+    fig_mensal   = viz.plot_visao_mensal(DIAS, RES_H, RES_R)
 
     # ── 8. Relatório final ────────────────────────────────────────
     d_custo = ((CR - CH) / CH * 100)    if CH   != 0 else 0
@@ -166,6 +172,16 @@ def main() -> None:
         line = f"║    {ag.nome:<16}  {ag.n_estados:>3} estados  {ag.n_updates:>6} updates"
         print(f"{line:<63}║")
     print("╚══════════════════════════════════════════════════════════════╝")
+
+    # ── 9. Dashboard unificado (abas em uma única janela) ─────────
+    print("\nAbrindo dashboard unificado... (feche a janela para encerrar)")
+    abrir_dashboard({
+        "Aprendizado"    : fig_aprendizado,
+        "Dia Destaque"   : fig_dia,
+        "Cenários"       : fig_cenarios,
+        "Uso das Máquinas": fig_maquinas,
+        "Visão Mensal"   : fig_mensal,
+    })
 
 
 if __name__ == "__main__":
