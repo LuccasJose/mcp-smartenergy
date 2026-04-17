@@ -319,10 +319,15 @@ def plot_explorar_dia(
     hist_h: list[dict],
     hist_r: list[dict],
     data_str: str = "",
+    todos_dias: list | None = None,
 ) -> None:
     """Desenha painéis detalhados de um dia na Figure fornecida (in-place).
 
     Usado pela aba interativa do dashboard — não salva arquivo.
+
+    Args:
+        todos_dias : lista com todos os DataFrames do mês, usada para
+                     calcular médias de referência no perfil do dia.
     """
     fig.clf()
     axes = fig.subplots(3, 2)
@@ -331,33 +336,31 @@ def plot_explorar_dia(
     titulo = f"Explorar Dia — {data_str}" if data_str else "Explorar Dia"
     fig.suptitle(titulo, fontsize=13, fontweight="bold")
 
-    # 1. Custo por hora
+    # ── Métricas comuns ───────────────────────────────────────────
+    ch = sum(r["custo_r"] for r in hist_h)
+    cr = sum(r["custo_r"] for r in hist_r)
+    delt = ((cr - ch) / ch * 100) if ch > 0 else 0
+    rede_h = sum(r["rede_kwh"] for r in hist_h)
+    rede_r = sum(r["rede_kwh"] for r in hist_r)
+    solar_dia  = dados_dia["solar_kw"].sum()
+    eolico_dia = dados_dia["eolico_kw"].sum()
+    ger_total  = solar_dia + eolico_dia
+    cons_total = (dados_dia["pivo_kw"] + dados_dia["captacao_kw"]
+                  + dados_dia["sede_kw"] + dados_dia["silo_kw"]).sum()
+
+    # ── 1. Custo por hora ─────────────────────────────────────────
     ax = axes[0, 0]
     ax.bar([h - 0.2 for h in horas], [r["custo_r"] for r in hist_h], 0.4,
            label="Heurístico", color=_COR_H, alpha=0.85)
     ax.bar([h + 0.2 for h in horas], [r["custo_r"] for r in hist_r], 0.4,
            label="RL", color=_COR_R, alpha=0.85)
     ax.axvspan(17.5, 20.5, alpha=0.12, color="orange", label="Pico tarifário")
-    ch = sum(r["custo_r"] for r in hist_h)
-    cr = sum(r["custo_r"] for r in hist_r)
-    delt = ((cr - ch) / ch * 100) if ch > 0 else 0
     ax.set_title(f"Custo por Hora  |  Heur R${ch:.2f}  →  RL R${cr:.2f}  ({delt:+.1f} %)")
-    ax.set_xlabel("Hora"); ax.set_ylabel("R$"); ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+    ax.set_xlabel("Hora"); ax.set_ylabel("R$")
+    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
 
-    # 2. SOC da bateria
+    # ── 2. Geração vs Consumo ─────────────────────────────────────
     ax = axes[0, 1]
-    ax.plot(horas, [r["soc"] for r in hist_h], "o-", color=_COR_H, label="Heurístico", ms=4)
-    ax.plot(horas, [r["soc"] for r in hist_r], "s-", color=_COR_R, label="RL", ms=4)
-    ax.axhline(CONFIG["soc_min_pct"], color="red", ls="--", alpha=0.6,
-               label=f"SOC crítico ({CONFIG['soc_min_pct']} %)")
-    ax.axhline(80, color="blue", ls="--", alpha=0.4, label="SOC ótimo (80 %)")
-    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
-    ax.set_title("Estado de Carga da Bateria (%)")
-    ax.set_xlabel("Hora"); ax.set_ylabel("SOC (%)")
-    ax.legend(fontsize=8); ax.grid(alpha=0.3); ax.set_ylim(0, 105)
-
-    # 3. Geração vs Consumo
-    ax = axes[1, 0]
     ger_vals = [r["geracao_kw"] for r in hist_r]
     ax.fill_between(horas, ger_vals, alpha=0.3, color="gold", label="Geração (solar+eólico)")
     ax.plot(horas, [r["consumo_kw"] for r in hist_h], "o-", color=_COR_H, label="Consumo Heurístico", ms=4)
@@ -367,33 +370,97 @@ def plot_explorar_dia(
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-    # 4. Mapa de decisões do RL
-    ax = axes[1, 1]
-    for h in range(24):
-        ax.barh(2.5, 1, left=h, height=0.75, color=_CORES_ARM[hist_r[h]["a_arm"]], alpha=0.9)
-        ax.barh(1.5, 1, left=h, height=0.75, color=_CORES_CONS[hist_r[h]["a_cons"]], alpha=0.9)
-        ax.barh(0.5, 1, left=h, height=0.75, color=_CORES_GER[hist_r[h]["a_ger"]], alpha=0.9)
-    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
-    ax.set_yticks([0.5, 1.5, 2.5])
-    ax.set_yticklabels(["Gerente", "Consumo", "Armaz."])
-    ax.set_xlabel("Hora"); ax.set_title("Decisões dos Agentes RL por Hora"); ax.set_xlim(0, 24)
-    leg_arm = [mpatches.Patch(color=c, label=l) for c, l in
-               zip(_CORES_ARM, ["Carregar", "Manter", "Descarregar"])]
-    ax.legend(handles=leg_arm, loc="upper left", fontsize=7, title="Armaz.", title_fontsize=7)
+    # ── 3. Uso das máquinas no dia (stacked bars por hora) ────────
+    ax = axes[1, 0]
+    _maq_cols   = ["pivo_kw",    "captacao_kw",     "sede_kw",         "silo_kw"]
+    _maq_labels = ["Pivô",       "Bomba Captação",   "Sede/Escritório", "Silo/Secador"]
+    _maq_cores  = ["#e74c3c",    "#3498db",          "#9b59b6",         "#e67e22"]
+    bottom = np.zeros(24)
+    for col, label, cor in zip(_maq_cols, _maq_labels, _maq_cores):
+        vals = dados_dia[col].to_numpy(dtype=float)
+        ax.bar(horas, vals, bottom=bottom, label=label, color=cor, alpha=0.85, width=0.8)
+        bottom += vals
+    ax.axvspan(17.5, 20.5, alpha=0.1, color="orange")
+    ax.set_title("Uso das Máquinas por Hora (kW)")
+    ax.set_xlabel("Hora"); ax.set_ylabel("kW")
+    ax.legend(fontsize=8, loc="upper left"); ax.grid(axis="y", alpha=0.3)
 
-    # 5. Resumo estatístico
+    # ── 4. Perfil do dia ──────────────────────────────────────────
+    ax = axes[1, 1]
+    ax.axis("off")
+
+    # Calcula médias de referência
+    if todos_dias:
+        media_solar  = np.mean([d["solar_kw"].sum()  for d in todos_dias])
+        media_eolico = np.mean([d["eolico_kw"].sum() for d in todos_dias])
+        media_cons   = np.mean([(d["pivo_kw"] + d["captacao_kw"]
+                                 + d["sede_kw"] + d["silo_kw"]).sum() for d in todos_dias])
+    else:
+        media_solar  = solar_dia
+        media_eolico = eolico_dia
+        media_cons   = cons_total
+
+    pct_solar  = ((solar_dia  - media_solar)  / media_solar  * 100) if media_solar  > 0 else 0
+    pct_eolico = ((eolico_dia - media_eolico) / media_eolico * 100) if media_eolico > 0 else 0
+    pct_cons   = ((cons_total - media_cons)   / media_cons   * 100) if media_cons   > 0 else 0
+    balanco    = ger_total - cons_total
+
+    # Classificação do dia
+    if pct_solar < -30:
+        class_label = "NUBLADO"
+        class_cor   = "#7f8c8d"
+        class_desc  = "Baixa geração solar"
+    elif pct_solar > 25:
+        class_label = "ENSOLARADO"
+        class_cor   = "#f39c12"
+        class_desc  = "Alta geração solar"
+    elif pct_cons > 25:
+        class_label = "ALTO CONSUMO"
+        class_cor   = "#e74c3c"
+        class_desc  = "Demanda elevada"
+    elif pct_cons < -25:
+        class_label = "BAIXO CONSUMO"
+        class_cor   = "#27ae60"
+        class_desc  = "Demanda reduzida"
+    else:
+        class_label = "EQUILIBRADO"
+        class_cor   = "#2980b9"
+        class_desc  = "Dia dentro da média"
+
+    # Badge de classificação
+    ax.text(0.5, 0.92, class_label, transform=ax.transAxes, fontsize=16,
+            fontweight="bold", ha="center", va="top", color="white",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor=class_cor, alpha=0.9))
+    ax.text(0.5, 0.76, class_desc, transform=ax.transAxes, fontsize=10,
+            ha="center", va="top", color=class_cor, style="italic")
+
+    # Comparação com a média do mês (mini gráfico de barras horizontal)
+    metricas  = ["Solar",    "Eólico",    "Consumo"]
+    pcts      = [pct_solar,  pct_eolico,  pct_cons]
+    cores_bar = ["#f39c12" if p >= 0 else "#95a5a6" for p in pcts[:2]] + \
+                ["#e74c3c" if pct_cons > 0 else "#27ae60"]
+    y_pos = [0.58, 0.44, 0.30]
+    for met, pct, cor, y in zip(metricas, pcts, cores_bar, y_pos):
+        bar_w = min(abs(pct) / 100 * 0.4, 0.4)
+        x0 = 0.5 if pct >= 0 else 0.5 - bar_w
+        ax.add_patch(
+            __import__("matplotlib.patches", fromlist=["FancyBboxPatch"]).FancyBboxPatch(
+                (x0, y - 0.04), bar_w, 0.08,
+                boxstyle="round,pad=0.005", facecolor=cor, alpha=0.75,
+                transform=ax.transAxes, clip_on=False,
+            )
+        )
+        ax.text(0.5, y, f"{met}: {pct:+.1f} % vs média", transform=ax.transAxes,
+                fontsize=9, ha="center", va="center", color="black")
+    ax.axvline(0.5, color="#bdc3c7", lw=1, transform=ax.transAxes)
+    ax.text(0.5, 0.16, f"Balanço energético: {balanco:+.1f} kWh",
+            transform=ax.transAxes, fontsize=9, ha="center", va="top",
+            color="#2c3e50", fontweight="bold")
+    ax.set_title("Perfil do Dia  (vs média do mês)")
+
+    # ── 5. Resumo estatístico ─────────────────────────────────────
     ax = axes[2, 0]
     ax.axis("off")
-    rede_h = sum(r["rede_kwh"] for r in hist_h)
-    rede_r = sum(r["rede_kwh"] for r in hist_r)
-    soc_med_h = np.mean([r["soc"] for r in hist_h])
-    soc_med_r = np.mean([r["soc"] for r in hist_r])
-    viol_h = sum(1 for r in hist_h if r["soc"] < CONFIG["soc_min_pct"] or r["soc"] > CONFIG["soc_max_pct"])
-    viol_r = sum(1 for r in hist_r if r["soc"] < CONFIG["soc_min_pct"] or r["soc"] > CONFIG["soc_max_pct"])
-    ger_total = dados_dia["solar_kw"].sum() + dados_dia["eolico_kw"].sum()
-    cons_total = (dados_dia["pivo_kw"] + dados_dia["captacao_kw"]
-                  + dados_dia["sede_kw"] + dados_dia["silo_kw"]).sum()
-
     resumo = (
         f"RESUMO DO DIA\n"
         f"{'─' * 40}\n"
@@ -403,25 +470,24 @@ def plot_explorar_dia(
         f"Rede Heurístico  : {rede_h:.2f} kWh\n"
         f"Rede RL          : {rede_r:.2f} kWh\n"
         f"{'─' * 40}\n"
-        f"SOC médio Heur.  : {soc_med_h:.1f} %\n"
-        f"SOC médio RL     : {soc_med_r:.1f} %\n"
-        f"Violações SOC    : Heur {viol_h}h  |  RL {viol_r}h\n"
-        f"{'─' * 40}\n"
+        f"Geração solar    : {solar_dia:.1f} kWh  ({pct_solar:+.1f} % vs média)\n"
+        f"Geração eólica   : {eolico_dia:.1f} kWh  ({pct_eolico:+.1f} % vs média)\n"
         f"Geração total    : {ger_total:.1f} kWh\n"
-        f"Consumo total    : {cons_total:.1f} kWh"
+        f"{'─' * 40}\n"
+        f"Consumo total    : {cons_total:.1f} kWh  ({pct_cons:+.1f} % vs média)\n"
+        f"Balanço          : {balanco:+.1f} kWh"
     )
     ax.text(0.05, 0.95, resumo, transform=ax.transAxes, fontsize=10,
             verticalalignment="top", fontfamily="monospace",
             bbox=dict(boxstyle="round,pad=0.5", facecolor="#f0f0f0", alpha=0.8))
 
-    # 6. Perfil de tarifas do dia
+    # ── 6. Consumo por máquina (totais do dia) ────────────────────
     ax = axes[2, 1]
-    tarifas = [r["tarifa"] for r in hist_r]
-    ax.fill_between(horas, tarifas, alpha=0.3, color="#8e44ad")
-    ax.plot(horas, tarifas, "o-", color="#8e44ad", ms=4, lw=2, label="Tarifa (R$/kWh)")
-    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange", label="Pico tarifário")
-    ax.set_title("Perfil Tarifário do Dia")
-    ax.set_xlabel("Hora"); ax.set_ylabel("R$/kWh")
-    ax.legend(fontsize=8); ax.grid(alpha=0.3)
+    totais = [dados_dia[col].sum() for col in _maq_cols]
+    bars = ax.barh(_maq_labels, totais, color=_maq_cores, alpha=0.85)
+    ax.bar_label(bars, fmt="%.1f kWh", padding=4, fontsize=9)
+    ax.set_title("Consumo Total por Máquina (kWh no dia)")
+    ax.set_xlabel("kWh"); ax.grid(axis="x", alpha=0.3)
+    ax.set_xlim(0, max(totais) * 1.2 if totais else 1)
 
     fig.tight_layout()

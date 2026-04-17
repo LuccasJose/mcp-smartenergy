@@ -58,7 +58,7 @@ def _criar_aba_explorar(notebook: ttk.Notebook, dados: dict) -> None:
     def _atualizar(_event=None):
         idx = combo.current()
         data_str = labels[idx]
-        plot_explorar_dia(fig, dias[idx], res_h[idx], res_r[idx], data_str)
+        plot_explorar_dia(fig, dias[idx], res_h[idx], res_r[idx], data_str, todos_dias=dias)
         canvas.draw_idle()
 
     combo.bind("<<ComboboxSelected>>", _atualizar)
