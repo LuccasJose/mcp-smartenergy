@@ -452,7 +452,7 @@ def plot_explorar_dia(
         )
         ax.text(0.5, y, f"{met}: {pct:+.1f} % vs média", transform=ax.transAxes,
                 fontsize=9, ha="center", va="center", color="black")
-    ax.axvline(0.5, color="#bdc3c7", lw=1, transform=ax.transAxes)
+    ax.plot([0.5, 0.5], [0.28, 0.62], color="#bdc3c7", lw=1, transform=ax.transAxes)
     ax.text(0.5, 0.16, f"Balanço energético: {balanco:+.1f} kWh",
             transform=ax.transAxes, fontsize=9, ha="center", va="top",
             color="#2c3e50", fontweight="bold")
