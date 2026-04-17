@@ -175,13 +175,20 @@ def main() -> None:
 
     # ── 9. Dashboard unificado (abas em uma única janela) ─────────
     print("\nAbrindo dashboard unificado... (feche a janela para encerrar)")
-    abrir_dashboard({
-        "Aprendizado"    : fig_aprendizado,
-        "Dia Destaque"   : fig_dia,
-        "Cenários"       : fig_cenarios,
-        "Uso das Máquinas": fig_maquinas,
-        "Visão Mensal"   : fig_mensal,
-    })
+    abrir_dashboard(
+        {
+            "Aprendizado"     : fig_aprendizado,
+            "Dia Destaque"    : fig_dia,
+            "Cenários"        : fig_cenarios,
+            "Uso das Máquinas": fig_maquinas,
+            "Visão Mensal"    : fig_mensal,
+        },
+        dados_explorar={
+            "dias": DIAS,
+            "res_h": RES_H,
+            "res_r": RES_R,
+        },
+    )
 
 
 if __name__ == "__main__":

@@ -18,6 +18,11 @@ _PLOTS_DIR = OUTPUT_DIR / "plots"
 _COR_H = "#e74c3c"
 _COR_R = "#27ae60"
 
+# Cores para as decisões dos agentes (reutilizadas em plot_comparacao_dia e plot_explorar_dia)
+_CORES_ARM  = ["#3498db", "#95a5a6", "#e67e22"]
+_CORES_CONS = ["#27ae60", "#f1c40f", "#e67e22", "#d35400", "#c0392b", "#e74c3c", "#962d22", "#2c3e50"]
+_CORES_GER  = ["#e74c3c", "#e67e22", "#27ae60"]
+
 
 def _save(fig: plt.Figure, nome: str) -> None:
     _PLOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,21 +108,17 @@ def plot_comparacao_dia(
 
     # 4. Mapa de decisões do RL
     ax = axes[1, 1]
-    cores_arm  = ["#3498db", "#95a5a6", "#e67e22"]
-    cores_cons = ["#27ae60", "#f1c40f", "#e67e22", "#d35400", "#c0392b", "#e74c3c", "#962d22", "#2c3e50"]
-    cores_ger  = ["#e74c3c", "#e67e22", "#27ae60"]
-
     for h in range(24):
-        ax.barh(2.5, 1, left=h, height=0.75, color=cores_arm[hist_r[h]["a_arm"]],  alpha=0.9)
-        ax.barh(1.5, 1, left=h, height=0.75, color=cores_cons[hist_r[h]["a_cons"]], alpha=0.9)
-        ax.barh(0.5, 1, left=h, height=0.75, color=cores_ger[hist_r[h]["a_ger"]],  alpha=0.9)
+        ax.barh(2.5, 1, left=h, height=0.75, color=_CORES_ARM[hist_r[h]["a_arm"]],  alpha=0.9)
+        ax.barh(1.5, 1, left=h, height=0.75, color=_CORES_CONS[hist_r[h]["a_cons"]], alpha=0.9)
+        ax.barh(0.5, 1, left=h, height=0.75, color=_CORES_GER[hist_r[h]["a_ger"]],  alpha=0.9)
 
     ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
     ax.set_yticks([0.5, 1.5, 2.5])
     ax.set_yticklabels(["Gerente", "Consumo", "Armaz."])
     ax.set_xlabel("Hora"); ax.set_title("Decisões dos Agentes RL por Hora"); ax.set_xlim(0, 24)
     leg_arm = [mpatches.Patch(color=c, label=l) for c, l in
-               zip(cores_arm, ["Carregar", "Manter", "Descarregar"])]
+               zip(_CORES_ARM, ["Carregar", "Manter", "Descarregar"])]
     ax.legend(handles=leg_arm, loc="upper left", fontsize=7, title="Armaz.", title_fontsize=7)
 
     plt.tight_layout()
@@ -306,3 +307,121 @@ def plot_visao_mensal(
     plt.tight_layout()
     _save(fig, "visao_mensal.png")
     return fig
+
+
+# ──────────────────────────────────────────────────────────────
+# Aba interativa: explorar dia individual
+# ──────────────────────────────────────────────────────────────
+
+def plot_explorar_dia(
+    fig: plt.Figure,
+    dados_dia: pd.DataFrame,
+    hist_h: list[dict],
+    hist_r: list[dict],
+    data_str: str = "",
+) -> None:
+    """Desenha painéis detalhados de um dia na Figure fornecida (in-place).
+
+    Usado pela aba interativa do dashboard — não salva arquivo.
+    """
+    fig.clf()
+    axes = fig.subplots(3, 2)
+    horas = list(range(24))
+
+    titulo = f"Explorar Dia — {data_str}" if data_str else "Explorar Dia"
+    fig.suptitle(titulo, fontsize=13, fontweight="bold")
+
+    # 1. Custo por hora
+    ax = axes[0, 0]
+    ax.bar([h - 0.2 for h in horas], [r["custo_r"] for r in hist_h], 0.4,
+           label="Heurístico", color=_COR_H, alpha=0.85)
+    ax.bar([h + 0.2 for h in horas], [r["custo_r"] for r in hist_r], 0.4,
+           label="RL", color=_COR_R, alpha=0.85)
+    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange", label="Pico tarifário")
+    ch = sum(r["custo_r"] for r in hist_h)
+    cr = sum(r["custo_r"] for r in hist_r)
+    delt = ((cr - ch) / ch * 100) if ch > 0 else 0
+    ax.set_title(f"Custo por Hora  |  Heur R${ch:.2f}  →  RL R${cr:.2f}  ({delt:+.1f} %)")
+    ax.set_xlabel("Hora"); ax.set_ylabel("R$"); ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+
+    # 2. SOC da bateria
+    ax = axes[0, 1]
+    ax.plot(horas, [r["soc"] for r in hist_h], "o-", color=_COR_H, label="Heurístico", ms=4)
+    ax.plot(horas, [r["soc"] for r in hist_r], "s-", color=_COR_R, label="RL", ms=4)
+    ax.axhline(CONFIG["soc_min_pct"], color="red", ls="--", alpha=0.6,
+               label=f"SOC crítico ({CONFIG['soc_min_pct']} %)")
+    ax.axhline(80, color="blue", ls="--", alpha=0.4, label="SOC ótimo (80 %)")
+    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
+    ax.set_title("Estado de Carga da Bateria (%)")
+    ax.set_xlabel("Hora"); ax.set_ylabel("SOC (%)")
+    ax.legend(fontsize=8); ax.grid(alpha=0.3); ax.set_ylim(0, 105)
+
+    # 3. Geração vs Consumo
+    ax = axes[1, 0]
+    ger_vals = [r["geracao_kw"] for r in hist_r]
+    ax.fill_between(horas, ger_vals, alpha=0.3, color="gold", label="Geração (solar+eólico)")
+    ax.plot(horas, [r["consumo_kw"] for r in hist_h], "o-", color=_COR_H, label="Consumo Heurístico", ms=4)
+    ax.plot(horas, [r["consumo_kw"] for r in hist_r], "s-", color=_COR_R, label="Consumo RL", ms=4)
+    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
+    ax.set_title("Geração vs Consumo (kW)")
+    ax.set_xlabel("Hora"); ax.set_ylabel("kW")
+    ax.legend(fontsize=8); ax.grid(alpha=0.3)
+
+    # 4. Mapa de decisões do RL
+    ax = axes[1, 1]
+    for h in range(24):
+        ax.barh(2.5, 1, left=h, height=0.75, color=_CORES_ARM[hist_r[h]["a_arm"]], alpha=0.9)
+        ax.barh(1.5, 1, left=h, height=0.75, color=_CORES_CONS[hist_r[h]["a_cons"]], alpha=0.9)
+        ax.barh(0.5, 1, left=h, height=0.75, color=_CORES_GER[hist_r[h]["a_ger"]], alpha=0.9)
+    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
+    ax.set_yticks([0.5, 1.5, 2.5])
+    ax.set_yticklabels(["Gerente", "Consumo", "Armaz."])
+    ax.set_xlabel("Hora"); ax.set_title("Decisões dos Agentes RL por Hora"); ax.set_xlim(0, 24)
+    leg_arm = [mpatches.Patch(color=c, label=l) for c, l in
+               zip(_CORES_ARM, ["Carregar", "Manter", "Descarregar"])]
+    ax.legend(handles=leg_arm, loc="upper left", fontsize=7, title="Armaz.", title_fontsize=7)
+
+    # 5. Resumo estatístico
+    ax = axes[2, 0]
+    ax.axis("off")
+    rede_h = sum(r["rede_kwh"] for r in hist_h)
+    rede_r = sum(r["rede_kwh"] for r in hist_r)
+    soc_med_h = np.mean([r["soc"] for r in hist_h])
+    soc_med_r = np.mean([r["soc"] for r in hist_r])
+    viol_h = sum(1 for r in hist_h if r["soc"] < CONFIG["soc_min_pct"] or r["soc"] > CONFIG["soc_max_pct"])
+    viol_r = sum(1 for r in hist_r if r["soc"] < CONFIG["soc_min_pct"] or r["soc"] > CONFIG["soc_max_pct"])
+    ger_total = dados_dia["solar_kw"].sum() + dados_dia["eolico_kw"].sum()
+    cons_total = (dados_dia["pivo_kw"] + dados_dia["captacao_kw"]
+                  + dados_dia["sede_kw"] + dados_dia["silo_kw"]).sum()
+
+    resumo = (
+        f"RESUMO DO DIA\n"
+        f"{'─' * 40}\n"
+        f"Custo Heurístico : R$ {ch:.2f}\n"
+        f"Custo RL         : R$ {cr:.2f}  ({delt:+.1f} %)\n"
+        f"{'─' * 40}\n"
+        f"Rede Heurístico  : {rede_h:.2f} kWh\n"
+        f"Rede RL          : {rede_r:.2f} kWh\n"
+        f"{'─' * 40}\n"
+        f"SOC médio Heur.  : {soc_med_h:.1f} %\n"
+        f"SOC médio RL     : {soc_med_r:.1f} %\n"
+        f"Violações SOC    : Heur {viol_h}h  |  RL {viol_r}h\n"
+        f"{'─' * 40}\n"
+        f"Geração total    : {ger_total:.1f} kWh\n"
+        f"Consumo total    : {cons_total:.1f} kWh"
+    )
+    ax.text(0.05, 0.95, resumo, transform=ax.transAxes, fontsize=10,
+            verticalalignment="top", fontfamily="monospace",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#f0f0f0", alpha=0.8))
+
+    # 6. Perfil de tarifas do dia
+    ax = axes[2, 1]
+    tarifas = [r["tarifa"] for r in hist_r]
+    ax.fill_between(horas, tarifas, alpha=0.3, color="#8e44ad")
+    ax.plot(horas, tarifas, "o-", color="#8e44ad", ms=4, lw=2, label="Tarifa (R$/kWh)")
+    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange", label="Pico tarifário")
+    ax.set_title("Perfil Tarifário do Dia")
+    ax.set_xlabel("Hora"); ax.set_ylabel("R$/kWh")
+    ax.legend(fontsize=8); ax.grid(alpha=0.3)
+
+    fig.tight_layout()
