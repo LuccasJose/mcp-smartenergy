@@ -66,7 +66,7 @@ class FazendaEnergyEnv:
 
     def discretizar(self, est: dict) -> tuple:
         h = est["hora"] // 6
-        s = min(int(est["soc"] / 20), 4)
+        s = min(int(est["soc"]), 100)
         g = 0 if est["solar_kw"] < 5 else (1 if est["solar_kw"] < 15 else 2)
         # Novo: Stress em 3 buckets
         str_val = est["stress"]

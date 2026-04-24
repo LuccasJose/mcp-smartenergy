@@ -29,7 +29,7 @@ def _save(fig: plt.Figure, nome: str) -> None:
     print(f"  Plot salvo: {path}")
 
 
-def _media_movel(arr: list, w: int = 50) -> np.ndarray:
+def _media_movel(arr: list, w: int = 500) -> np.ndarray:
     return np.convolve(arr, np.ones(w) / w, mode="valid")
 
 
@@ -38,23 +38,24 @@ def plot_curvas_aprendizado(rewards_hist: list, custos_hist: list) -> plt.Figure
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 4))
     fig.suptitle("Curva de Aprendizado — Q-Learning Cooperativo", fontsize=13, fontweight="bold")
 
-    ax1.plot(rewards_hist, alpha=0.2, color="steelblue", lw=0.8)
-    ax1.plot(_media_movel(rewards_hist), color="steelblue", lw=2.2, label="Média móvel (50 ep.)")
+    ax1.plot(rewards_hist, alpha=0.1, color="steelblue", lw=0.5)
+    ax1.plot(_media_movel(rewards_hist, w=500), color="steelblue", lw=2.2, label="Média móvel (500 ep.)")
     ax1.set_xlabel("Episódio"); ax1.set_ylabel("Reward total do dia")
     ax1.set_title("Reward por Episódio"); ax1.legend(); ax1.grid(alpha=0.3)
 
-    ax2.plot(custos_hist, alpha=0.2, color="tomato", lw=0.8)
-    ax2.plot(_media_movel(custos_hist), color="tomato", lw=2.2, label="Média móvel (50 ep.)")
+    ax2.plot(custos_hist, alpha=0.1, color="tomato", lw=0.5)
+    ax2.plot(_media_movel(custos_hist, w=500), color="tomato", lw=2.2, label="Média móvel (500 ep.)")
     ax2.set_xlabel("Episódio"); ax2.set_ylabel("Custo (R$)")
     ax2.set_title("Custo de Energia por Episódio"); ax2.legend(); ax2.grid(alpha=0.3)
 
     plt.tight_layout()
     _save(fig, "curva_aprendizado.png")
 
-    c_ini = np.mean(custos_hist[:50])
-    c_fim = np.mean(custos_hist[-50:])
-    print(f"Custo médio (primeiros 50 ep.) : R${c_ini:.2f}")
-    print(f"Custo médio (últimos  50 ep.)  : R${c_fim:.2f}")
+    amostra = 1000
+    c_ini = np.mean(custos_hist[:amostra])
+    c_fim = np.mean(custos_hist[-amostra:])
+    print(f"Custo médio (primeiros {amostra} ep.) : R${c_ini:.2f}")
+    print(f"Custo médio (últimos  {amostra} ep.)  : R${c_fim:.2f}")
     if c_ini > 0:
         print(f"Redução aprendida              : {((c_ini - c_fim) / c_ini * 100):.1f} %")
     return fig
@@ -479,14 +480,17 @@ def plot_explorar_dia(
             verticalalignment="top", fontfamily="monospace",
             bbox=dict(boxstyle="round,pad=0.5", facecolor="#f0f0f0", alpha=0.8))
 
-    # ── 6. Consumo por máquina (totais do dia) ────────────────────
+    # ── 6. Estado de Carga da bateria (SOC) ───────────────────────
     ax = axes[2, 1]
-    totais = [dados_dia[col].sum() for col in _maq_cols]
-    bars = ax.barh(_maq_labels, totais, color=_maq_cores, alpha=0.85)
-    ax.bar_label(bars, fmt="%.1f kWh", padding=4, fontsize=9)
-    ax.set_title("Consumo Total por Máquina (kWh no dia)")
-    ax.set_xlabel("kWh"); ax.grid(axis="x", alpha=0.3)
-    ax.set_xlim(0, max(totais) * 1.2 if totais else 1)
+    ax.plot(horas, [r["soc"] for r in hist_h], "o-", color=_COR_H, label="Heurístico", ms=4)
+    ax.plot(horas, [r["soc"] for r in hist_r], "s-", color=_COR_R, label="RL", ms=4)
+    ax.axhline(CONFIG["soc_min_pct"], color="red",  ls="--", alpha=0.6,
+               label=f"SOC crítico ({CONFIG['soc_min_pct']} %)")
+    ax.axhline(80, color="blue", ls="--", alpha=0.4, label="SOC ótimo (80 %)")
+    ax.axvspan(17.5, 20.5, alpha=0.12, color="orange", label="Pico tarifário")
+    ax.set_title("Estado de Carga da Bateria (%)")
+    ax.set_xlabel("Hora"); ax.set_ylabel("SOC (%)")
+    ax.legend(fontsize=8, loc="lower right"); ax.grid(alpha=0.3); ax.set_ylim(0, 105)
 
     fig.tight_layout()
 

@@ -22,12 +22,12 @@ OUTPUT_DIR = _ROOT / os.getenv("OUTPUT_DIR", "outputs")
 # ──────────────────────────────────────────────────────────────
 CONFIG = {
     # Treinamento
-    "n_episodios": 20000,    # dias simulados no treino
+    "n_episodios": 100000,    # dias simulados no treino
     "alpha": 0.1,           # taxa de aprendizado
     "gamma": 0.98,          # fator de desconto futuro
     "epsilon_inicial": 1.0, # exploração inicial (100 %)
     "epsilon_final": 0.01,  # exploração mínima  (5 %)
-    "epsilon_decay": 0.9995,# decaimento por episódio
+    "epsilon_decay": 0.99993,# decaimento por episódio
 
     # Bateria
     "bateria_cap_kwh": 24.0,

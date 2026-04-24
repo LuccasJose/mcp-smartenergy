@@ -87,7 +87,7 @@ def test_env_discretizar_retorna_tupla_de_5(env):
     assert len(disc) == 5
     h, s, g, st, m = disc
     assert 0 <= h <= 3
-    assert 0 <= s <= 4
+    assert 0 <= s <= 100
     assert g in (0, 1, 2)
     assert st in (0, 1, 2)
     assert m in (0, 1)
