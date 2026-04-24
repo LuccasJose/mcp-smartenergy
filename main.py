@@ -30,6 +30,7 @@ from smarty_energy.data_loader import carregar_dados
 from smarty_energy.agents import AgenteQL
 from smarty_energy.training import treinar
 from smarty_energy.evaluation import (
+    rodar_sem_agente,
     rodar_heuristico,
     rodar_rl,
     resumo_mes,
@@ -78,22 +79,24 @@ def main() -> None:
     fig_aprendizado = viz.plot_curvas_aprendizado(REWARDS_HIST, CUSTOS_HIST)
 
     # ── 5. Avaliação mensal ───────────────────────────────────────
-    print("\nAvaliando em todos os 31 dias...")
-    RES_H = [rodar_heuristico(d, TARIFA) for d in DIAS]
-    RES_R = [rodar_rl(d, TARIFA, AGENTES) for d in DIAS]
+    print("\nAvaliando em todos os 31 dias (Sem Agente, Heurístico e RL)...")
+    RES_S = [rodar_sem_agente(d, TARIFA)    for d in DIAS]
+    RES_H = [rodar_heuristico(d, TARIFA)    for d in DIAS]
+    RES_R = [rodar_rl(d, TARIFA, AGENTES)   for d in DIAS]
 
+    CS, RS, VS, RWS = resumo_mes(RES_S)
     CH, RH, VH, RWH = resumo_mes(RES_H)
     CR, RR, VR, RWR = resumo_mes(RES_R)
 
-    print(f"\n{'AVALIAÇÃO — MÉDIA DIÁRIA (Janeiro 2025)':^62}")
-    print(f"{'═'*62}")
-    print(f"  {'Métrica':<30} {'Heurístico':>12} {'RL':>10} {'Δ':>8}")
-    print(f"  {'─'*58}")
-    print(f"  {'Custo (R$/dia)':<30} {CH:>12.2f} {CR:>10.2f} {delta_pct(CH, CR):>8}")
-    print(f"  {'kWh da rede / dia':<30} {RH:>12.2f} {RR:>10.2f} {delta_pct(RH, RR):>8}")
-    print(f"  {'Violações SOC / dia':<30} {VH:>12.2f} {VR:>10.2f}")
-    print(f"  {'Reward médio / dia':<30} {RWH:>12.2f} {RWR:>10.2f} {delta_pct(RWH, RWR):>8}")
-    print(f"{'═'*62}")
+    print(f"\n{'AVALIAÇÃO — MÉDIA DIÁRIA (Janeiro 2025)':^78}")
+    print(f"{'═'*78}")
+    print(f"  {'Métrica':<26} {'Sem Agente':>12} {'Heurístico':>12} {'RL':>10} {'Δ RL vs Sem':>12}")
+    print(f"  {'─'*72}")
+    print(f"  {'Custo (R$/dia)':<26} {CS:>12.2f} {CH:>12.2f} {CR:>10.2f} {delta_pct(CS, CR):>12}")
+    print(f"  {'kWh da rede / dia':<26} {RS:>12.2f} {RH:>12.2f} {RR:>10.2f} {delta_pct(RS, RR):>12}")
+    print(f"  {'Violações SOC / dia':<26} {VS:>12.2f} {VH:>12.2f} {VR:>10.2f}")
+    print(f"  {'Reward médio / dia':<26} {RWS:>12.2f} {RWH:>12.2f} {RWR:>10.2f} {delta_pct(RWS, RWR):>12}")
+    print(f"{'═'*78}")
 
     # ── 6. Plot do melhor dia ─────────────────────────────────────
     difs = [sum(RES_H[i][h]["custo_r"] for h in range(24)) -
@@ -135,9 +138,10 @@ def main() -> None:
     fig_cenarios = viz.plot_cenarios(DIAS, resultados_cenarios)
 
     # ── 7b. Visualizações operacionais ────────────────────────────
-    print("\nGerando visão por máquina e resumo mensal...")
-    fig_maquinas = viz.plot_uso_maquinas(DIAS)
-    fig_mensal   = viz.plot_visao_mensal(DIAS, RES_H, RES_R)
+    print("\nGerando visão por máquina, resumo mensal e comparativo 3-vias...")
+    fig_maquinas  = viz.plot_uso_maquinas(DIAS)
+    fig_mensal    = viz.plot_visao_mensal(DIAS, RES_H, RES_R)
+    fig_comp_3vias = viz.plot_comparativo_3vias(DIAS, RES_S, RES_H, RES_R)
 
     # ── 8. Relatório final ────────────────────────────────────────
     d_custo = ((CR - CH) / CH * 100)    if CH   != 0 else 0
@@ -175,19 +179,19 @@ def main() -> None:
 
     # ── 9. Dashboard unificado (abas em uma única janela) ─────────
     print("\nAbrindo dashboard unificado... (feche a janela para encerrar)")
+    dados_3 = {"dias": DIAS, "res_s": RES_S, "res_h": RES_H, "res_r": RES_R}
     abrir_dashboard(
         {
-            "Aprendizado"     : fig_aprendizado,
-            "Dia Destaque"    : fig_dia,
-            "Cenários"        : fig_cenarios,
-            "Uso das Máquinas": fig_maquinas,
-            "Visão Mensal"    : fig_mensal,
+            "Aprendizado"       : fig_aprendizado,
+            "Dia Destaque"      : fig_dia,
+            "Cenários"          : fig_cenarios,
+            "Uso das Máquinas"  : fig_maquinas,
+            "Visão Mensal"      : fig_mensal,
+            "Comparativo 3-vias": fig_comp_3vias,
         },
-        dados_explorar={
-            "dias": DIAS,
-            "res_h": RES_H,
-            "res_r": RES_R,
-        },
+        dados_explorar={"dias": DIAS, "res_h": RES_H, "res_r": RES_R},
+        dados_fonte=dados_3,
+        dados_maquina=dados_3,
     )
 
 

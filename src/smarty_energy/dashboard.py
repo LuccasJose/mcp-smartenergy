@@ -1,12 +1,14 @@
 """Dashboard unificado — embute todas as figuras em uma única janela Tk.
 
-Substitui as 3 janelas matplotlib sequenciais por uma janela com abas
+Substitui as janelas matplotlib sequenciais por uma janela com abas
 (ttk.Notebook). Cada aba contém uma figura matplotlib embutida via
 FigureCanvasTkAgg e a barra de navegação padrão (zoom/pan/save).
 
-Uso:
-    from smarty_energy.dashboard import abrir_dashboard
-    abrir_dashboard(figuras)   # dict {"Aba": Figure, ...}
+Abas interativas (criadas sob demanda):
+    - Explorar Dia        : combo com os 31 dias; mostra perfil detalhado
+    - Fonte de Energia    : combo de dia; stacked area de origem (ger/bat/rede)
+                            para as 3 estratégias (Sem Agente × Heurístico × RL)
+    - Máquina Detalhada   : combo de máquina; heatmap + perfil horário + diário
 """
 
 from __future__ import annotations
@@ -23,6 +25,20 @@ from matplotlib.backends.backend_tkagg import (  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 
+def _embutir_figura(
+    frame: ttk.Frame,
+    fig: Figure,
+) -> FigureCanvasTkAgg:
+    """Embute uma Figure no frame com barra de navegação padrão."""
+    canvas = FigureCanvasTkAgg(fig, master=frame)
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+    barra = NavigationToolbar2Tk(canvas, frame, pack_toolbar=False)
+    barra.update()
+    barra.pack(side=tk.BOTTOM, fill=tk.X)
+    return canvas
+
+
 def _criar_aba_explorar(notebook: ttk.Notebook, dados: dict) -> None:
     """Cria aba interativa com combobox para selecionar o dia."""
     from smarty_energy.visualization import plot_explorar_dia
@@ -30,39 +46,100 @@ def _criar_aba_explorar(notebook: ttk.Notebook, dados: dict) -> None:
     dias = dados["dias"]
     res_h = dados["res_h"]
     res_r = dados["res_r"]
-
-    # Labels para o combobox
     labels = [d["data"].iloc[0].strftime("%d/%m/%Y") for d in dias]
 
     frame = ttk.Frame(notebook)
     notebook.add(frame, text="Explorar Dia")
 
-    # Barra de controle no topo
     controle = ttk.Frame(frame)
     controle.pack(side=tk.TOP, fill=tk.X, padx=10, pady=6)
-
     ttk.Label(controle, text="Selecione o dia:", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(0, 8))
     combo = ttk.Combobox(controle, values=labels, state="readonly", width=14, font=("Segoe UI", 10))
     combo.current(0)
     combo.pack(side=tk.LEFT)
 
-    # Figura reutilizável
     fig = Figure(figsize=(15, 12))
-    canvas = FigureCanvasTkAgg(fig, master=frame)
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-    barra = NavigationToolbar2Tk(canvas, frame, pack_toolbar=False)
-    barra.update()
-    barra.pack(side=tk.BOTTOM, fill=tk.X)
+    canvas = _embutir_figura(frame, fig)
 
     def _atualizar(_event=None):
         idx = combo.current()
-        data_str = labels[idx]
-        plot_explorar_dia(fig, dias[idx], res_h[idx], res_r[idx], data_str, todos_dias=dias)
+        plot_explorar_dia(fig, dias[idx], res_h[idx], res_r[idx], labels[idx], todos_dias=dias)
         canvas.draw_idle()
 
     combo.bind("<<ComboboxSelected>>", _atualizar)
-    # Renderizar dia inicial
+    _atualizar()
+
+
+def _criar_aba_fonte_energia(notebook: ttk.Notebook, dados: dict) -> None:
+    """Aba interativa — origem da energia (ger/bat/rede) por dia e estratégia."""
+    from smarty_energy.visualization import plot_fonte_energia
+
+    dias  = dados["dias"]
+    res_s = dados["res_s"]
+    res_h = dados["res_h"]
+    res_r = dados["res_r"]
+    labels = [d["data"].iloc[0].strftime("%d/%m/%Y") for d in dias]
+
+    frame = ttk.Frame(notebook)
+    notebook.add(frame, text="Fonte de Energia")
+
+    controle = ttk.Frame(frame)
+    controle.pack(side=tk.TOP, fill=tk.X, padx=10, pady=6)
+    ttk.Label(controle, text="Selecione o dia:", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(0, 8))
+    combo = ttk.Combobox(controle, values=labels, state="readonly", width=14, font=("Segoe UI", 10))
+    combo.current(0)
+    combo.pack(side=tk.LEFT)
+    ttk.Label(
+        controle,
+        text="  (geração própria = solar + eólico direto na carga; bateria = descarga)",
+        font=("Segoe UI", 8), foreground="#555"
+    ).pack(side=tk.LEFT, padx=(10, 0))
+
+    fig = Figure(figsize=(15, 9))
+    canvas = _embutir_figura(frame, fig)
+
+    def _atualizar(_event=None):
+        idx = combo.current()
+        plot_fonte_energia(fig, res_s[idx], res_h[idx], res_r[idx], labels[idx])
+        canvas.draw_idle()
+
+    combo.bind("<<ComboboxSelected>>", _atualizar)
+    _atualizar()
+
+
+def _criar_aba_maquina_detalhada(notebook: ttk.Notebook, dados: dict) -> None:
+    """Aba interativa — drill-down por máquina."""
+    from smarty_energy.visualization import plot_maquina_detalhada, _MAQUINAS_DETALHE
+
+    dias  = dados["dias"]
+    res_s = dados["res_s"]
+    res_h = dados["res_h"]
+    res_r = dados["res_r"]
+    nomes_maq = list(_MAQUINAS_DETALHE.keys())
+
+    frame = ttk.Frame(notebook)
+    notebook.add(frame, text="Máquina Detalhada")
+
+    controle = ttk.Frame(frame)
+    controle.pack(side=tk.TOP, fill=tk.X, padx=10, pady=6)
+    ttk.Label(controle, text="Selecione a máquina:", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(0, 8))
+    combo = ttk.Combobox(controle, values=nomes_maq, state="readonly", width=24, font=("Segoe UI", 10))
+    combo.current(0)
+    combo.pack(side=tk.LEFT)
+    ttk.Label(
+        controle,
+        text="  (heatmap mostra demanda; barras e linhas mostram quanto cada estratégia usou)",
+        font=("Segoe UI", 8), foreground="#555"
+    ).pack(side=tk.LEFT, padx=(10, 0))
+
+    fig = Figure(figsize=(15, 10))
+    canvas = _embutir_figura(frame, fig)
+
+    def _atualizar(_event=None):
+        plot_maquina_detalhada(fig, combo.get(), dias, res_s, res_h, res_r)
+        canvas.draw_idle()
+
+    combo.bind("<<ComboboxSelected>>", _atualizar)
     _atualizar()
 
 
@@ -70,25 +147,25 @@ def abrir_dashboard(
     figuras: dict[str, Figure],
     titulo: str = "SmartEnergy MAS — Dashboard",
     dados_explorar: dict | None = None,
+    dados_fonte: dict | None = None,
+    dados_maquina: dict | None = None,
 ) -> None:
-    """Abre uma janela única com uma aba por figura.
+    """Abre uma janela única com uma aba por figura + abas interativas.
 
     Args:
-        figuras        : dict ordenado {nome_aba: Figure}. A ordem do dict é a
-                         ordem das abas (Python 3.7+ garante).
+        figuras        : dict ordenado {nome_aba: Figure}.
         titulo         : título da janela.
-        dados_explorar : se fornecido, cria aba interativa "Explorar Dia".
-                         Esperado: {"dias": [...], "res_h": [...], "res_r": [...]}.
+        dados_explorar : {"dias", "res_h", "res_r"} — aba "Explorar Dia".
+        dados_fonte    : {"dias", "res_s", "res_h", "res_r"} — aba "Fonte de Energia".
+        dados_maquina  : {"dias", "res_s", "res_h", "res_r"} — aba "Máquina Detalhada".
     """
     root = tk.Tk()
     root.title(titulo)
-    # Tenta iniciar em tela cheia/grande; cai para 1400x900 se necessário.
     try:
         root.state("zoomed")
     except tk.TclError:
         root.geometry("1400x900")
 
-    # Estilo das abas
     estilo = ttk.Style()
     try:
         estilo.theme_use("clam")
@@ -102,21 +179,15 @@ def abrir_dashboard(
     for nome, fig in figuras.items():
         frame = ttk.Frame(notebook)
         notebook.add(frame, text=nome)
+        _embutir_figura(frame, fig).draw()
 
-        canvas = FigureCanvasTkAgg(fig, master=frame)
-        canvas.draw()
-
-        barra = NavigationToolbar2Tk(canvas, frame, pack_toolbar=False)
-        barra.update()
-        barra.pack(side=tk.BOTTOM, fill=tk.X)
-
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-    # Aba interativa "Explorar Dia"
     if dados_explorar is not None:
         _criar_aba_explorar(notebook, dados_explorar)
+    if dados_fonte is not None:
+        _criar_aba_fonte_energia(notebook, dados_fonte)
+    if dados_maquina is not None:
+        _criar_aba_maquina_detalhada(notebook, dados_maquina)
 
-    # Rodapé discreto
     rodape = ttk.Label(
         root,
         text="Navegue pelas abas  •  Use a barra inferior para zoom/pan/salvar  •  Feche a janela para encerrar",

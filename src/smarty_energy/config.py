@@ -69,6 +69,12 @@ CONFIG = {
     "pen_bomba_ciclo": 8.0,     # ↓ era 15
     "pen_secador_meta": 20.0,   # ↓ era 40
     "pen_sede_desvio": 5.0,     # ↓ era 10
+
+    # Shaping por ponto ótimo de cada máquina
+    "pen_bomba_pico"     : 15.0, # bomba ligada em hora de pico tarifário (>0.9 R$/kWh)
+    "bonus_pivo_solar"   : 3.0,  # pivô operando em janela solar forte (≥15 kW)
+    "bonus_sec_excedente": 2.0,  # secador com excedente de geração (≥5 kW após fixo)
+    "bonus_bomba_offpeak": 1.0,  # bomba captação fora do pico (reforço positivo)
 }
 
 # Tetos de consumo por decisão do Gerente de Carga

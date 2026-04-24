@@ -6,7 +6,7 @@ Estado discreto (chave Q-table): (bucket_hora, bucket_soc, bucket_solar, bucket_
   bucket_soc   : soc // 20        -> 5 valores  (0-20 / 20-40 / … / 80-100 %)
   bucket_solar : low/med/high     -> 3 valores  (<5 kW / 5-15 / >15)
   bucket_tarifa: normal/pico      -> 2 valores
-  Total: 4×5×3×2 = 120 estados
+  Total: 4x5x3x2 = 120 estados
 
 Ações por agente:
   Armazenamento : 0=carregar  1=manter  2=descarregar
@@ -209,6 +209,21 @@ class FazendaEnergyEnv:
         excedente = exportacao
         custo     = rede_kwh * est["tarifa"]
 
+        # ── Decomposição da origem do consumo (kWh por hora) ──────
+        # Geração própria direto, bateria e rede. Soma fecha com `consumo`.
+        ger_disp_carga    = max(0.0, geracao - carga_consumida)
+        fonte_geracao_kwh = min(consumo, ger_disp_carga)
+        restante_consumo  = consumo - fonte_geracao_kwh
+        fonte_bateria_kwh = min(restante_consumo, descarga_util)
+        fonte_rede_kwh    = max(0.0, consumo - fonte_geracao_kwh - fonte_bateria_kwh)
+
+        # Consumo nominal por máquina (kWh na hora, antes do corte pelo teto)
+        pivo_kw_consumido     = 0.0 if c_pivo  else pivo_nom
+        captacao_kw_consumido = 0.0 if c_bomba else cap_nom
+        secador_kw_consumido  = p_sec
+        sede_kw_consumido     = sede_real
+        silo_kw_consumido     = float(r["silo_kw"])
+
         self.hora += 1
         done  = self.hora >= 24
 
@@ -220,6 +235,23 @@ class FazendaEnergyEnv:
             if self.bomba_total_h < 6: # Mínimo diário bomba
                 pen_metas += cfg["pen_bomba_ciclo"]
 
+        # ── Shaping: ponto ótimo de uso por máquina ───────────────
+        # Pico tarifário (18-20h em tarifa azul → > 0.9 R$/kWh)
+        em_pico_tarifa = est["tarifa"] > 0.9
+        # Janela solar forte para irrigação/pivô
+        sol_forte      = solar_kw >= 15.0
+        # Excedente disponível (após cargas fixas) — bom para secador
+        excedente_ger  = (geracao - fixo) >= 5.0
+
+        pivo_ligado    = not c_pivo
+        bomba_ligada   = not c_bomba
+        secador_ligado = not c_sec
+
+        pen_bomba_pico      = cfg["pen_bomba_pico"]      if (bomba_ligada  and em_pico_tarifa) else 0.0
+        bonus_pivo_solar    = cfg["bonus_pivo_solar"]    if (pivo_ligado   and sol_forte)      else 0.0
+        bonus_sec_excedente = cfg["bonus_sec_excedente"] if (secador_ligado and excedente_ger)  else 0.0
+        bonus_bomba_offpeak = cfg["bonus_bomba_offpeak"] if (bomba_ligada  and not em_pico_tarifa) else 0.0
+
         # ── Reward cooperativo ────────────────────────────────────
         reward = (
             - cfg["w_custo"]         * custo
@@ -229,6 +261,10 @@ class FazendaEnergyEnv:
             - cfg["pen_pcc"]         * float(pcc_violado)
             - pen_oper
             - pen_metas
+            - pen_bomba_pico
+            + bonus_pivo_solar
+            + bonus_sec_excedente
+            + bonus_bomba_offpeak
             + cfg["bonus_excedente"] * excedente * est["tarifa"]
             + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
         )
@@ -236,12 +272,26 @@ class FazendaEnergyEnv:
         self.historico.append({
             "hora": self.hora - 1, "soc": self.soc,
             "geracao_kw": geracao, "consumo_kw": consumo,
+            "solar_kw": solar_kw, "eolico_kw": eolico_kw,
             "rede_kwh": rede_kwh, "excedente": excedente,
             "importacao": importacao, "exportacao": exportacao,
             "custo_r": custo, "tarifa": est["tarifa"], "reward": reward,
             "a_arm": a_arm, "a_cons": a_cons, "a_ger": a_ger,
             "bat_carga": bat_carga, "bat_descarga": bat_descarga,
             "pcc_violado": pcc_violado,
+            # Origem da energia consumida
+            "fonte_geracao_kwh": fonte_geracao_kwh,
+            "fonte_bateria_kwh": fonte_bateria_kwh,
+            "fonte_rede_kwh"   : fonte_rede_kwh,
+            # Consumo realizado por máquina
+            "pivo_kw_consumido"    : pivo_kw_consumido,
+            "captacao_kw_consumido": captacao_kw_consumido,
+            "sede_kw_consumido"    : sede_kw_consumido,
+            "silo_kw_consumido"    : silo_kw_consumido,
+            "secador_kw_consumido" : secador_kw_consumido,
+            # Flags de contexto (para auditoria)
+            "em_pico_tarifa": em_pico_tarifa,
+            "bomba_ligada"  : bomba_ligada,
         })
 
         prox  = self._estado() if not done else est

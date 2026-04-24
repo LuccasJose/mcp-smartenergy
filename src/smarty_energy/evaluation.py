@@ -10,6 +10,22 @@ from .agents import AgentesHeuristicos
 _heuristica = AgentesHeuristicos()
 
 
+def rodar_sem_agente(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[dict]:
+    """Baseline SEM otimização — a fazenda 'como está hoje'.
+
+    Comportamento fixo: bateria em modo 'manter' (sem gestão), nenhuma máquina
+    cortada e teto de consumo liberal. Serve como referência de custo para
+    comparar Heurístico e RL.
+    """
+    env = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
+    env.reset()
+    for _ in range(24):
+        _, _, done, _ = env.step(a_arm=1, a_cons=0, a_ger=2)
+        if done:
+            break
+    return env.historico
+
+
 def rodar_heuristico(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[dict]:
     """Executa os agentes heurísticos em um dia completo.
 

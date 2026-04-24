@@ -5,8 +5,6 @@ embute essas figuras em abas de uma única janela Tk. Chamar ``plt.show()``
 fica a cargo do consumidor (dashboard ou script standalone).
 """
 
-from pathlib import Path
-
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -489,5 +487,342 @@ def plot_explorar_dia(
     ax.set_title("Consumo Total por Máquina (kWh no dia)")
     ax.set_xlabel("kWh"); ax.grid(axis="x", alpha=0.3)
     ax.set_xlim(0, max(totais) * 1.2 if totais else 1)
+
+    fig.tight_layout()
+
+
+# ──────────────────────────────────────────────────────────────
+# Comparativo 3-vias: Sem Agente vs Heurístico vs RL
+# ──────────────────────────────────────────────────────────────
+
+_COR_S = "#7f8c8d"  # cinza para baseline "sem agente"
+
+
+def plot_comparativo_3vias(
+    dias: list[pd.DataFrame],
+    res_s: list[list[dict]],
+    res_h: list[list[dict]],
+    res_r: list[list[dict]],
+) -> plt.Figure:
+    """Compara três estratégias: Sem Agente (baseline) vs Heurístico vs RL.
+
+    Quatro painéis:
+      1. Custo diário (barras agrupadas)
+      2. kWh da rede por dia
+      3. Custo mensal total (barras com Δ% vs baseline)
+      4. Consumo total por máquina (mensal) — idêntico entre estratégias
+         quando não há corte, mas diferente quando RL/Heur cortam cargas.
+    """
+    n = len(dias)
+    dias_x = np.arange(n)
+    labels = [d["data"].iloc[0].strftime("%d") for d in dias]
+
+    custo_s = np.array([sum(h["custo_r"]  for h in hist) for hist in res_s])
+    custo_h = np.array([sum(h["custo_r"]  for h in hist) for hist in res_h])
+    custo_r = np.array([sum(h["custo_r"]  for h in hist) for hist in res_r])
+    rede_s  = np.array([sum(h["rede_kwh"] for h in hist) for hist in res_s])
+    rede_h  = np.array([sum(h["rede_kwh"] for h in hist) for hist in res_h])
+    rede_r  = np.array([sum(h["rede_kwh"] for h in hist) for hist in res_r])
+
+    fig, axes = plt.subplots(2, 2, figsize=(15, 9))
+    fig.suptitle("Comparativo de Estratégias — Sem Agente × Heurístico × RL",
+                 fontsize=13, fontweight="bold")
+
+    # 1. Custo diário (3 barras agrupadas)
+    ax = axes[0, 0]
+    w = 0.28
+    ax.bar(dias_x - w, custo_s, w, color=_COR_S, alpha=0.85, label="Sem Agente")
+    ax.bar(dias_x,     custo_h, w, color=_COR_H, alpha=0.85, label="Heurístico")
+    ax.bar(dias_x + w, custo_r, w, color=_COR_R, alpha=0.85, label="RL")
+    ax.set_title("Custo Diário (R$)")
+    ax.set_xticks(dias_x[::2]); ax.set_xticklabels(labels[::2], fontsize=7)
+    ax.set_xlabel("Dia"); ax.set_ylabel("R$")
+    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+
+    # 2. kWh rede diário (3 barras agrupadas)
+    ax = axes[0, 1]
+    ax.bar(dias_x - w, rede_s, w, color=_COR_S, alpha=0.85, label="Sem Agente")
+    ax.bar(dias_x,     rede_h, w, color=_COR_H, alpha=0.85, label="Heurístico")
+    ax.bar(dias_x + w, rede_r, w, color=_COR_R, alpha=0.85, label="RL")
+    ax.set_title(f"Energia da Rede (kWh/dia)  |  Média: {rede_s.mean():.1f} → {rede_h.mean():.1f} → {rede_r.mean():.1f}")
+    ax.set_xticks(dias_x[::2]); ax.set_xticklabels(labels[::2], fontsize=7)
+    ax.set_xlabel("Dia"); ax.set_ylabel("kWh")
+    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+
+    # 3. Totais mensais (custo e rede)
+    ax = axes[1, 0]
+    estrategias = ["Sem Agente", "Heurístico", "RL"]
+    cores       = [_COR_S, _COR_H, _COR_R]
+    totais_c    = [custo_s.sum(), custo_h.sum(), custo_r.sum()]
+    bars = ax.bar(estrategias, totais_c, color=cores, alpha=0.9)
+    for b, v in zip(bars, totais_c):
+        delt_base = ((v - totais_c[0]) / totais_c[0] * 100) if totais_c[0] > 0 else 0
+        rot = f"R$ {v:.0f}" + (f"\n({delt_base:+.1f}%)" if v != totais_c[0] else "")
+        ax.text(b.get_x() + b.get_width()/2, v, rot, ha="center", va="bottom", fontsize=9,
+                fontweight="bold")
+    ax.set_title("Custo Total do Mês (R$)  —  Δ% vs Sem Agente")
+    ax.set_ylabel("R$"); ax.grid(axis="y", alpha=0.3)
+    ax.set_ylim(0, max(totais_c) * 1.15)
+
+    # 4. Consumo total por máquina (mensal) — Sem Agente vs RL (Heur já visível nos outros)
+    ax = axes[1, 1]
+    _maquinas_plot = [
+        ("pivo_kw_consumido",     "Pivô"),
+        ("captacao_kw_consumido", "Bomba Captação"),
+        ("sede_kw_consumido",     "Sede"),
+        ("silo_kw_consumido",     "Silo"),
+        ("secador_kw_consumido",  "Secador"),
+    ]
+    nomes_maq = [n for _, n in _maquinas_plot]
+    y_pos = np.arange(len(nomes_maq))
+    bw = 0.28
+
+    def _soma_maquinas(resultados):
+        totais = []
+        for campo, _ in _maquinas_plot:
+            s = 0.0
+            for hist in resultados:
+                s += sum(h.get(campo, 0.0) for h in hist)
+            totais.append(s)
+        return totais
+
+    vals_s = _soma_maquinas(res_s)
+    vals_h = _soma_maquinas(res_h)
+    vals_r = _soma_maquinas(res_r)
+    ax.barh(y_pos + bw, vals_s, bw, color=_COR_S, alpha=0.85, label="Sem Agente")
+    ax.barh(y_pos,       vals_h, bw, color=_COR_H, alpha=0.85, label="Heurístico")
+    ax.barh(y_pos - bw,  vals_r, bw, color=_COR_R, alpha=0.85, label="RL")
+    ax.set_yticks(y_pos); ax.set_yticklabels(nomes_maq)
+    ax.set_xlabel("kWh no mês")
+    ax.set_title("Consumo Total por Máquina (mês) — quanto cada estratégia cortou")
+    ax.legend(fontsize=8); ax.grid(axis="x", alpha=0.3)
+
+    plt.tight_layout()
+    _save(fig, "comparativo_3vias.png")
+    return fig
+
+
+# ──────────────────────────────────────────────────────────────
+# Fonte de Energia — origem do consumo (geração própria / bateria / rede)
+# ──────────────────────────────────────────────────────────────
+
+_CORES_FONTE = {
+    "Geração própria": "#f1c40f",   # amarelo/dourado (solar+eólico)
+    "Bateria"        : "#27ae60",   # verde
+    "Rede"           : "#e74c3c",   # vermelho
+}
+
+
+def plot_fonte_energia(
+    fig: plt.Figure,
+    hist_s: list[dict],
+    hist_h: list[dict],
+    hist_r: list[dict],
+    data_str: str = "",
+) -> None:
+    """Desenha in-place: origem do consumo por hora, para 3 estratégias.
+
+    Linha 1: stacked area (geração própria / bateria / rede) para cada estratégia.
+    Linha 2: pizza com participação percentual de cada fonte no dia.
+    """
+    fig.clf()
+    axes = fig.subplots(2, 3)
+    horas = list(range(24))
+
+    titulo = f"Origem da Energia Consumida — {data_str}" if data_str else "Origem da Energia Consumida"
+    fig.suptitle(titulo, fontsize=13, fontweight="bold")
+
+    estrategias = [
+        ("Sem Agente", hist_s),
+        ("Heurístico", hist_h),
+        ("RL",         hist_r),
+    ]
+
+    for col, (nome, hist) in enumerate(estrategias):
+        ger = np.array([h.get("fonte_geracao_kwh", 0.0) for h in hist])
+        bat = np.array([h.get("fonte_bateria_kwh", 0.0) for h in hist])
+        red = np.array([h.get("fonte_rede_kwh",    0.0) for h in hist])
+        total_dia = ger.sum() + bat.sum() + red.sum()
+
+        # ── Stacked area por hora ────────────────────────────────
+        ax = axes[0, col]
+        ax.stackplot(
+            horas, ger, bat, red,
+            labels=["Geração própria", "Bateria", "Rede"],
+            colors=[_CORES_FONTE["Geração própria"],
+                    _CORES_FONTE["Bateria"],
+                    _CORES_FONTE["Rede"]],
+            alpha=0.9,
+        )
+        ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
+        custo_dia = sum(h["custo_r"] for h in hist)
+        ax.set_title(f"{nome}\nCusto R${custo_dia:.2f}  |  {total_dia:.1f} kWh")
+        ax.set_xlabel("Hora"); ax.set_ylabel("kW")
+        ax.set_xlim(0, 23); ax.legend(fontsize=7, loc="upper left")
+        ax.grid(alpha=0.3)
+
+        # ── Pizza com participação percentual ────────────────────
+        ax = axes[1, col]
+        valores = [ger.sum(), bat.sum(), red.sum()]
+        nomes_f = list(_CORES_FONTE.keys())
+        cores_f = list(_CORES_FONTE.values())
+        valores_nz = [max(v, 1e-9) for v in valores]
+        ax.pie(
+            valores_nz, labels=nomes_f, colors=cores_f,
+            autopct=lambda p: f"{p:.1f}%" if p > 1 else "",
+            startangle=90, wedgeprops=dict(alpha=0.9, edgecolor="white", linewidth=2),
+        )
+        pct_propria = (valores[0] + valores[1]) / max(total_dia, 1e-9) * 100
+        ax.set_title(f"Autossuficiência: {pct_propria:.1f}%", fontsize=10)
+
+    fig.tight_layout()
+
+
+# ──────────────────────────────────────────────────────────────
+# Máquina Detalhada — drill-down por equipamento
+# ──────────────────────────────────────────────────────────────
+
+_MAQUINAS_DETALHE = {
+    "Pivô (irrigação)"    : ("pivo_kw",     "pivo_kw_consumido",     "#e74c3c", "YlOrRd"),
+    "Bomba de Captação"   : ("captacao_kw", "captacao_kw_consumido", "#3498db", "Blues"),
+    "Sede / Escritório"   : ("sede_kw",     "sede_kw_consumido",     "#9b59b6", "Purples"),
+    "Silo"                : ("silo_kw",     "silo_kw_consumido",     "#e67e22", "Oranges"),
+    "Secador (no reward)" : (None,          "secador_kw_consumido",  "#d35400", "YlOrBr"),
+}
+
+
+def plot_maquina_detalhada(
+    fig: plt.Figure,
+    nome_maquina: str,
+    dias: list[pd.DataFrame],
+    res_s: list[list[dict]],
+    res_h: list[list[dict]],
+    res_r: list[list[dict]],
+) -> None:
+    """Desenha in-place um drill-down para uma máquina selecionada.
+
+    Painéis:
+      (0,0) Heatmap dia × hora do consumo nominal (demanda) da máquina
+      (0,1) Perfil horário médio (linha) — demanda vs consumo nas 3 estratégias
+      (1,0) Consumo diário total (kWh) — 3 estratégias lado a lado
+      (1,1) Resumo textual com métricas e dicas de uso
+    """
+    fig.clf()
+    gs = fig.add_gridspec(2, 2)
+    ax_heat    = fig.add_subplot(gs[0, 0])
+    ax_perfil  = fig.add_subplot(gs[0, 1])
+    ax_diario  = fig.add_subplot(gs[1, 0])
+    ax_texto   = fig.add_subplot(gs[1, 1])
+
+    col_nom, col_cons, cor, cmap = _MAQUINAS_DETALHE[nome_maquina]
+    fig.suptitle(f"Máquina: {nome_maquina}", fontsize=13, fontweight="bold")
+
+    n_dias = len(dias)
+    horas  = list(range(24))
+
+    # ── Heatmap dia × hora da demanda nominal ────────────────────
+    if col_nom is not None:
+        matriz = np.array([d[col_nom].values for d in dias])
+        im = ax_heat.imshow(matriz, aspect="auto", cmap=cmap, interpolation="nearest")
+        fig.colorbar(im, ax=ax_heat, fraction=0.04, pad=0.02, label="kW nominal")
+        total = matriz.sum()
+        pico  = matriz.max()
+        ax_heat.set_title(f"Demanda nominal (dia × hora)\nTotal: {total:.0f} kWh  |  Pico: {pico:.1f} kW",
+                          fontsize=10)
+    else:
+        # Secador não tem demanda nominal no dataset — usa consumo realizado (RL)
+        matriz = np.array([[h[col_cons] for h in hist] for hist in res_r])
+        im = ax_heat.imshow(matriz, aspect="auto", cmap=cmap, interpolation="nearest")
+        fig.colorbar(im, ax=ax_heat, fraction=0.04, pad=0.02, label="kW consumido")
+        ax_heat.set_title(f"Consumo realizado pelo RL (dia × hora)\nTotal: {matriz.sum():.0f} kWh",
+                          fontsize=10)
+
+    ax_heat.axvspan(17.5, 20.5, alpha=0.15, color="white")
+    ax_heat.set_xlabel("Hora"); ax_heat.set_ylabel("Dia")
+    ax_heat.set_xticks(range(0, 24, 3))
+    step = max(1, n_dias // 10)
+    datas_labels = [d["data"].iloc[0].strftime("%d") for d in dias]
+    ax_heat.set_yticks(range(0, n_dias, step))
+    ax_heat.set_yticklabels(datas_labels[::step], fontsize=7)
+
+    # ── Perfil horário médio (24 horas) ─────────────────────────
+    def _perfil_consumo(resultados):
+        m = np.zeros(24)
+        for hist in resultados:
+            for h in hist:
+                m[h["hora"]] += h.get(col_cons, 0.0)
+        return m / max(len(resultados), 1)
+
+    perfil_s = _perfil_consumo(res_s)
+    perfil_h = _perfil_consumo(res_h)
+    perfil_r = _perfil_consumo(res_r)
+
+    if col_nom is not None:
+        demanda_media = np.mean([d[col_nom].values for d in dias], axis=0)
+        ax_perfil.fill_between(horas, demanda_media, alpha=0.18, color=cor,
+                               label="Demanda média")
+
+    ax_perfil.plot(horas, perfil_s, "-",  color=_COR_S, lw=2, label="Sem Agente", alpha=0.9)
+    ax_perfil.plot(horas, perfil_h, "--", color=_COR_H, lw=2, label="Heurístico")
+    ax_perfil.plot(horas, perfil_r, "-.", color=_COR_R, lw=2.2, label="RL")
+    ax_perfil.axvspan(17.5, 20.5, alpha=0.12, color="orange", label="Pico tarifário")
+    ax_perfil.set_title("Perfil horário médio (consumo por estratégia)")
+    ax_perfil.set_xlabel("Hora"); ax_perfil.set_ylabel("kW (média diária)")
+    ax_perfil.legend(fontsize=7); ax_perfil.grid(alpha=0.3)
+    ax_perfil.set_xlim(0, 23)
+
+    # ── Consumo diário total (kWh) — 3 estratégias ──────────────
+    diario_s = np.array([sum(h.get(col_cons, 0.0) for h in hist) for hist in res_s])
+    diario_h = np.array([sum(h.get(col_cons, 0.0) for h in hist) for hist in res_h])
+    diario_r = np.array([sum(h.get(col_cons, 0.0) for h in hist) for hist in res_r])
+    dias_x = np.arange(n_dias)
+    w = 0.28
+    ax_diario.bar(dias_x - w, diario_s, w, color=_COR_S, alpha=0.85, label="Sem Agente")
+    ax_diario.bar(dias_x,     diario_h, w, color=_COR_H, alpha=0.85, label="Heurístico")
+    ax_diario.bar(dias_x + w, diario_r, w, color=_COR_R, alpha=0.85, label="RL")
+    ax_diario.set_title("Consumo diário total (kWh)")
+    ax_diario.set_xticks(dias_x[::2])
+    ax_diario.set_xticklabels(datas_labels[::2], fontsize=7)
+    ax_diario.set_xlabel("Dia"); ax_diario.set_ylabel("kWh")
+    ax_diario.legend(fontsize=7); ax_diario.grid(axis="y", alpha=0.3)
+
+    # ── Resumo textual ──────────────────────────────────────────
+    ax_texto.axis("off")
+    total_s, total_h, total_r = diario_s.sum(), diario_h.sum(), diario_r.sum()
+
+    # Uso no pico tarifário (18-20h): fração do consumo total que cai no pico
+    def _pct_pico(resultados):
+        tot = 0.0
+        pico = 0.0
+        for hist in resultados:
+            for h in hist:
+                v = h.get(col_cons, 0.0)
+                tot += v
+                if 18 <= h["hora"] <= 20:
+                    pico += v
+        return (pico / max(tot, 1e-9)) * 100, pico
+
+    pct_s, pico_s = _pct_pico(res_s)
+    pct_h, pico_h = _pct_pico(res_h)
+    pct_r, pico_r = _pct_pico(res_r)
+
+    resumo = (
+        f"RESUMO — {nome_maquina}\n"
+        f"{'─' * 44}\n"
+        f"Consumo total mensal (kWh):\n"
+        f"  Sem Agente : {total_s:>8.1f}\n"
+        f"  Heurístico : {total_h:>8.1f}  ({(total_h-total_s)/max(total_s,1e-9)*100:+.1f}%)\n"
+        f"  RL         : {total_r:>8.1f}  ({(total_r-total_s)/max(total_s,1e-9)*100:+.1f}%)\n"
+        f"{'─' * 44}\n"
+        f"Uso em HORÁRIO DE PICO (18-20h):\n"
+        f"  Sem Agente : {pico_s:>6.1f} kWh  ({pct_s:>5.1f}%)\n"
+        f"  Heurístico : {pico_h:>6.1f} kWh  ({pct_h:>5.1f}%)\n"
+        f"  RL         : {pico_r:>6.1f} kWh  ({pct_r:>5.1f}%)\n"
+        f"{'─' * 44}\n"
+        f"Δ pico (RL vs Sem Agente): {pct_r - pct_s:+.1f} pontos %"
+    )
+    ax_texto.text(0.02, 0.98, resumo, transform=ax_texto.transAxes, fontsize=10,
+                  va="top", fontfamily="monospace",
+                  bbox=dict(boxstyle="round,pad=0.5", facecolor="#f5f5f5", alpha=0.9))
 
     fig.tight_layout()
