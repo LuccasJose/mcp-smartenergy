@@ -55,9 +55,10 @@ CONFIG = {
     "sede_desvio_max": 0.20,     # 20%
 
     # Pesos do reward cooperativo (rebalanceados — custo como sinal dominante)
-    "w_custo": 8.0,             # ↑ era 1.5: agora custo diário pesa ~320 pts
-    "w_estresse": 0.5,          # ↓ era 1.0: reduzido para não competir com custo
-    "pen_soc": 15.0,            # ↓ era 30: ainda forte, mas não esmaga o sinal de custo
+    "w_custo": 8.0,         # peso do custo monetário no reward
+    "w_estresse": 0.5,      # peso do estresse financeiro
+    "w_bonus_carga": 1.2,   # bônus por carregar com excedente solar (aumentado para 1.2)
+    "pen_soc": 12.0,        # penalidade por SOC crítico (rebalanceado: era 30, dominava o sinal)
     "pen_teto": 8.0,            # ↓ era 15: idem
     "pen_producao": 5.0,        # ↓ era 10
     "pen_pcc": 10.0,            # ↓ era 20
@@ -67,11 +68,14 @@ CONFIG = {
     # Penalidades Operacionais (proporcionalmente reduzidas)
     "pen_pivo_quebra": 12.0,    # ↓ era 25
     "pen_bomba_ciclo": 8.0,     # ↓ era 15
+    "pen_bomba_meta": 100.0,    # penalidade escalonada por não atingir 6h/dia de bomba
     "pen_secador_meta": 20.0,   # ↓ era 40
     "pen_sede_desvio": 5.0,     # ↓ era 10
 
     # Shaping por ponto ótimo de cada máquina
-    "pen_bomba_pico"     : 15.0, # bomba ligada em hora de pico tarifário (>0.9 R$/kWh)
+    "pen_bomba_pico"     : 25.0, # ↑ era 15: bomba ligada em pico tarifário (>0.9 R$/kWh)
+    "pen_pivo_pico"      : 18.0, # pivô ligado em pico tarifário
+    "pen_secador_pico"   : 8.0,  # secador ligado em pico tarifário (carga menor)
     "bonus_pivo_solar"   : 3.0,  # pivô operando em janela solar forte (≥15 kW)
     "bonus_sec_excedente": 2.0,  # secador com excedente de geração (≥5 kW após fixo)
     "bonus_bomba_offpeak": 1.0,  # bomba captação fora do pico (reforço positivo)

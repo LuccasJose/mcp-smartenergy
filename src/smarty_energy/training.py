@@ -1,9 +1,11 @@
 """Loop de treinamento IQL (Independent Q-Learning) cooperativo."""
 
+import pickle
+
 import numpy as np
 import pandas as pd
 
-from .config import CONFIG
+from .config import CONFIG, OUTPUT_DIR
 from .environment import FazendaEnergyEnv
 
 
@@ -35,6 +37,7 @@ def treinar(
     """
     rewards_hist = []
     custos_hist  = []
+    eps_hist     = []
     n_ep         = cfg["n_episodios"]
     soc_proximo  = cfg["soc_inicial_pct"]   # SOC inicial do 1º episódio
 
@@ -71,16 +74,32 @@ def treinar(
 
         rewards_hist.append(ep_reward)
         custos_hist.append(ep_custo)
+        eps_hist.append(agentes["armazenamento"].epsilon)
 
-        if (ep + 1) % 200 == 0:
-            w     = min(100, ep + 1)
+        # Print adaptativo: ~50 prints independente do tamanho do treino
+        intervalo_print = max(200, n_ep // 50)
+        if (ep + 1) % intervalo_print == 0:
+            w     = min(intervalo_print, ep + 1)
             r_med = np.mean(rewards_hist[-w:])
             c_med = np.mean(custos_hist[-w:])
             eps   = agentes["armazenamento"].epsilon
             n_est = agentes["armazenamento"].n_estados
             print(
-                f"Ep {ep+1:>5}/{n_ep}  reward={r_med:>8.2f}  "
+                f"Ep {ep+1:>6}/{n_ep}  reward={r_med:>8.2f}  "
                 f"custo=R${c_med:>5.2f}  \u03b5={eps:.3f}  estados={n_est}"
             )
+
+    # Persiste hist\u00f3rico de treino para revisualiza\u00e7\u00e3o sem retreinar
+    models_dir = OUTPUT_DIR / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    hist_path = models_dir / "training_history.pkl"
+    with open(hist_path, "wb") as f:
+        pickle.dump({
+            "rewards" : rewards_hist,
+            "custos"  : custos_hist,
+            "epsilons": eps_hist,
+            "n_episodios": n_ep,
+        }, f)
+    print(f"  Hist\u00f3rico de treino salvo em: {hist_path}")
 
     return rewards_hist, custos_hist

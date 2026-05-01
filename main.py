@@ -15,6 +15,8 @@ Uso:
     python main.py
 """
 
+import argparse
+import pickle
 import sys
 import warnings
 warnings.filterwarnings("ignore")
@@ -41,7 +43,7 @@ from smarty_energy import visualization as viz
 from smarty_energy.dashboard import abrir_dashboard
 
 
-def main() -> None:
+def main(replot: bool = False) -> None:
     # ── 1. Dados ──────────────────────────────────────────────────
     print("Carregando dados...")
     DIAS, TARIFA = carregar_dados()
@@ -59,26 +61,40 @@ def main() -> None:
         "consumo"      : AgenteQL(8, "Consumo",       CONFIG),
         "gerente"      : AgenteQL(3, "Gerente",        CONFIG),
     }
-
-    # ── 3. Treinamento ────────────────────────────────────────────
-    print(f"\nIniciando treinamento ({CONFIG['n_episodios']} episódios × 24 timesteps)...\n")
-    REWARDS_HIST, CUSTOS_HIST = treinar(DIAS, TARIFA, AGENTES, CONFIG)
-    print("\nTreinamento concluído!")
-    for ag in AGENTES.values():
-        print(f"  {ag.nome:<16} | {ag.n_estados:>3} estados | {ag.n_updates:>6} updates | ε={ag.epsilon:.3f}")
-
-    # Salvar Q-tables
     models_dir = OUTPUT_DIR / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
-    for ag in AGENTES.values():
-        ag.save(models_dir / f"qtable_{ag.nome.lower()}.pkl")
-    print(f"  Q-tables salvas em: {models_dir}")
 
-    # ── 4. Curvas de aprendizado ──────────────────────────────────
-    print("\nGerando curvas de aprendizado...")
-    fig_aprendizado = viz.plot_curvas_aprendizado(REWARDS_HIST, CUSTOS_HIST)
+    # ── 3. Treinamento OU carregamento de modelos salvos ─────────
+    if replot:
+        print("\n[--replot] Pulando treinamento. Carregando Q-tables e histórico salvos...")
+        for ag in AGENTES.values():
+            ag.load(models_dir / f"qtable_{ag.nome.lower()}.pkl")
+        hist_path = models_dir / "training_history.pkl"
+        with open(hist_path, "rb") as f:
+            hist = pickle.load(f)
+        REWARDS_HIST = hist["rewards"]
+        CUSTOS_HIST  = hist["custos"]
+        EPS_HIST     = hist.get("epsilons")
+        print(f"  Q-tables carregadas de: {models_dir}")
+        print(f"  Histórico de treino   : {hist['n_episodios']} episódios")
+    else:
+        print(f"\nIniciando treinamento ({CONFIG['n_episodios']} episódios × 24 timesteps)...\n")
+        REWARDS_HIST, CUSTOS_HIST = treinar(DIAS, TARIFA, AGENTES, CONFIG)
+        EPS_HIST = None  # carregado do pickle só no modo replot
+        print("\nTreinamento concluído!")
+        for ag in AGENTES.values():
+            print(f"  {ag.nome:<16} | {ag.n_estados:>3} estados | {ag.n_updates:>6} updates | ε={ag.epsilon:.3f}")
 
-    # ── 5. Avaliação mensal ───────────────────────────────────────
+        # Salvar Q-tables
+        models_dir.mkdir(parents=True, exist_ok=True)
+        for ag in AGENTES.values():
+            ag.save(models_dir / f"qtable_{ag.nome.lower()}.pkl")
+        print(f"  Q-tables salvas em: {models_dir}")
+
+        # Recarrega o eps_hist do pickle que `treinar()` acabou de salvar
+        with open(models_dir / "training_history.pkl", "rb") as f:
+            EPS_HIST = pickle.load(f).get("epsilons")
+
+    # ── 5. Avaliação mensal (precisa vir antes do plot p/ baselines) ─
     print("\nAvaliando em todos os 31 dias (Sem Agente, Heurístico e RL)...")
     RES_S = [rodar_sem_agente(d, TARIFA)    for d in DIAS]
     RES_H = [rodar_heuristico(d, TARIFA)    for d in DIAS]
@@ -97,6 +113,15 @@ def main() -> None:
     print(f"  {'Violações SOC / dia':<26} {VS:>12.2f} {VH:>12.2f} {VR:>10.2f}")
     print(f"  {'Reward médio / dia':<26} {RWS:>12.2f} {RWH:>12.2f} {RWR:>10.2f} {delta_pct(RWS, RWR):>12}")
     print(f"{'═'*78}")
+
+    # ── 4. Curvas de aprendizado (com baselines horizontais) ─────
+    print("\nGerando curvas de aprendizado...")
+    fig_aprendizado = viz.plot_curvas_aprendizado(
+        REWARDS_HIST, CUSTOS_HIST,
+        eps_hist=EPS_HIST,
+        custo_baseline_sem=CS,
+        custo_baseline_heur=CH,
+    )
 
     # ── 6. Plot do melhor dia ─────────────────────────────────────
     difs = [sum(RES_H[i][h]["custo_r"] for h in range(24)) -
@@ -196,4 +221,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="SmartEnergy MAS — pipeline e dashboard.")
+    parser.add_argument(
+        "--replot",
+        action="store_true",
+        help="Pula o treinamento, carrega Q-tables e training_history.pkl salvos "
+             "e regenera todas as visualizações com base no último treino.",
+    )
+    args = parser.parse_args()
+    main(replot=args.replot)

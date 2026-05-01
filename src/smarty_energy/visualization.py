@@ -29,35 +29,91 @@ def _save(fig: plt.Figure, nome: str) -> None:
     print(f"  Plot salvo: {path}")
 
 
-def _media_movel(arr: list, w: int = 500) -> np.ndarray:
+def _media_movel(arr: list, w: int | None = None) -> np.ndarray:
+    """Média móvel com janela adaptativa ao tamanho do histórico."""
+    if w is None:
+        w = max(50, len(arr) // 200)   # ~500 em 100k eps; 50 em 10k eps
+    w = max(1, min(w, len(arr)))
     return np.convolve(arr, np.ones(w) / w, mode="valid")
 
 
-def plot_curvas_aprendizado(rewards_hist: list, custos_hist: list) -> plt.Figure:
-    """Plota reward e custo ao longo dos episódios de treinamento."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 4))
-    fig.suptitle("Curva de Aprendizado — Q-Learning Cooperativo", fontsize=13, fontweight="bold")
+def plot_curvas_aprendizado(
+    rewards_hist: list,
+    custos_hist: list,
+    eps_hist: list | None = None,
+    custo_baseline_sem: float | None = None,
+    custo_baseline_heur: float | None = None,
+) -> plt.Figure:
+    """Plota reward, custo e (opcional) epsilon ao longo do treinamento.
 
-    ax1.plot(rewards_hist, alpha=0.1, color="steelblue", lw=0.5)
-    ax1.plot(_media_movel(rewards_hist, w=500), color="steelblue", lw=2.2, label="Média móvel (500 ep.)")
+    Args:
+        rewards_hist        : reward total por episódio
+        custos_hist         : custo (R$) por episódio
+        eps_hist            : epsilon por episódio (opcional). Se fornecido,
+                              adiciona um terceiro painel com o decaimento.
+        custo_baseline_sem  : custo médio diário do baseline "Sem Agente"
+                              — desenhado como linha horizontal de referência.
+        custo_baseline_heur : custo médio diário do Heurístico — idem.
+    """
+    n_ep  = len(rewards_hist)
+    # Subamostragem do scatter de fundo: limita a ~5000 pontos para não saturar
+    step  = max(1, n_ep // 5000)
+    x_sub = np.arange(0, n_ep, step)
+    w_med = max(50, n_ep // 200)
+
+    n_paineis = 3 if eps_hist is not None else 2
+    fig, axes = plt.subplots(1, n_paineis, figsize=(6 * n_paineis, 4))
+    if n_paineis == 2:
+        ax1, ax2 = axes
+    else:
+        ax1, ax2, ax3 = axes
+    fig.suptitle(
+        f"Curva de Aprendizado — Q-Learning Cooperativo  ({n_ep:,} episódios)",
+        fontsize=13, fontweight="bold",
+    )
+
+    # Reward por episódio
+    ax1.plot(x_sub, np.array(rewards_hist)[x_sub], alpha=0.2, color="steelblue", lw=0.6)
+    rewards_smooth = _media_movel(rewards_hist, w_med)
+    ax1.plot(np.arange(len(rewards_smooth)) + w_med // 2,
+             rewards_smooth, color="steelblue", lw=2.2,
+             label=f"Média móvel ({w_med} ep.)")
     ax1.set_xlabel("Episódio"); ax1.set_ylabel("Reward total do dia")
-    ax1.set_title("Reward por Episódio"); ax1.legend(); ax1.grid(alpha=0.3)
+    ax1.set_title("Reward por Episódio"); ax1.legend(fontsize=9); ax1.grid(alpha=0.3)
 
-    ax2.plot(custos_hist, alpha=0.1, color="tomato", lw=0.5)
-    ax2.plot(_media_movel(custos_hist, w=500), color="tomato", lw=2.2, label="Média móvel (500 ep.)")
-    ax2.set_xlabel("Episódio"); ax2.set_ylabel("Custo (R$)")
-    ax2.set_title("Custo de Energia por Episódio"); ax2.legend(); ax2.grid(alpha=0.3)
+    # Custo por episódio com baselines horizontais
+    ax2.plot(x_sub, np.array(custos_hist)[x_sub], alpha=0.2, color="tomato", lw=0.6)
+    custos_smooth = _media_movel(custos_hist, w_med)
+    ax2.plot(np.arange(len(custos_smooth)) + w_med // 2,
+             custos_smooth, color="tomato", lw=2.2,
+             label=f"Média móvel ({w_med} ep.)")
+    if custo_baseline_sem is not None:
+        ax2.axhline(custo_baseline_sem, color="#7f8c8d", ls="--", lw=1.5,
+                    label=f"Sem Agente: R${custo_baseline_sem:.2f}")
+    if custo_baseline_heur is not None:
+        ax2.axhline(custo_baseline_heur, color="#e74c3c", ls=":", lw=1.5,
+                    label=f"Heurístico: R${custo_baseline_heur:.2f}")
+    ax2.set_xlabel("Episódio"); ax2.set_ylabel("Custo (R$/dia)")
+    ax2.set_title("Custo de Energia por Episódio"); ax2.legend(fontsize=8); ax2.grid(alpha=0.3)
+
+    # Decaimento do epsilon
+    if eps_hist is not None:
+        ax3.plot(x_sub, np.array(eps_hist)[x_sub], color="#8e44ad", lw=1.6)
+        ax3.set_xlabel("Episódio"); ax3.set_ylabel("ε (taxa de exploração)")
+        ax3.set_title("Decaimento do Epsilon"); ax3.grid(alpha=0.3)
+        ax3.set_ylim(0, 1.05)
 
     plt.tight_layout()
     _save(fig, "curva_aprendizado.png")
 
-    amostra = 1000
-    c_ini = np.mean(custos_hist[:amostra])
-    c_fim = np.mean(custos_hist[-amostra:])
-    print(f"Custo médio (primeiros {amostra} ep.) : R${c_ini:.2f}")
-    print(f"Custo médio (últimos  {amostra} ep.)  : R${c_fim:.2f}")
+    # Estatísticas — janela adaptativa para inicial vs final
+    w_stat = max(50, n_ep // 100)
+    c_ini = float(np.mean(custos_hist[:w_stat]))
+    c_fim = float(np.mean(custos_hist[-w_stat:]))
+    print(f"Custo médio (primeiros {w_stat} ep.) : R${c_ini:.2f}")
+    print(f"Custo médio (últimos  {w_stat} ep.)  : R${c_fim:.2f}")
     if c_ini > 0:
-        print(f"Redução aprendida              : {((c_ini - c_fim) / c_ini * 100):.1f} %")
+        print(f"Redução aprendida                 : {((c_ini - c_fim) / c_ini * 100):.1f} %")
     return fig
 
 
@@ -369,20 +425,55 @@ def plot_explorar_dia(
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-    # ── 3. Uso das máquinas no dia (stacked bars por hora) ────────
+    # ── 3. Uso REAL das máquinas pelo RL (stacked bars) ───────────
+    # Mostra o consumo que o RL EFETIVAMENTE deixou rodar; a linha cinza
+    # tracejada por trás é a demanda histórica (o que a fazenda "queria").
     ax = axes[1, 0]
-    _maq_cols   = ["pivo_kw",    "captacao_kw",     "sede_kw",         "silo_kw"]
-    _maq_labels = ["Pivô",       "Bomba Captação",   "Sede/Escritório", "Silo/Secador"]
-    _maq_cores  = ["#e74c3c",    "#3498db",          "#9b59b6",         "#e67e22"]
+    _maq_cols_dem  = ["pivo_kw",         "captacao_kw",         "sede_kw",         "silo_kw"]
+    _maq_cols_real = ["pivo_kw_consumido", "captacao_kw_consumido", "sede_kw_consumido", "silo_kw_consumido"]
+    _maq_labels    = ["Pivô",            "Bomba Captação",       "Sede/Escritório", "Silo/Secador"]
+    _maq_cores     = ["#e74c3c",         "#3498db",              "#9b59b6",         "#e67e22"]
+
+    # Demanda histórica empilhada como contorno fantasma
+    demanda_total = np.zeros(24)
+    for col in _maq_cols_dem:
+        demanda_total += dados_dia[col].to_numpy(dtype=float)
+    ax.step(np.arange(24) + 0.5, demanda_total, where="mid", color="#7f8c8d",
+            ls="--", lw=1.2, alpha=0.85, label="Demanda histórica")
+
+    # Consumo realizado pelo RL (stacked)
     bottom = np.zeros(24)
-    for col, label, cor in zip(_maq_cols, _maq_labels, _maq_cores):
-        vals = dados_dia[col].to_numpy(dtype=float)
+    for col, label, cor in zip(_maq_cols_real, _maq_labels, _maq_cores):
+        vals = np.array([h.get(col, 0.0) for h in hist_r])
         ax.bar(horas, vals, bottom=bottom, label=label, color=cor, alpha=0.85, width=0.8)
         bottom += vals
     ax.axvspan(17.5, 20.5, alpha=0.1, color="orange")
-    ax.set_title("Uso das Máquinas por Hora (kW)")
+
+    ax.set_title("Consumo REALIZADO pelo RL (kW)  —  cinza tracejado = demanda histórica")
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
-    ax.legend(fontsize=8, loc="upper left"); ax.grid(axis="y", alpha=0.3)
+    ax.legend(fontsize=7, loc="upper left"); ax.grid(axis="y", alpha=0.3)
+
+    # Métrica de confirmação: bomba/pivô/secador no pico (h18-20)
+    # Colocada DENTRO do painel (canto sup. direito) com caixa para evitar
+    # colisão com o título.
+    pico_h     = list(range(18, 21))
+    bomba_pico = sum(hist_r[h]["captacao_kw_consumido"] for h in pico_h)
+    pivo_pico  = sum(hist_r[h]["pivo_kw_consumido"]    for h in pico_h)
+    sec_pico   = sum(hist_r[h]["secador_kw_consumido"] for h in pico_h)
+    badge = (
+        f"Em pico (18-20h):\n"
+        f"  bomba   = {bomba_pico:5.1f} kWh\n"
+        f"  pivô    = {pivo_pico:5.1f} kWh\n"
+        f"  secador = {sec_pico:5.1f} kWh"
+    )
+    cor_badge = "#27ae60" if (bomba_pico + pivo_pico + sec_pico) < 0.5 else "#c0392b"
+    ax.text(
+        0.985, 0.97, badge, transform=ax.transAxes,
+        ha="right", va="top", fontsize=8, fontweight="bold",
+        color=cor_badge, fontfamily="monospace",
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
+                  edgecolor=cor_badge, linewidth=1.2, alpha=0.92),
+    )
 
     # ── 4. Perfil do dia ──────────────────────────────────────────
     ax = axes[1, 1]

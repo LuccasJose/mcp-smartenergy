@@ -66,7 +66,7 @@ class FazendaEnergyEnv:
 
     def discretizar(self, est: dict) -> tuple:
         h = est["hora"] // 6
-        s = min(int(est["soc"]), 100)
+        s = min(int(est["soc"] / 10), 9)   # 10 buckets: [0,10) [10,20) ... [90,100]
         g = 0 if est["solar_kw"] < 5 else (1 if est["solar_kw"] < 15 else 2)
         # Novo: Stress em 3 buckets
         str_val = est["stress"]
@@ -129,19 +129,27 @@ class FazendaEnergyEnv:
             self.pivo_timer += 1
 
         # R: Bomba (2h ON / 4h OFF)
-        if not c_bomba: # Quer ligar
-            if self.bomba_timer < 0 and abs(self.bomba_timer) < self.cfg["bomba_off_min"]:
-                pen_oper += self.cfg["pen_bomba_ciclo"]
-                c_bomba = True # Força corte por segurança física
-            elif self.bomba_timer >= self.cfg["bomba_on_max"]:
-                pen_oper += self.cfg["pen_bomba_ciclo"]
-                c_bomba = True # Força corte
-            
-            if not c_bomba: # Se ainda estiver ligada
+        # bomba_timer > 0 → contagem de horas ON; < 0 → contagem de horas OFF
+        if not c_bomba:  # Agente quer ligar
+            if self.bomba_timer < 0 and abs(self.bomba_timer) < cfg["bomba_off_min"]:
+                # Descansou menos que o mínimo → força corte
+                pen_oper += cfg["pen_bomba_ciclo"]
+                c_bomba = True
+                self.bomba_timer -= 1          # continua contando OFF
+            elif self.bomba_timer >= cfg["bomba_on_max"]:
+                # Ficou ON além do máximo → força corte e inicia descanso
+                pen_oper += cfg["pen_bomba_ciclo"]
+                c_bomba = True
+                self.bomba_timer = -1          # inicia contagem OFF
+            else:
+                # Liga normalmente
                 self.bomba_timer = max(1, self.bomba_timer + 1)
                 self.bomba_total_h += 1
-        else: # Cortada
-            self.bomba_timer = min(-1, self.bomba_timer - 1)
+        else:  # Agente quer cortar
+            if self.bomba_timer > 0:
+                self.bomba_timer = -1          # estava ON → começa OFF
+            else:
+                self.bomba_timer -= 1          # continuava OFF
 
         # R: Secador (Consumo variável 0.44 - 2.2 kW)
         # Se não cortado, consome proporcional ao teto ou geração excedente
@@ -232,8 +240,9 @@ class FazendaEnergyEnv:
         if done:
             if self.secador_kwh_ac < cfg["secador_meta_kwh"]:
                 pen_metas += cfg["pen_secador_meta"]
-            if self.bomba_total_h < 6: # Mínimo diário bomba
-                pen_metas += cfg["pen_bomba_ciclo"]
+            if self.bomba_total_h < 6:  # Mínimo diário bomba (escalonado)
+                falta = 6 - self.bomba_total_h
+                pen_metas += cfg["pen_bomba_meta"] * (falta / 6)
 
         # ── Shaping: ponto ótimo de uso por máquina ───────────────
         # Pico tarifário (18-20h em tarifa azul → > 0.9 R$/kWh)
@@ -247,10 +256,17 @@ class FazendaEnergyEnv:
         bomba_ligada   = not c_bomba
         secador_ligado = not c_sec
 
-        pen_bomba_pico      = cfg["pen_bomba_pico"]      if (bomba_ligada  and em_pico_tarifa) else 0.0
-        bonus_pivo_solar    = cfg["bonus_pivo_solar"]    if (pivo_ligado   and sol_forte)      else 0.0
+        pen_bomba_pico      = cfg["pen_bomba_pico"]      if (bomba_ligada   and em_pico_tarifa) else 0.0
+        pen_pivo_pico       = cfg["pen_pivo_pico"]       if (pivo_ligado    and em_pico_tarifa) else 0.0
+        pen_secador_pico    = cfg["pen_secador_pico"]    if (secador_ligado and em_pico_tarifa) else 0.0
+        bonus_pivo_solar    = cfg["bonus_pivo_solar"]    if (pivo_ligado    and sol_forte)      else 0.0
         bonus_sec_excedente = cfg["bonus_sec_excedente"] if (secador_ligado and excedente_ger)  else 0.0
-        bonus_bomba_offpeak = cfg["bonus_bomba_offpeak"] if (bomba_ligada  and not em_pico_tarifa) else 0.0
+        bonus_bomba_offpeak = cfg["bonus_bomba_offpeak"] if (bomba_ligada   and not em_pico_tarifa) else 0.0
+
+        # Bônus por carga solar (Incentivo para aproveitar o sol)
+        bonus_carga_solar = 0.0
+        if a_arm == 0 and saldo >= 0: # 0 = CARREGAR e saldo positivo (excedente)
+            bonus_carga_solar = bat_carga * cfg["w_bonus_carga"]
 
         # ── Reward cooperativo ────────────────────────────────────
         reward = (
@@ -262,9 +278,12 @@ class FazendaEnergyEnv:
             - pen_oper
             - pen_metas
             - pen_bomba_pico
+            - pen_pivo_pico
+            - pen_secador_pico
             + bonus_pivo_solar
             + bonus_sec_excedente
             + bonus_bomba_offpeak
+            + bonus_carga_solar
             + cfg["bonus_excedente"] * excedente * est["tarifa"]
             + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
         )
