@@ -78,7 +78,7 @@ CONFIG = {
     "pen_secador_pico"   : 8.0,  # secador ligado em pico tarifário (carga menor)
     "bonus_pivo_solar"   : 3.0,  # pivô operando em janela solar forte (≥15 kW)
     "bonus_sec_excedente": 2.0,  # secador com excedente de geração (≥5 kW após fixo)
-    "bonus_bomba_offpeak": 1.0,  # bomba captação fora do pico (reforço positivo)
+    "bonus_bomba_offpeak": 4.0,  # bomba captação fora do pico (reforço positivo)
 }
 
 # Tetos de consumo por decisão do Gerente de Carga

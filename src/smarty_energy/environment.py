@@ -242,7 +242,7 @@ class FazendaEnergyEnv:
                 pen_metas += cfg["pen_secador_meta"]
             if self.bomba_total_h < 6:  # Mínimo diário bomba (escalonado)
                 falta = 6 - self.bomba_total_h
-                pen_metas += cfg["pen_bomba_meta"] * (falta / 6)
+                pen_metas += cfg["pen_bomba_meta"] * (falta / 6) ** 2
 
         # ── Shaping: ponto ótimo de uso por máquina ───────────────
         # Pico tarifário (18-20h em tarifa azul → > 0.9 R$/kWh)
