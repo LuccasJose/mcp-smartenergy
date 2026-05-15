@@ -443,26 +443,23 @@ def plot_explorar_dia(
 
     # Consumo realizado pelo RL (stacked)
     bottom = np.zeros(24)
+    captacao_top = None
     for col, label, cor in zip(_maq_cols_real, _maq_labels, _maq_cores):
         vals = np.array([h.get(col, 0.0) for h in hist_r])
         ax.bar(horas, vals, bottom=bottom, label=label, color=cor, alpha=0.85, width=0.8)
         bottom += vals
+        if col == "captacao_kw_consumido":
+            captacao_top = bottom.copy()
     ax.axvspan(17.5, 20.5, alpha=0.1, color="orange")
 
-    # Marcadores acima da pilha — confirmam visualmente as horas ON da bomba e do pivô.
-    topo_max = float(np.max(bottom)) if bottom.size else 1.0
-    offset_b = topo_max * 0.06 + 0.5
-    offset_p = topo_max * 0.13 + 0.5
+    # Marcador do cronograma da bomba: triângulo acima das horas agendadas (h0-1, 6-7, 12-13, 21-22).
     sched_horas = [h for h, reg in enumerate(hist_r) if reg.get("bomba_agendada")]
-    pivo_horas  = [h for h, reg in enumerate(hist_r) if reg.get("pivo_kw_consumido", 0.0) > 0]
-    if sched_horas:
-        ax.scatter(sched_horas, [topo_max + offset_b] * len(sched_horas),
-                   marker="v", color="#2980b9", s=60, zorder=5,
-                   label=f"Bomba ON ({len(sched_horas)}h)")
-    if pivo_horas:
-        ax.scatter(pivo_horas, [topo_max + offset_p] * len(pivo_horas),
-                   marker="v", color="#e74c3c", s=60, zorder=5,
-                   label=f"Pivô ON ({len(pivo_horas)}h)")
+    if sched_horas and captacao_top is not None:
+        topo_max  = float(np.max(bottom)) if bottom.size else 1.0
+        offset    = topo_max * 0.06 + 0.5
+        sched_y   = [captacao_top[h] + offset for h in sched_horas]
+        ax.scatter(sched_horas, sched_y, marker="v", color="#2980b9",
+                   s=60, zorder=5, label="Bomba agendada")
 
     ax.set_title("Consumo REALIZADO pelo RL (kW)  —  cinza tracejado = demanda histórica")
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
