@@ -449,6 +449,21 @@ def plot_explorar_dia(
         bottom += vals
     ax.axvspan(17.5, 20.5, alpha=0.1, color="orange")
 
+    # Marcadores acima da pilha — confirmam visualmente as horas ON da bomba e do pivô.
+    topo_max = float(np.max(bottom)) if bottom.size else 1.0
+    offset_b = topo_max * 0.06 + 0.5
+    offset_p = topo_max * 0.13 + 0.5
+    sched_horas = [h for h, reg in enumerate(hist_r) if reg.get("bomba_agendada")]
+    pivo_horas  = [h for h, reg in enumerate(hist_r) if reg.get("pivo_kw_consumido", 0.0) > 0]
+    if sched_horas:
+        ax.scatter(sched_horas, [topo_max + offset_b] * len(sched_horas),
+                   marker="v", color="#2980b9", s=60, zorder=5,
+                   label=f"Bomba ON ({len(sched_horas)}h)")
+    if pivo_horas:
+        ax.scatter(pivo_horas, [topo_max + offset_p] * len(pivo_horas),
+                   marker="v", color="#e74c3c", s=60, zorder=5,
+                   label=f"Pivô ON ({len(pivo_horas)}h)")
+
     ax.set_title("Consumo REALIZADO pelo RL (kW)  —  cinza tracejado = demanda histórica")
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
     ax.legend(fontsize=7, loc="upper left"); ax.grid(axis="y", alpha=0.3)

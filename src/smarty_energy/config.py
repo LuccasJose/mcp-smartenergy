@@ -48,9 +48,9 @@ CONFIG = {
     "tarifa_estresse_limiar": 0.9, # R$/kWh acima disso é estresse alto
 
     # Metas Operacionais
-    "pivo_horas_alvo": 8,
-    "bomba_on_max": 2,
-    "bomba_off_min": 4,
+    "pivo_horas_alvo": 8,           # duração do ciclo travado de irrigação
+    "pivo_nominal_kw": 3.0,         # potência do pivô durante lock (override de dados)
+    "bomba_cap_nominal_kw": 15.0,   # potência da bomba durante hora agendada (override de dados)
     "secador_meta_kwh": 20.0,
     "sede_desvio_max": 0.20,     # 20%
 
@@ -66,20 +66,18 @@ CONFIG = {
     "bonus_soc_ok": 1.0,        # ↓ era 5.0: evita que agentes "gamifiquem" o SOC
 
     # Penalidades Operacionais (proporcionalmente reduzidas)
-    "pen_pivo_quebra": 12.0,    # ↓ era 25
-    "pen_bomba_ciclo": 8.0,     # ↓ era 15
-    "pen_bomba_meta": 100.0,    # penalidade escalonada por não atingir 6h/dia de bomba
-    "pen_secador_meta": 20.0,   # ↓ era 40
-    "pen_sede_desvio": 5.0,     # ↓ era 10
+    "pen_secador_meta": 20.0,   # fallback se rescue não alcançar (defensivo)
+    "pen_sede_desvio": 5.0,     # reservado para violações de clamp (defensivo)
 
     # Shaping por ponto ótimo de cada máquina
-    "pen_bomba_pico"     : 25.0, # ↑ era 15: bomba ligada em pico tarifário (>0.9 R$/kWh)
     "pen_pivo_pico"      : 18.0, # pivô ligado em pico tarifário
     "pen_secador_pico"   : 8.0,  # secador ligado em pico tarifário (carga menor)
     "bonus_pivo_solar"   : 3.0,  # pivô operando em janela solar forte (≥15 kW)
     "bonus_sec_excedente": 2.0,  # secador com excedente de geração (≥5 kW após fixo)
-    "bonus_bomba_offpeak": 4.0,  # bomba captação fora do pico (reforço positivo)
 }
 
 # Tetos de consumo por decisão do Gerente de Carga
 TETOS_KW = {0: 20.0, 1: 30.0, 2: 40.0}  # conservador / moderado / liberal
+
+# Cronograma fixo da bomba — 4 ciclos de 2h espaçados 6h, evitando pico (18-20h)
+BOMBA_HORAS_ON = frozenset({0, 1, 6, 7, 12, 13, 21, 22})
