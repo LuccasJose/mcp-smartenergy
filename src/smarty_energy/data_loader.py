@@ -4,9 +4,16 @@ import urllib.request
 import numpy as np
 import pandas as pd
 
-from .config import SHEET_ID
+from .config import SHEET_ID, DATA_PATH, ID_FAZENDA
 
 _EXPORT_URL = "https://docs.google.com/spreadsheets/d/{}/export?format=xlsx"
+
+# ── Mapeamento das cargas da base nova → colunas do ambiente ──────────
+# A base nova traz 7 cargas nomeadas por fazenda; o modelo opera com 4.
+_CARGA_PIVO     = "Pivô"
+_CARGA_CAPTACAO = "Bomba_Aux"                  # bomba auxiliar = captação
+_CARGAS_SILO    = ("Secadora", "Quadro_Auto")  # demais cargas agrícolas fixas
+_TIPO_SEDE      = "Sede"                       # Escritório + Cozinha + Quarto
 
 
 def _baixar_excel_drive(sheet_id: str) -> dict[str, pd.DataFrame]:
@@ -18,11 +25,20 @@ def _baixar_excel_drive(sheet_id: str) -> dict[str, pd.DataFrame]:
 
 
 def carregar_dados(path: str | None = None) -> tuple[list[pd.DataFrame], np.ndarray]:
-    """Carrega dados de geração, consumo e tarifa.
+    """Carrega dados de geração, consumo e tarifa da base nova.
 
-    Prioridade:
+    Prioridade da fonte:
         1. Google Sheets (se SHEET_ID configurado)
-        2. Arquivo local (path)
+        2. Arquivo local (path ou DATA_PATH)
+
+    A base nova contém duas fazendas (FAZ-001, FAZ-002); a fazenda usada
+    é definida por ID_FAZENDA no config.
+
+    Mapeamento de cargas (base nova → modelo):
+        pivo_kw     ← Pivô
+        captacao_kw ← Bomba_Aux
+        sede_kw     ← Escritório + Cozinha + Quarto (Tipo = "Sede")
+        silo_kw     ← Secadora + Quadro_Auto (demais cargas agrícolas)
 
     Retorna:
         dias      — lista de DataFrames, um por dia do mês, com colunas:
@@ -33,31 +49,40 @@ def carregar_dados(path: str | None = None) -> tuple[list[pd.DataFrame], np.ndar
     if SHEET_ID:
         xl = _baixar_excel_drive(SHEET_ID)
     else:
-        xl = pd.read_excel(path, sheet_name=None)
+        xl = pd.read_excel(path or DATA_PATH, sheet_name=None)
 
-    # Tarifa azul (pico 18h–21h)
-    t_row = xl["Tarifa"][xl["Tarifa"]["Tipo_Tarifa"] == "Tarifa azul"].iloc[0]
-    tarifa_24 = np.array([float(t_row[h]) for h in range(24)])
+    # ── Tarifa: curva horária única (Fora Ponta / Ponta) ──────────
+    tar = xl["Tarifa"].copy()
+    tar["_h"] = tar["Hora"].astype(str).str.slice(0, 2).astype(int)
+    tar = tar.sort_values("_h")
+    tarifa_24 = tar["Energia_R$/kWh"].to_numpy(dtype=float)
 
-    # Geração: fonte 6 = solar, 7 = eólico
+    # ── Geração: colunas Solar_kW / Eólica_kW ─────────────────────
     ger = xl["Geracao"].copy()
-    ger["Data"] = pd.to_datetime(ger["Data"])
+    ger = ger[ger["ID_Fazenda"] == ID_FAZENDA].copy()
+    ger["data"] = pd.to_datetime(ger["Data_Hora"]).dt.normalize()
 
-    # Cargas: 6 = pivô, 7 = captação, 8 = sede, 9 = silo
+    # ── Cargas: nomeadas por equipamento ──────────────────────────
     car = xl["Cargas"].copy()
-    car["Data"] = pd.to_datetime(car["Data"])
+    car = car[car["ID_Fazenda"] == ID_FAZENDA].copy()
+    car["data"] = pd.to_datetime(car["Data_Hora"]).dt.normalize()
+
+    if ger.empty or car.empty:
+        raise ValueError(f"Sem dados para a fazenda {ID_FAZENDA!r} na base.")
 
     dias = []
-    for data in sorted(ger["Data"].unique()):
-        g = ger[ger["Data"] == data]
-        c = car[car["Data"] == data]
+    for data in sorted(ger["data"].unique()):
+        g = ger[ger["data"] == data]
+        c = car[car["data"] == data]
 
-        solar    = g[g["ID_Fonte"] == 6].set_index("Hora")["Energia_Gerada_kWh"]
-        eolico   = g[g["ID_Fonte"] == 7].set_index("Hora")["Energia_Gerada_kWh"]
-        pivo     = c[c["ID_equipamento"] == 6].set_index("Hora")["Energia_Consumida_kWh"]
-        captacao = c[c["ID_equipamento"] == 7].set_index("Hora")["Energia_Consumida_kWh"]
-        sede     = c[c["ID_equipamento"] == 8].set_index("Hora")["Energia_Consumida_kWh"]
-        silo     = c[c["ID_equipamento"] == 9].set_index("Hora")["Energia_Consumida_kWh"]
+        solar    = g.set_index("Hora")["Solar_kW"]
+        eolico   = g.set_index("Hora")["Eólica_kW"]
+        pivo     = c[c["Carga"] == _CARGA_PIVO].set_index("Hora")["Consumo_kWh"]
+        captacao = c[c["Carga"] == _CARGA_CAPTACAO].set_index("Hora")["Consumo_kWh"]
+        silo     = (c[c["Carga"].isin(_CARGAS_SILO)]
+                    .groupby("Hora")["Consumo_kWh"].sum())
+        sede     = (c[c["Tipo"] == _TIPO_SEDE]
+                    .groupby("Hora")["Consumo_kWh"].sum())
 
         dia = pd.DataFrame({"hora": range(24)})
         dia["solar_kw"]    = dia["hora"].map(solar).fillna(0.0)

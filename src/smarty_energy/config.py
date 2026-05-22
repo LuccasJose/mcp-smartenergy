@@ -7,15 +7,16 @@ load_dotenv()
 # Caminhos resolvidos a partir da raiz do projeto
 _ROOT = Path(__file__).resolve().parents[2]
 
-# Google Sheets — ID extraído do link de compartilhamento
-SHEET_ID = os.getenv(
-    "SHEET_ID",
-    "1Ih71F74ugD7aZvHk8P56sYPXoClKcNZC1dWq2G5fdSk",
-)
+# Fonte de dados — por padrão usa o arquivo local da base nova.
+# Defina SHEET_ID (env) para baixar de um Google Sheets com o mesmo esquema.
+SHEET_ID = os.getenv("SHEET_ID", "")
 
-# Fallback local (usado apenas se SHEET_ID estiver vazio)
-DATA_PATH = _ROOT / os.getenv("DATA_PATH", "data/modelo_dados_gestao_energia_fazenda.xlsx")
+# Base de dados local (base nova — contém FAZ-001 e FAZ-002)
+DATA_PATH = _ROOT / os.getenv("DATA_PATH", "dados/base_nova.xlsx")
 OUTPUT_DIR = _ROOT / os.getenv("OUTPUT_DIR", "outputs")
+
+# Fazenda usada no modelo (a base nova traz duas: FAZ-001 e FAZ-002)
+ID_FAZENDA = os.getenv("ID_FAZENDA", "FAZ-002")
 
 # ──────────────────────────────────────────────────────────────
 # Parâmetros globais — ajuste aqui antes de rodar
