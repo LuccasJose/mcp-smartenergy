@@ -412,7 +412,11 @@ def plot_explorar_dia(
     ax.axvspan(17.5, 20.5, alpha=0.12, color="orange", label="Pico tarifário")
     ax.set_title(f"Custo por Hora  |  Heur R${ch:.2f}  →  RL R${cr:.2f}  ({delt:+.1f} %)")
     ax.set_xlabel("Hora"); ax.set_ylabel("R$")
-    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+    ax.set_xticks(range(24)); ax.set_xticklabels(range(24), fontsize=8)
+    ax.set_xlim(-0.6, 23.6)
+    ax.grid(axis="x", which="major", alpha=0.15, linestyle=":")
+    ax.grid(axis="y", alpha=0.3)
+    ax.legend(fontsize=8)
 
     # ── 2. Geração vs Consumo ─────────────────────────────────────
     ax = axes[0, 1]
@@ -423,6 +427,8 @@ def plot_explorar_dia(
     ax.axvspan(17.5, 20.5, alpha=0.12, color="orange")
     ax.set_title("Geração vs Consumo (kW)")
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
+    ax.set_xticks(range(0, 24, 2)); ax.set_xticklabels(range(0, 24, 2), fontsize=8)
+    ax.set_xlim(-0.6, 23.6)
     ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
     # ── 3. Uso REAL das máquinas pelo RL (stacked bars) ───────────
@@ -463,7 +469,12 @@ def plot_explorar_dia(
 
     ax.set_title("Consumo REALIZADO pelo RL (kW)  —  cinza tracejado = demanda histórica")
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
-    ax.legend(fontsize=7, loc="upper left"); ax.grid(axis="y", alpha=0.3)
+    ax.set_xticks(range(24))
+    ax.set_xticklabels(range(24), fontsize=8)
+    ax.set_xlim(-0.6, 23.6)
+    ax.grid(axis="x", which="major", alpha=0.15, linestyle=":")
+    ax.grid(axis="y", alpha=0.3)
+    ax.legend(fontsize=7, loc="upper left")
 
     # Métrica de confirmação: bomba/pivô/secador no pico (h18-20)
     # Colocada DENTRO do painel (canto sup. direito) com caixa para evitar
