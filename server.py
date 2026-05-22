@@ -1,470 +1,704 @@
 """
-MCP Server – SmartEnergy Q-Learning
-Expõe ferramentas para treinar, avaliar e monitorar o AgenteQL.
+MCP Server — SmartEnergy IQL (3 agentes Q-Learning cooperativos).
+
+Expõe ferramentas para configurar, treinar, avaliar e diagnosticar o
+sistema multi-agente que espelha o projeto Smart_Energy (FazendaEnergyEnv).
+
+Dataset é baixado do Google Sheets na inicialização. SOC propaga entre
+episódios (default), refletindo a continuidade real entre dias.
 """
 
 import json
-import sys
 import os
+import sys
 
-# garante que imports relativos funcionem ao executar via mcp run
 sys.path.insert(0, os.path.dirname(__file__))
 
 from mcp.server.fastmcp import FastMCP
 
-from environment.energy_env import EnergyEnvironment
-from environment.scenarios import identificar_cenarios, stats_por_cenario
-from agents.qlearning_agent import AgenteQL
-from agents.baselines import AgenteHeuristico, SemAgente
+from config import (
+    CONFIG, TETOS_KW, BOMBA_HORAS_ON, ID_FAZENDA,
+    N_ACOES_ARMAZENAMENTO, N_ACOES_CONSUMO, N_ACOES_GERENTE,
+    N_ESTADOS_TOTAL,
+)
+from environment.data_loader import carregar_dados
+from environment.energy_env import FazendaEnergyEnv
+from environment.scenarios import identificar_cenarios, classificar_dia
+from agents.qlearning_agent import IQLSystem
+from agents.baselines import AgentesHeuristicos, SemAgente
 from metrics.tracker import MetricsTracker
-from config import DEFAULT_HYPERPARAMS
+
 
 # ------------------------------------------------------------------ #
 # Estado global do servidor                                            #
 # ------------------------------------------------------------------ #
 
-env = EnergyEnvironment()
-agent = AgenteQL(**DEFAULT_HYPERPARAMS)
-heuristico = AgenteHeuristico()
-sem_agente = SemAgente()
+print("Baixando dataset do Google Sheets...", file=sys.stderr)
+DIAS, TARIFA_24H, DATASET_META = carregar_dados()
+print(f"  {len(DIAS)} dias carregados (fazenda {DATASET_META['id_fazenda']}).",
+      file=sys.stderr)
+
+iql = IQLSystem(CONFIG)
+heuristico = AgentesHeuristicos(CONFIG)
+sem_agente = SemAgente(CONFIG)
 tracker = MetricsTracker()
+
+# Env "atual" usado por get_current_state e step_environment (dia 0 por default).
+_dia_atual_idx = 0
+env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
 
 mcp = FastMCP("mcpsmartenergy")
 
 
+def _err(e: Exception) -> str:
+    return json.dumps({"erro": f"{type(e).__name__}: {e}"}, indent=2, default=str)
+
+
 # ------------------------------------------------------------------ #
-# Ferramentas: configuração                                            #
+# Configuração                                                         #
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
-def configure_agent(
-    n_episodios: int = DEFAULT_HYPERPARAMS["n_episodios"],
-    alpha: float = DEFAULT_HYPERPARAMS["alpha"],
-    gamma: float = DEFAULT_HYPERPARAMS["gamma"],
-    beta: float = DEFAULT_HYPERPARAMS["beta"],
-    epsilon_inicial: float = DEFAULT_HYPERPARAMS["epsilon_inicial"],
-    epsilon_final: float = DEFAULT_HYPERPARAMS["epsilon_final"],
-    epsilon_decay: float = DEFAULT_HYPERPARAMS["epsilon_decay"],
+def configure_agents(
+    n_episodios: int | None = None,
+    alpha: float | None = None,
+    gamma: float | None = None,
+    beta: float | None = None,
+    epsilon_inicial: float | None = None,
+    epsilon_final: float | None = None,
+    epsilon_decay: float | None = None,
 ) -> str:
-    """
-    Reconfigura e reinicia o AgenteQL com novos hiperparâmetros.
+    """Atualiza hiperparâmetros dos 3 agentes IQL (sem destruir Q-tables).
 
-    Hiperparâmetros:
-    - n_episodios: episódios de treino
-    - alpha: taxa de aprendizado otimista (atualizações positivas)
-    - gamma: fator de desconto
-    - beta: taxa de aprendizado pessimista — deve ser << alpha (hysteretic)
-    - epsilon_inicial / epsilon_final / epsilon_decay: exploração ε-greedy
+    Use `reset_environment(reset_agents=True)` para também zerar as Q-tables.
+    Parâmetros omitidos mantêm o valor atual.
     """
     try:
-        if not (0.0 < alpha <= 1.0):
-            return json.dumps({"erro": "alpha deve estar em (0, 1]"}, indent=2)
-        if not (0.0 < beta <= alpha):
-            return json.dumps({"erro": "beta deve estar em (0, alpha] para hysteretic"}, indent=2)
-        if not (0.0 < gamma < 1.0):
-            return json.dumps({"erro": "gamma deve estar em (0, 1)"}, indent=2)
-        global agent
-        agent = AgenteQL(
-            n_episodios=n_episodios,
-            alpha=alpha,
-            gamma=gamma,
-            beta=beta,
-            epsilon_inicial=epsilon_inicial,
-            epsilon_final=epsilon_final,
-            epsilon_decay=epsilon_decay,
-        )
+        novos = {}
+        if n_episodios is not None:
+            if n_episodios < 1:
+                return json.dumps({"erro": "n_episodios deve ser >= 1"}, indent=2)
+            novos["n_episodios"] = n_episodios
+        if alpha is not None:
+            if not (0.0 < alpha <= 1.0):
+                return json.dumps({"erro": "alpha em (0, 1]"}, indent=2)
+            novos["alpha"] = alpha
+        if beta is not None:
+            if not (0.0 < beta <= 1.0):
+                return json.dumps({"erro": "beta em (0, 1]"}, indent=2)
+            novos["beta"] = beta
+        if gamma is not None:
+            if not (0.0 < gamma < 1.0):
+                return json.dumps({"erro": "gamma em (0, 1)"}, indent=2)
+            novos["gamma"] = gamma
+        if epsilon_inicial is not None: novos["epsilon_inicial"] = epsilon_inicial
+        if epsilon_final is not None:   novos["epsilon_final"]   = epsilon_final
+        if epsilon_decay is not None:   novos["epsilon_decay"]   = epsilon_decay
+
+        iql.reconfigurar(novos)
         return json.dumps({
-            "status": "agente recriado",
-            "hiperparametros": {
-                "n_episodios": n_episodios,
-                "alpha": alpha,
-                "gamma": gamma,
-                "beta": beta,
-                "epsilon_inicial": epsilon_inicial,
-                "epsilon_final": epsilon_final,
-                "epsilon_decay": epsilon_decay,
-            },
+            "status": "agentes reconfigurados",
+            "hiperparametros_atuais": {n: iql.agentes[n].get_info()
+                                        for n in iql.agentes},
+            "n_episodios": iql.n_episodios,
         }, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
 
 
 # ------------------------------------------------------------------ #
-# Ferramentas: treino                                                  #
+# Treino                                                                #
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
-def train_agent(n_episodios: int = 0) -> str:
-    """
-    Treina o AgenteQL por N episódios (usa config do agente se n_episodios=0).
-    Registra rewards_hist, custos_hist e epsilons no tracker.
-    Retorna sumário do treino.
+def train_agents(n_episodios: int = 0) -> str:
+    """Treina os 3 agentes IQL com reward cooperativo.
+
+    Dias percorridos sequencialmente com wrap-around. SOC propaga entre
+    episódios (continuidade real). Use n_episodios=0 para usar o configurado.
     """
     try:
-        tracker.limpar("ql_treino")
+        tracker.limpar("iql_treino")
         if n_episodios > 0:
-            agent.n_episodios = n_episodios
-        sumario = agent.train(env, tracker=tracker)
+            iql.n_episodios = n_episodios
+        sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv, tracker=tracker)
         return json.dumps(sumario, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
 
 
 # ------------------------------------------------------------------ #
-# Ferramentas: avaliação                                               #
+# Avaliação                                                             #
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
-def evaluate_agent(n_dias: int = 30) -> str:
-    """
-    Avalia a política aprendida (greedy, sem exploração) por n_dias.
-    Retorna métricas mensais: custo médio, rede, violações SOC, reward.
+def evaluate_agents(n_dias: int = 30, propagar_soc: bool = True) -> str:
+    """Avalia o IQL em modo greedy por n_dias percorrendo o dataset.
+
+    propagar_soc=True (default) mantém o SOC final como inicial do próximo
+    dia, refletindo continuidade real. False reseta para soc_inicial em
+    cada dia (útil para diagnóstico isolado).
     """
     try:
-        tracker.limpar("ql_eval")
-        resultado = agent.evaluate(env, n_dias=n_dias, tracker=tracker)
+        tracker.limpar("iql_eval")
+        resultado = iql.avaliar(
+            DIAS, TARIFA_24H, FazendaEnergyEnv,
+            n_dias=n_dias, tracker=tracker, propagar_soc=propagar_soc,
+        )
         return json.dumps(resultado, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
 
 
 @mcp.tool()
-def compare_strategies(n_dias: int = 30) -> str:
-    """
-    Compara RL (AgenteQL) vs Heurístico vs Sem Agente em n_dias.
-    Cada agente usa ambiente independente com seed=42 — mesma sequência de dias.
-    Retorna custo médio, rede média, violações SOC e reward para cada estratégia.
+def compare_strategies(n_dias: int = 30, propagar_soc: bool = True) -> str:
+    """Compara IQL vs Heurístico vs SemAgente nos mesmos n_dias do dataset.
+
+    Cada estratégia roda independentemente sobre as mesmas datas e a mesma
+    sequência de SOC inicial. Popula tracker com chaves 'iql_eval_cmp',
+    'heuristico', 'sem_agente'.
     """
     try:
-        # Cada agente recebe um env separado com a mesma seed para comparação justa
-        resultados = {
-            "RL (AgenteQL)": agent.evaluate(EnergyEnvironment(seed=42), n_dias=n_dias),
-            "Heuristico": heuristico.evaluate(EnergyEnvironment(seed=42), n_dias=n_dias),
-            "SemAgente": sem_agente.evaluate(EnergyEnvironment(seed=42), n_dias=n_dias),
-        }
+        tracker.limpar("iql_eval")
+        tracker.limpar("iql_eval_cmp")
+        tracker.limpar("heuristico")
+        tracker.limpar("sem_agente")
 
-        custo_rl = resultados["RL (AgenteQL)"]["custo_medio_dia_rs"]
-        custo_sem = resultados["SemAgente"]["custo_medio_dia_rs"]
+        r_iql  = iql.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
+                              n_dias=n_dias, tracker=tracker,
+                              propagar_soc=propagar_soc)
+        # iql escreve em 'iql_eval'; renomeia para não conflitar
+        tracker.passos["iql_eval_cmp"]     = tracker.passos.pop("iql_eval", [])
+        tracker.episodios["iql_eval_cmp"]  = tracker.episodios.pop("iql_eval", [])
+
+        r_heur = heuristico.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
+                                     n_dias=n_dias, tracker=tracker,
+                                     tracker_key="heuristico",
+                                     propagar_soc=propagar_soc)
+        r_sem  = sem_agente.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
+                                     n_dias=n_dias, tracker=tracker,
+                                     tracker_key="sem_agente",
+                                     propagar_soc=propagar_soc)
+
+        resultados = {
+            "IQL":        r_iql,
+            "Heuristico": r_heur,
+            "SemAgente":  r_sem,
+            "tracker_keys": ["iql_eval_cmp", "heuristico", "sem_agente"],
+        }
+        custo_iql, custo_heur, custo_sem = (r["custo_medio_dia_rs"]
+                                             for r in (r_iql, r_heur, r_sem))
         if custo_sem > 0:
-            reducao_pct = (custo_sem - custo_rl) / custo_sem * 100
-            resultados["reducao_custo_rl_vs_sem_agente_pct"] = round(reducao_pct, 2)
+            resultados["reducao_iql_vs_sem_pct"]  = round(
+                (custo_sem - custo_iql) / custo_sem * 100, 2)
+            resultados["reducao_iql_vs_heur_pct"] = round(
+                (custo_heur - custo_iql) / custo_heur * 100, 2) if custo_heur > 0 else None
 
         return json.dumps(resultados, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
+
+
+@mcp.tool()
+def run_episode(mode: str = "eval", dia_idx: int | None = None) -> str:
+    """Executa 1 dia completo e retorna o trace hora-a-hora.
+
+    mode: "eval" (greedy) ou "train" (ε-greedy com aprendizado online)
+    dia_idx: índice do dia no dataset (None = dia atual selecionado)
+    """
+    try:
+        idx = _dia_atual_idx if dia_idx is None else int(dia_idx)
+        if not (0 <= idx < len(DIAS)):
+            return json.dumps({"erro": f"dia_idx fora do range [0, {len(DIAS)-1}]"}, indent=2)
+
+        tracker.limpar("iql_trace")
+        e = FazendaEnergyEnv(DIAS[idx], TARIFA_24H, CONFIG)
+        est = e.reset(soc_inicial=iql.soc_propagado)
+        s = e.discretizar(est)
+
+        explore = mode == "train"
+        reward_total = 0.0
+        custo_total  = 0.0
+
+        for _ in range(24):
+            acoes = iql.agir_todos(s, explorando=explore)
+            prox, reward, done, info = e.step(*acoes)
+            s2 = e.discretizar(prox)
+            if explore:
+                iql.aprender_todos(s, acoes, reward, s2, done)
+            s = s2
+            tracker.registrar_passo(info, agente="iql_trace")
+            reward_total += reward
+            custo_total  += info["custo_r"]
+
+        return json.dumps({
+            "mode": mode,
+            "dia_idx": idx,
+            "data": DATASET_META.get("data_inicio") if idx == 0 else str(DIAS[idx]["data"].iloc[0])[:10],
+            "cenario": classificar_dia(idx, DIAS),
+            "reward_total": round(reward_total, 4),
+            "custo_total_rs": round(custo_total, 4),
+            "soc_final_pct": round(e.soc, 2),
+            "trace": tracker.get_trace_ultimo_episodio("iql_trace"),
+        }, indent=2, default=str)
+    except Exception as e:
+        return _err(e)
 
 
 # ------------------------------------------------------------------ #
-# Ferramentas: métricas de treino                                      #
+# Métricas                                                              #
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
 def get_training_metrics() -> str:
-    """
-    Retorna métricas completas do último treino:
-    rewards_hist, custos_hist, epsilons, médias e convergência.
-    """
-    metricas = tracker.get_training_metrics("ql_treino")
-    qtable = agent.get_qtable_info()
-    return json.dumps({"treino": metricas, "qtable": qtable}, indent=2)
+    """Métricas do último treino: rewards/custos/epsilons + info dos 3 agentes."""
+    return json.dumps({
+        "treino": tracker.get_training_metrics("iql_treino"),
+        "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
+    }, indent=2)
 
 
 @mcp.tool()
-def get_qtable_info() -> str:
-    """
-    Retorna estatísticas da Q-table:
-    - n_estados: estados distintos visitados
-    - n_updates: total de atualizações Q-learning aplicadas
-    - epsilon: taxa de exploração atual
-    - hiperparâmetros configurados
-    """
-    return json.dumps(agent.get_qtable_info(), indent=2)
+def get_qtables_info() -> str:
+    """Estatísticas das Q-tables dos 3 agentes IQL."""
+    return json.dumps({n: ag.get_info() for n, ag in iql.agentes.items()}, indent=2)
 
 
 @mcp.tool()
 def get_learning_curve(janela_media_movel: int = 20) -> str:
-    """
-    Retorna dados para a curva de aprendizado:
-    reward e custo por episódio com média móvel.
-    Útil para visualizar convergência do agente.
-    """
-    curva = tracker.get_learning_curve("ql_treino", janela=janela_media_movel)
-    return json.dumps(curva, indent=2)
-
-
-# ------------------------------------------------------------------ #
-# Ferramentas: avaliação detalhada                                     #
-# ------------------------------------------------------------------ #
-
-@mcp.tool()
-def get_eval_metrics() -> str:
-    """
-    Retorna métricas detalhadas da última avaliação:
-    custo, rede, violações SOC/PCC, kWh cortado, reward.
-    """
-    metricas = tracker.get_eval_metrics("ql_eval")
-    return json.dumps(metricas, indent=2)
+    """Curva de aprendizado (reward e custo por episódio com média móvel)."""
+    return json.dumps(tracker.get_learning_curve("iql_treino",
+                                                  janela=janela_media_movel), indent=2)
 
 
 @mcp.tool()
-def get_peak_offpeak_stats() -> str:
+def get_eval_metrics(agente: str = "iql_eval") -> str:
+    """Métricas da última avaliação.
+
+    `agente`: "iql_eval" (default), "iql_eval_cmp", "heuristico", "sem_agente".
     """
-    Retorna consumo de pivô, bomba e secador separado por
-    período de pico e fora de pico (kWh e R$).
+    return json.dumps(tracker.get_eval_metrics(agente), indent=2)
+
+
+@mcp.tool()
+def get_peak_offpeak_stats(agente: str = "iql_eval") -> str:
+    """Consumo por carga separado por período tarifário (pico vs fora-pico)."""
+    return json.dumps(tracker.get_peak_offpeak_stats(agente), indent=2)
+
+
+@mcp.tool()
+def get_stats_por_cenario(agente: str = "iql_eval") -> str:
+    """Reward/custo médio por cenário climático (NUBLADO/ENSOLARADO/ALTO CONSUMO/EQUILIBRADO).
+
+    Como o env real não classifica cenário automaticamente, o tracker
+    armazena 'REAL'; para uma análise por cenário use identify_scenarios
+    com um trace específico.
     """
-    stats = tracker.get_peak_offpeak_stats("ql_eval")
-    return json.dumps(stats, indent=2)
+    return json.dumps(tracker.get_stats_por_cenario(agente), indent=2)
+
+
+@mcp.tool()
+def get_hourly_violations(agente: str = "iql_eval") -> str:
+    """Violações (SOC, PCC, teto) agregadas por hora-do-dia.
+
+    Útil para o LLM-juiz identificar em quais horas a política falha mais.
+    """
+    return json.dumps(tracker.get_hourly_violations(agente), indent=2)
 
 
 # ------------------------------------------------------------------ #
-# Ferramentas: cenários                                                #
+# Cenários e dataset                                                    #
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
-def identify_scenario() -> str:
-    """
-    Identifica o cenário do último dia simulado:
-    NUBLADO / ENSOLARADO / ALTO CONSUMO / EQUILIBRADO.
-    """
-    estado = env.get_full_state()
+def identify_scenarios() -> str:
+    """Índices dos 3 dias extremos do dataset (nublado/ensolarado/alto_consumo)."""
+    cen = identificar_cenarios(DIAS)
+    enriquecido = {}
+    for nome, idx in cen.items():
+        dia = DIAS[idx]
+        enriquecido[nome] = {
+            "dia_idx": idx,
+            "data": str(dia["data"].iloc[0])[:10],
+            "geracao_total_kwh": round(float(dia["solar_kw"].sum() + dia["eolico_kw"].sum()), 2),
+            "consumo_total_kwh": round(float((dia["pivo_kw"] + dia["captacao_kw"]
+                                              + dia["sede_kw"] + dia["silo_kw"]).sum()), 2),
+            "categoria": classificar_dia(idx, DIAS),
+        }
+    return json.dumps(enriquecido, indent=2)
+
+
+@mcp.tool()
+def get_dataset_info() -> str:
+    """Informações sobre o dataset carregado (fazenda, n_dias, range de datas, tarifa)."""
     return json.dumps({
-        "cenario": estado["cenario_dia"],
-        "solar_media_kw": round(float(env.solar_media_dia), 2),
-        "consumo_medio_kw": round(float(env.consumo_medio_dia), 2),
+        **DATASET_META,
+        "tarifa_horaria_rs_kwh": [round(float(t), 4) for t in TARIFA_24H],
+        "horas_pico_tarifa": [int(h) for h in range(24) if TARIFA_24H[h] > 0.9],
     }, indent=2)
 
 
 @mcp.tool()
-def get_stats_por_cenario() -> str:
-    """
-    Retorna reward médio e custo médio por cenário
-    (NUBLADO, ENSOLARADO, ALTO CONSUMO, EQUILIBRADO).
-    """
-    stats = tracker.get_stats_por_cenario("ql_eval")
-    return json.dumps(stats, indent=2)
+def select_day(dia_idx: int) -> str:
+    """Seleciona um dia específico do dataset para get_current_state / step_environment."""
+    try:
+        global _dia_atual_idx, env
+        if not (0 <= dia_idx < len(DIAS)):
+            return json.dumps({"erro": f"dia_idx fora de [0, {len(DIAS)-1}]"}, indent=2)
+        _dia_atual_idx = dia_idx
+        env = FazendaEnergyEnv(DIAS[dia_idx], TARIFA_24H, CONFIG)
+        return json.dumps({
+            "status": "dia selecionado",
+            "dia_idx": dia_idx,
+            "data": str(DIAS[dia_idx]["data"].iloc[0])[:10],
+            "categoria": classificar_dia(dia_idx, DIAS),
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
 
 
 # ------------------------------------------------------------------ #
-# Ferramentas: episódio manual                                         #
-# ------------------------------------------------------------------ #
-
-@mcp.tool()
-def run_episode(mode: str = "eval") -> str:
-    """
-    Executa um episódio completo (24h) e retorna o trace hora-a-hora.
-
-    mode: "train" (com exploração) | "eval" (política greedy)
-
-    O trace inclui todos os campos de estado físico, energético,
-    financeiro, ações e violações para cada hora do dia.
-    """
-    agente_key = "ql_trace"
-    tracker.limpar(agente_key)
-
-    obs = env.reset()
-    state = agent.discretize(obs)
-    done = False
-    explore = mode == "train"
-    reward_total = 0.0
-    custo_total = 0.0
-
-    while not done:
-        action_id = agent.choose_action(state, explore=explore)
-        a_arm, a_cons, a_ger = agent.decode_action(action_id)
-        next_obs, reward, done, info = env.step(a_arm, a_cons, a_ger)
-
-        if explore:
-            next_state = agent.discretize(next_obs)
-            agent.update(state, action_id, reward, next_state, done)
-            state = next_state
-        else:
-            state = agent.discretize(next_obs)
-
-        tracker.registrar_passo(info, agente=agente_key)
-        reward_total += reward
-        custo_total += info["custo_r"]
-
-    trace = tracker.get_trace_ultimo_episodio(agente_key)
-    return json.dumps({
-        "mode": mode,
-        "reward_total": round(reward_total, 4),
-        "custo_total_rs": round(custo_total, 4),
-        "cenario": getattr(env, "cenario_dia", "EQUILIBRADO"),
-        "trace": trace,
-    }, indent=2)
-
-
-# ------------------------------------------------------------------ #
-# Ferramentas: estado do ambiente                                      #
+# Ambiente                                                              #
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
 def get_current_state() -> str:
-    """
-    Retorna o estado atual do ambiente (hora, SOC, tarifas, geração prevista).
-    """
-    return json.dumps(env.get_full_state(), indent=2)
-
-
-@mcp.tool()
-def reset_environment(reset_agent: bool = False) -> str:
-    """
-    Reinicia o ambiente para um novo dia.
-    Se reset_agent=True, apaga a Q-table e o histórico do agente.
-    """
-    env.reset()
-    if reset_agent:
-        global agent
-        params = {
-            "n_episodios": agent.n_episodios,
-            "alpha": agent.alpha,
-            "gamma": agent.gamma,
-            "beta": agent.beta,
-            "epsilon_inicial": agent.epsilon_inicial,
-            "epsilon_final": agent.epsilon_final,
-            "epsilon_decay": agent.epsilon_decay,
-        }
-        agent = AgenteQL(**params)
-        tracker.limpar()
-
+    """Estado atual do env (dia selecionado, hora corrente)."""
     return json.dumps({
-        "status": "ambiente reiniciado",
-        "agente_reiniciado": reset_agent,
-        "estado": env.get_full_state(),
+        "dia_idx": _dia_atual_idx,
+        "data": str(DIAS[_dia_atual_idx]["data"].iloc[0])[:10],
+        **{k: (round(float(v), 4) if isinstance(v, (int, float)) else v)
+           for k, v in env.get_full_state().items()},
     }, indent=2)
 
 
+@mcp.tool()
+def reset_environment(reset_agents: bool = False, dia_idx: int | None = None) -> str:
+    """Reinicia o env (e opcionalmente as Q-tables).
+
+    Se dia_idx for fornecido, troca o dia selecionado. SOC inicial vem do
+    soc_propagado mantido pelo IQLSystem.
+    """
+    try:
+        global env, _dia_atual_idx
+        if dia_idx is not None:
+            if not (0 <= dia_idx < len(DIAS)):
+                return json.dumps({"erro": f"dia_idx fora de [0, {len(DIAS)-1}]"}, indent=2)
+            _dia_atual_idx = dia_idx
+        env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+        env.reset(soc_inicial=iql.soc_propagado)
+
+        if reset_agents:
+            iql.reset_qtables()
+            tracker.limpar()
+
+        return json.dumps({
+            "status": "ambiente reiniciado",
+            "agentes_reiniciados": reset_agents,
+            "dia_idx": _dia_atual_idx,
+            "estado": {k: (round(float(v), 4) if isinstance(v, (int, float)) else v)
+                       for k, v in env.get_full_state().items()},
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
 # ------------------------------------------------------------------ #
-# Ferramentas: integração com agente externo                           #
+# Integração com agente externo                                         #
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
 def get_observation() -> str:
-    """
-    Retorna a observação atual do ambiente junto com o estado discretizado.
-    Use antes de step_environment para que um agente externo consulte sua Q-table.
-
-    Campos retornados:
-    - obs: dicionário de observação (hora, soc, geracao_kw, ...)
-    - state_discrete: tupla (hora, soc_b, pico, ger_b, cons_b, bomba_b)
-    - state_index: representação string da tupla para lookup em JSON
-    """
+    """Observação atual + estado discretizado para um agente externo."""
     try:
-        obs = env._get_obs()
-        state = agent.discretize(obs)
+        est = env._estado()
+        s = env.discretizar(est)
         return json.dumps({
-            "obs": {k: (bool(v) if isinstance(v, bool) else v) for k, v in obs.items()},
-            "state_discrete": list(state),
-            "state_index": str(state),
+            "obs": {k: (bool(v) if isinstance(v, bool) else
+                        round(float(v), 4) if isinstance(v, (int, float)) else v)
+                    for k, v in est.items()},
+            "state_discrete": list(s),
+            "state_index": str(s),
         }, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
 
 
 @mcp.tool()
 def step_environment(a_arm: int, a_cons: int, a_ger: int) -> str:
-    """
-    Executa um único passo no ambiente com as ações fornecidas.
-    Retorna (obs, reward, done, info) — interface primária para agente externo.
+    """Avança 1 hora no env atual com as 3 ações fornecidas.
 
-    Ações:
-    - a_arm: 0=carregar, 1=manter, 2=descarregar
-    - a_cons: bitmask 3 bits — bit0=cortar_pivô, bit1=cortar_bomba, bit2=cortar_secador
-    - a_ger: 0=conservador (teto 20kW), 1=moderado (35kW), 2=liberal (55kW)
+    a_arm: 0=carregar, 1=manter, 2=descarregar
+    a_cons: bitmask 3 bits (bit0=corta pivô, bit1=corta bomba, bit2=corta secador)
+    a_ger: 0=conservador(20kW), 1=moderado(30kW), 2=liberal(40kW)
     """
     try:
         if a_arm not in (0, 1, 2):
-            return json.dumps({"erro": f"a_arm inválido: {a_arm} (esperado 0-2)"}, indent=2)
+            return json.dumps({"erro": f"a_arm inválido: {a_arm}"}, indent=2)
         if not (0 <= a_cons <= 7):
-            return json.dumps({"erro": f"a_cons inválido: {a_cons} (esperado 0-7)"}, indent=2)
+            return json.dumps({"erro": f"a_cons inválido: {a_cons}"}, indent=2)
         if a_ger not in (0, 1, 2):
-            return json.dumps({"erro": f"a_ger inválido: {a_ger} (esperado 0-2)"}, indent=2)
+            return json.dumps({"erro": f"a_ger inválido: {a_ger}"}, indent=2)
 
-        next_obs, reward, done, info = env.step(a_arm, a_cons, a_ger)
-        next_state = agent.discretize(next_obs)
-
+        prox, reward, done, info = env.step(a_arm, a_cons, a_ger)
+        s2 = env.discretizar(prox)
         return json.dumps({
             "reward": round(reward, 6),
             "done": done,
-            "next_state_discrete": list(next_state),
-            "next_state_index": str(next_state),
-            "obs": {k: (bool(v) if isinstance(v, bool) else v) for k, v in next_obs.items()},
-            "info": {k: (bool(v) if isinstance(v, bool) else round(v, 6) if isinstance(v, float) else v)
+            "next_state_discrete": list(s2),
+            "obs": {k: (bool(v) if isinstance(v, bool) else
+                        round(float(v), 4) if isinstance(v, (int, float)) else v)
+                    for k, v in prox.items()},
+            "info": {k: (bool(v) if isinstance(v, bool) else
+                         round(float(v), 6) if isinstance(v, (int, float)) else v)
                      for k, v in info.items()},
         }, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
 
 
 @mcp.tool()
-def get_action(explore: bool = False) -> str:
-    """
-    Retorna a ação escolhida pelo AgenteQL para o estado atual do ambiente.
-    explore=False usa política greedy; explore=True usa ε-greedy.
-    Retorna action_id, (a_arm, a_cons, a_ger) e Q-values das top-5 ações.
-    """
+def get_actions(explore: bool = False) -> str:
+    """Ações escolhidas pelos 3 agentes IQL para o estado atual + Q-values."""
     try:
-        obs = env._get_obs()
-        state = agent.discretize(obs)
-        action_id = agent.choose_action(state, explore=explore)
-        a_arm, a_cons, a_ger = agent.decode_action(action_id)
-        q_vals = agent.q_table[state]
-        top5 = sorted(enumerate(q_vals.tolist()), key=lambda x: -x[1])[:5]
-        return json.dumps({
-            "action_id": action_id,
-            "a_arm": a_arm,
-            "a_cons": a_cons,
-            "a_ger": a_ger,
-            "q_value": round(float(q_vals[action_id]), 6),
-            "explore_mode": explore,
-            "epsilon": round(agent.epsilon, 4),
-            "top5_actions": [{"action_id": aid, "q": round(q, 6)} for aid, q in top5],
-        }, indent=2)
+        est = env._estado()
+        s = env.discretizar(est)
+        out = {"state_discrete": list(s)}
+        for nome, ag in iql.agentes.items():
+            a = ag.agir(s, explorando=explore)
+            q = ag.q_table[s]
+            top = sorted(enumerate(q.tolist()), key=lambda x: -x[1])[:3]
+            out[nome] = {
+                "action": a,
+                "q_value": round(float(q[a]), 6),
+                "top_actions": [{"a": aid, "q": round(qv, 6)} for aid, qv in top],
+                "epsilon": round(ag.epsilon, 4),
+            }
+        return json.dumps(out, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
 
 
 @mcp.tool()
-def save_qtable(filepath: str = "qtable.json") -> str:
-    """
-    Salva a Q-table treinada em um arquivo JSON para persistência ou transferência.
-    O arquivo pode ser recarregado com load_qtable.
-    """
+def save_qtables(dir_path: str = "qtables") -> str:
+    """Salva as 3 Q-tables (uma por agente) em arquivos pickle."""
     try:
-        agent.save_qtable(filepath)
+        iql.save_all(dir_path)
         return json.dumps({
-            "status": "Q-table salva",
-            "filepath": filepath,
-            "n_estados": len(agent.q_table),
-            "n_updates": agent.n_updates,
+            "status": "Q-tables salvas",
+            "dir": dir_path,
+            "arquivos": [f"qtable_{n}.pkl" for n in iql.agentes],
         }, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
 
 
 @mcp.tool()
-def load_qtable(filepath: str = "qtable.json") -> str:
-    """
-    Carrega uma Q-table previamente salva com save_qtable.
-    Restaura os Q-values e epsilon do agente.
-    """
+def load_qtables(dir_path: str = "qtables") -> str:
+    """Carrega Q-tables previamente salvas com save_qtables."""
     try:
-        agent.load_qtable(filepath)
+        iql.load_all(dir_path)
         return json.dumps({
-            "status": "Q-table carregada",
-            "filepath": filepath,
-            "n_estados": len(agent.q_table),
-            "n_updates": agent.n_updates,
-            "epsilon": round(agent.epsilon, 4),
+            "status": "Q-tables carregadas",
+            "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
         }, indent=2)
-    except FileNotFoundError:
-        return json.dumps({"erro": f"Arquivo não encontrado: {filepath}"}, indent=2)
     except Exception as e:
-        return json.dumps({"erro": str(e)}, indent=2)
+        return _err(e)
+
+
+@mcp.tool()
+def get_financeiro_state() -> str:
+    """Estado atual do AgenteFinanceiro do env: saldo de créditos + estresse atual."""
+    try:
+        est = env._estado()
+        return json.dumps({
+            "saldo_creditos_kwh": round(float(env.fin.saldo_creditos), 4),
+            "estresse_atual": round(float(est["stress"]), 2),
+            "tarifa_atual_rs_kwh": round(float(est["tarifa"]), 4),
+            "em_pico_tarifa": est["em_pico_tarifa"],
+            "credito_inicial_kwh": CONFIG["credito_inicial_kwh"],
+            "tarifa_estresse_limiar_rs_kwh": CONFIG["tarifa_estresse_limiar"],
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
 
 
 # ------------------------------------------------------------------ #
-# Entrada                                                              #
+# Diagnóstico consolidado e schema                                      #
+# ------------------------------------------------------------------ #
+
+@mcp.tool()
+def health_report() -> str:
+    """Payload consolidado para um LLM avaliar o sistema:
+    - cobertura das 3 Q-tables / TD-error recente
+    - sumário do último treino
+    - sumário da última avaliação
+    - comparação IQL vs baselines (se compare_strategies foi rodado)
+    - alertas heurísticos
+    """
+    try:
+        info_ags = {n: ag.get_info() for n, ag in iql.agentes.items()}
+        cobertura = {n: round(info["n_estados_visitados"] / N_ESTADOS_TOTAL * 100, 2)
+                     for n, info in info_ags.items()}
+
+        treino = tracker.get_training_metrics("iql_treino")
+        treino_resumo = {k: v for k, v in treino.items()
+                         if k not in ("rewards_hist", "custos_hist", "epsilons")}
+
+        eval_iql  = tracker.get_eval_metrics("iql_eval")
+        eval_cmp  = tracker.get_eval_metrics("iql_eval_cmp")
+        eval_heur = tracker.get_eval_metrics("heuristico")
+        eval_sem  = tracker.get_eval_metrics("sem_agente")
+
+        comparacao = None
+        if all("custo_medio_dia_rs" in m for m in (eval_cmp, eval_heur, eval_sem)):
+            c_iql, c_heur, c_sem = (m["custo_medio_dia_rs"] for m in (eval_cmp, eval_heur, eval_sem))
+            comparacao = {
+                "custo_iql_rs_dia":  round(c_iql, 4),
+                "custo_heuristico_rs_dia": round(c_heur, 4),
+                "custo_sem_agente_rs_dia": round(c_sem, 4),
+                "reducao_iql_vs_sem_pct":  round((c_sem - c_iql) / c_sem * 100, 2) if c_sem > 0 else None,
+                "reducao_iql_vs_heur_pct": round((c_heur - c_iql) / c_heur * 100, 2) if c_heur > 0 else None,
+            }
+
+        alertas = []
+        cob_min = min(cobertura.values())
+        if cob_min < 25:
+            alertas.append(
+                f"cobertura_baixa: agente menos visitado cobriu {cob_min:.1f}% dos 2160 estados — "
+                "treine mais episódios ou aumente epsilon_inicial."
+            )
+        td_max = max(info["td_error_recente"]["td_abs_medio"] for info in info_ags.values())
+        if td_max > 50 and treino_resumo.get("n_episodios", 0) > 100:
+            alertas.append(
+                f"td_error_alto: TD-error médio recente {td_max:.1f} — política ainda não convergiu."
+            )
+        if "n_episodios" not in treino:
+            alertas.append("sem_treino: rode train_agents primeiro.")
+        if "custo_medio_dia_rs" not in eval_iql and "custo_medio_dia_rs" not in eval_cmp:
+            alertas.append("sem_avaliacao: rode evaluate_agents ou compare_strategies.")
+        if comparacao and comparacao.get("reducao_iql_vs_sem_pct") is not None \
+                and comparacao["reducao_iql_vs_sem_pct"] < 0:
+            alertas.append(
+                "iql_pior_que_sem_agente: política aprendida custa mais que não fazer nada — "
+                "verifique convergência, pesos do reward ou se treino foi suficiente."
+            )
+        if eval_iql.get("violacoes_pcc_total", 0) > 0:
+            alertas.append(f"violacoes_pcc: {eval_iql['violacoes_pcc_total']} horas com importação ≥ PCC.")
+        if eval_iql.get("violacoes_soc_total_h", 0) > 0:
+            alertas.append(f"violacoes_soc: {eval_iql['violacoes_soc_total_h']} horas com SOC < 15%.")
+
+        return json.dumps({
+            "dataset": {
+                "fazenda": DATASET_META["id_fazenda"],
+                "n_dias": DATASET_META["n_dias"],
+                "data_inicio": DATASET_META["data_inicio"],
+                "data_fim": DATASET_META["data_fim"],
+            },
+            "agentes": info_ags,
+            "cobertura_pct": cobertura,
+            "n_estados_possiveis": N_ESTADOS_TOTAL,
+            "soc_propagado_pct": round(float(iql.soc_propagado), 2),
+            "treino": treino_resumo,
+            "avaliacao_atual": eval_iql,
+            "comparacao_baselines": comparacao,
+            "alertas": alertas,
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def describe_schema() -> str:
+    """Esquema completo: estado, ações, restrições HARD, reward, tarifa, tracker_keys."""
+    schema = {
+        "arquitetura": "IQL (Independent Q-Learning) com 3 agentes cooperativos",
+        "agentes": {
+            "armazenamento": {"n_acoes": N_ACOES_ARMAZENAMENTO,
+                              "valores": {0: "carregar", 1: "manter", 2: "descarregar"}},
+            "consumo":       {"n_acoes": N_ACOES_CONSUMO,
+                              "valores": "bitmask 3 bits",
+                              "bits": {"bit0(1)": "corta pivô",
+                                       "bit1(2)": "corta bomba",
+                                       "bit2(4)": "corta secador"}},
+            "gerente":       {"n_acoes": N_ACOES_GERENTE,
+                              "tetos_kw": TETOS_KW,
+                              "valores": {0: "conservador (20kW)",
+                                          1: "moderado (30kW)",
+                                          2: "liberal (40kW)"}},
+        },
+        "estado_obs": {
+            "hora": "0-23",
+            "soc": "0-100 (%)",
+            "solar_kw": "kW disponíveis (clipado a inversor 50kW)",
+            "eolico_kw": "kW disponíveis (clipado a nominal 10kW)",
+            "tarifa": "R$/kWh — 0.68 fora-pico, 1.10 pico (18-20h)",
+            "stress": "0-100 — calculado pelo AgenteFinanceiro do env",
+            "sec_ac": "kWh acumulados no secador (meta diária 20)",
+            "bomba_h": "horas que a bomba já operou (cronograma fixo 8h)",
+            "em_pico_tarifa": "bool (tarifa > 0.9)",
+            "saldo_creditos_kwh": "saldo de créditos solares (AgenteFinanceiro)",
+        },
+        "estado_discreto": {
+            "tupla": "(h, s, g, st, meta, b)",
+            "buckets": {
+                "h":    "hora // 6 → 4 valores",
+                "s":    "soc // 10 → 10 valores",
+                "g":    "solar_kw → 3 (<5 / 5-15 / >15)",
+                "st":   "stress → 3 (<30 / 30-70 / >70)",
+                "meta": "0/1 (secador atingiu meta diária)",
+                "b":    "horas bomba → 3 (<3 / 3-5 / >=6)",
+            },
+            "n_total": N_ESTADOS_TOTAL,
+        },
+        "restricoes_hard": {
+            "R-PIVO":    "8h consecutivas + 1 ativação/dia (lock automático)",
+            "R-BOMBA":   f"cronograma fixo nas horas {sorted(BOMBA_HORAS_ON)} — ação do agente é ignorada",
+            "R-SECADOR": "meta diária 20kWh + rescue tardio se faltar energia",
+            "R-SEDE":    "consumo clampado em ±20% do ideal; eco-mode em stress > 80",
+            "R-PCC":     "importação/exportação ≤ 65.8 kW",
+            "R-BAT":     "throughput diário ≤ 48 kWh, η carga 0.92, η descarga 0.95",
+        },
+        "reward_termos": {
+            "pen_custo": -CONFIG["w_custo"],
+            "pen_estresse": -CONFIG["w_estresse"],
+            "pen_soc_critico": -CONFIG["pen_soc"],
+            "pen_teto_excedido": -CONFIG["pen_teto"],
+            "pen_pcc_violado": -CONFIG["pen_pcc"],
+            "pen_kwh_cortado": -CONFIG["pen_producao"],
+            "pen_secador_meta_nao_atingida": -CONFIG["pen_secador_meta"],
+            "pen_pivo_em_pico": -CONFIG["pen_pivo_pico"],
+            "pen_secador_em_pico": -CONFIG["pen_secador_pico"],
+            "bonus_pivo_solar": CONFIG["bonus_pivo_solar"],
+            "bonus_secador_excedente": CONFIG["bonus_sec_excedente"],
+            "bonus_carga_bateria_solar": CONFIG["w_bonus_carga"],
+            "bonus_excedente_exportado": CONFIG["bonus_excedente"],
+            "bonus_soc_30_80": CONFIG["bonus_soc_ok"],
+        },
+        "tarifa_tou": {
+            "min_rs_kwh": DATASET_META["tarifa_min_rs_kwh"],
+            "max_rs_kwh": DATASET_META["tarifa_max_rs_kwh"],
+            "horas_pico": DATASET_META["horas_pico"],
+        },
+        "tracker_keys_validos": ["iql_treino", "iql_eval", "iql_eval_cmp",
+                                  "heuristico", "sem_agente", "iql_trace"],
+        "info_step_campos": [
+            "hora", "soc", "geracao_kw", "consumo_kw", "solar_kw", "eolico_kw",
+            "rede_kwh", "excedente", "importacao", "exportacao", "custo_r",
+            "tarifa", "reward", "a_arm", "a_cons", "a_ger", "bat_carga", "bat_descarga",
+            "pcc_violado", "soc_violado", "fonte_geracao_kwh", "fonte_bateria_kwh",
+            "fonte_rede_kwh", "pivo_kw_consumido", "captacao_kw_consumido",
+            "sede_kw_consumido", "silo_kw_consumido", "secador_kw_consumido",
+            "em_pico_tarifa", "bomba_ligada", "bomba_agendada", "kwh_cortado",
+            "stress", "saldo_creditos_kwh", "teto_excedido", "pivo_em_lock",
+            "secador_kwh_ac",
+        ],
+    }
+    return json.dumps(schema, indent=2)
+
+
+# ------------------------------------------------------------------ #
+# Entrada                                                               #
 # ------------------------------------------------------------------ #
 
 if __name__ == "__main__":

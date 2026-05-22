@@ -1,67 +1,102 @@
-DEFAULT_HYPERPARAMS = {
-    "n_episodios": 1000,
+"""
+Configuração do MCP SmartEnergy — espelha o projeto Smart_Energy (FAZ-002).
+
+CONFIG       : dict com hiperparâmetros do treino, parâmetros físicos da fazenda,
+               pesos do reward cooperativo e penalidades operacionais.
+TETOS_KW     : tetos de consumo por decisão do Gerente de Carga.
+BOMBA_HORAS_ON: cronograma fixo da bomba de captação (4 ciclos de 2h).
+"""
+
+import os
+
+# ─── Fonte de dados ────────────────────────────────────────────────
+# Por padrão usa o SHEET_ID do projeto Smart_Energy (planilha pública).
+# Pode ser sobrescrito via variável de ambiente.
+SHEET_ID = os.getenv("SHEET_ID", "1sjs2XLNEZp2oPxm_YLwsX9DxPxIfks32")
+
+# Fazenda usada — a base traz FAZ-001 e FAZ-002.
+ID_FAZENDA = os.getenv("ID_FAZENDA", "FAZ-002")
+
+# ─── Hiperparâmetros e parâmetros físicos ──────────────────────────
+CONFIG = {
+    # Treinamento
+    "n_episodios": 1000,    # default reduzido (Smart_Energy usa 100000)
     "alpha": 0.1,
-    "gamma": 0.95,
-    "beta": 0.01,
+    "beta": 0.01,           # taxa pessimista (Hysteretic Q-learning)
+    "gamma": 0.98,
     "epsilon_inicial": 1.0,
-    "epsilon_final": 0.05,
-    "epsilon_decay": 0.995,
+    "epsilon_final": 0.01,
+    "epsilon_decay": 0.995, # default reduzido para 1k episódios
+
+    # Bateria
+    "bateria_cap_kwh": 24.0,
+    "soc_inicial_pct": 50.0,
+    "soc_min_pct": 15.0,
+    "soc_max_pct": 95.0,
+    "eficiencia_carga": 0.92,
+    "eficiencia_descarga": 0.95,
+    "bat_throughput_max_kwh": 48.0,
+
+    # Limites de conexão e geração
+    "pcc_max_kw": 65.8,
+    "inversor_fv_max_kw": 50.0,
+    "eolico_nominal_kw": 10.0,
+
+    # Financeiro
+    "credito_inicial_kwh": 100.0,
+    "tarifa_estresse_limiar": 0.9,
+
+    # Metas operacionais
+    "pivo_horas_alvo": 8,
+    "pivo_nominal_kw": 3.0,
+    "bomba_cap_nominal_kw": 15.0,
+    "secador_meta_kwh": 20.0,
+    "sede_desvio_max": 0.20,
+
+    # Pesos do reward cooperativo
+    "w_custo": 8.0,
+    "w_estresse": 0.5,
+    "w_bonus_carga": 1.2,
+    "pen_soc": 12.0,
+    "pen_teto": 8.0,
+    "pen_producao": 5.0,
+    "pen_pcc": 10.0,
+    "bonus_excedente": 0.5,
+    "bonus_soc_ok": 1.0,
+
+    # Penalidades operacionais
+    "pen_secador_meta": 20.0,
+    "pen_sede_desvio": 5.0,
+
+    # Shaping por ponto ótimo
+    "pen_pivo_pico":       18.0,
+    "pen_secador_pico":    8.0,
+    "bonus_pivo_solar":    3.0,
+    "bonus_sec_excedente": 2.0,
 }
 
-# Espaço de ações
+# Tetos de consumo por decisão do Gerente
+TETOS_KW = {0: 20.0, 1: 30.0, 2: 40.0}
+
+# Cronograma fixo da bomba (4 ciclos × 2h, evitando pico 18-20h)
+BOMBA_HORAS_ON = frozenset({0, 1, 6, 7, 12, 13, 21, 22})
+
+# Espaços de ação
 N_ACOES_ARMAZENAMENTO = 3   # 0=carregar, 1=manter, 2=descarregar
-N_ACOES_CONSUMO = 8         # 3 bits: pivô(1), bomba(2), secador(4)
-N_ACOES_GERENTE = 3         # 0=conservador, 1=moderado, 2=liberal
-N_ACOES_TOTAL = N_ACOES_ARMAZENAMENTO * N_ACOES_CONSUMO * N_ACOES_GERENTE  # 72
+N_ACOES_CONSUMO       = 8   # bitmask 3 bits: pivo(1), bomba(2), secador(4)
+N_ACOES_GERENTE       = 3   # 0=conservador, 1=moderado, 2=liberal
 
-# Restrições físicas
-PCC_LIMITE_KW = 65.8
-SOC_MINIMO = 0.15
-SOC_MAXIMO = 0.95
-BATERIA_CAPACIDADE_KWH = 100.0
-BATERIA_MAX_CARGA_KW = 30.0
-BATERIA_MAX_DESCARGA_KW = 30.0
-BATERIA_EF_CARGA = 0.95
-BATERIA_EF_DESCARGA = 0.95
-SOC_INICIAL = 0.50
+# Espaço de estados (deve refletir FazendaEnergyEnv.discretizar)
+# hora(4) × soc(10) × solar(3) × stress(3) × meta_sec(2) × bomba(3) = 2160
+N_ESTADOS_TOTAL = 4 * 10 * 3 * 3 * 2 * 3
 
-# Tarifa (TOU brasileira)
-HORAS_PICO = set(range(18, 21))  # 18h–20h
-TARIFA_PICO = 0.85        # R$/kWh
-TARIFA_FORA_PICO = 0.25   # R$/kWh
-
-# Potências das cargas (kW)
-PIVO_KW = 25.0
-CAPTACAO_KW = 15.0
-SEDE_KW = 3.0
-SILO_KW_BASE = 4.0
-SECADOR_KW = 20.0
-
-# Watchdog: bomba deve operar ao menos N horas/dia
-BOMBA_WATCHDOG_HORAS = 6
-
-# Teto de geração por ação do gerente (kW)
-GERENTE_TETO = {0: 20.0, 1: 35.0, 2: 55.0}
-
-# Perfil solar (kW, dia claro, pico ~34 kW)
-SOLAR_PERFIL = [
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    2.0, 8.0, 15.0, 22.0, 28.0, 32.0,
-    34.0, 33.0, 30.0, 25.0, 18.0, 10.0,
-    3.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-]
-
-# Perfil eólico base (kW)
-VENTO_PERFIL = [
-    8.0, 9.0, 10.0, 10.0, 9.0, 8.0,
-    7.0, 6.0, 5.0, 5.0, 4.0, 4.0,
-    4.0, 5.0, 5.0, 6.0, 7.0, 8.0,
-    9.0, 10.0, 10.0, 10.0, 9.0, 8.0,
-]
-
-# Pesos do reward
-REWARD_PESO_CUSTO = 2.0
-REWARD_PESO_REDE = 0.05
-REWARD_PENALIDADE_PCC = 100.0
-REWARD_PENALIDADE_SOC = 50.0
-REWARD_BONUS_RENOVAVEL = 0.03
+# Retro-compat com a versão anterior do MCP — mapeia para CONFIG.
+DEFAULT_HYPERPARAMS = {
+    "n_episodios": CONFIG["n_episodios"],
+    "alpha": CONFIG["alpha"],
+    "gamma": CONFIG["gamma"],
+    "beta": CONFIG["beta"],
+    "epsilon_inicial": CONFIG["epsilon_inicial"],
+    "epsilon_final": CONFIG["epsilon_final"],
+    "epsilon_decay": CONFIG["epsilon_decay"],
+}

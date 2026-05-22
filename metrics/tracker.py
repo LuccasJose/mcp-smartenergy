@@ -2,6 +2,9 @@ import numpy as np
 from collections import defaultdict
 from typing import Any
 
+# Limiar de SOC crítico — a nova base usa porcentagem (0-100), não fração (0-1).
+_SOC_MIN_PCT = 15.0
+
 
 class MetricsTracker:
     """
@@ -89,7 +92,7 @@ class MetricsTracker:
         # Estatísticas de passo
         rede_vals = [p["rede_kwh"] for p in passos_agente]
         soc_vals = [p["soc"] for p in passos_agente]
-        viols_soc = sum(1 for s in soc_vals if s < 0.15)
+        viols_soc = sum(1 for s in soc_vals if s < _SOC_MIN_PCT)
         pcc_viols = sum(1 for p in passos_agente if p["pcc_violado"])
         kwh_cortado_total = sum(p["kwh_cortado"] for p in passos_agente)
 
@@ -186,6 +189,53 @@ class MetricsTracker:
                 "n_horas": len(fora),
             },
         }
+
+    # ------------------------------------------------------------------ #
+    # Violações por hora-do-dia                                            #
+    # ------------------------------------------------------------------ #
+
+    def get_hourly_violations(self, agente: str = "iql_eval") -> dict:
+        """Agrega violações por hora-do-dia para diagnóstico do LLM-juiz.
+
+        Retorna, para cada hora 0-23: total de violações SOC, PCC, teto excedido,
+        custo médio e SOC médio.
+        """
+        passos = self.passos.get(agente, [])
+        if not passos:
+            return {"aviso": f"Nenhum passo registrado para '{agente}'"}
+
+        por_hora: dict[int, dict] = {h: {"n": 0, "soc_vals": [], "custo": 0.0,
+                                          "viol_soc": 0, "viol_pcc": 0,
+                                          "teto_excedido": 0, "kwh_cortado": 0.0}
+                                     for h in range(24)}
+        for p in passos:
+            h = int(p.get("hora", 0))
+            d = por_hora[h]
+            d["n"] += 1
+            d["soc_vals"].append(p["soc"])
+            d["custo"] += p.get("custo_r", 0.0)
+            if p["soc"] < _SOC_MIN_PCT:
+                d["viol_soc"] += 1
+            if p.get("pcc_violado", False):
+                d["viol_pcc"] += 1
+            if p.get("teto_excedido", False):
+                d["teto_excedido"] += 1
+            d["kwh_cortado"] += p.get("kwh_cortado", 0.0)
+
+        resultado = {}
+        for h, d in por_hora.items():
+            if d["n"] == 0:
+                continue
+            resultado[h] = {
+                "n_observacoes": d["n"],
+                "soc_medio": float(np.mean(d["soc_vals"])),
+                "custo_total_rs": round(d["custo"], 4),
+                "violacoes_soc": d["viol_soc"],
+                "violacoes_pcc": d["viol_pcc"],
+                "teto_excedido": d["teto_excedido"],
+                "kwh_cortado_total": round(d["kwh_cortado"], 4),
+            }
+        return resultado
 
     # ------------------------------------------------------------------ #
     # Snapshot completo de um episódio                                    #

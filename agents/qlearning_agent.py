@@ -1,242 +1,284 @@
+"""
+AgenteQL — Q-learning histérico (Hysteretic Q-learning).
+
+Diferença em relação à versão monolítica anterior do MCP: agora cada
+agente tem `n_acoes` parametrizável (3, 8 ou 3) e a orquestração dos
+três agentes independentes (IQL) é feita por `IQLSystem`, espelhando
+o projeto Smart_Energy.
+
+Reward cooperativo: o env emite um único reward; os três agentes
+recebem o mesmo valor e cada um atualiza apenas sua própria ação.
+"""
+
 import json
+import pickle
 import numpy as np
 from collections import defaultdict
+from pathlib import Path
+
 from config import (
-    N_ACOES_CONSUMO, N_ACOES_GERENTE, N_ACOES_TOTAL,
-    DEFAULT_HYPERPARAMS, SOC_MINIMO,
+    CONFIG, N_ACOES_ARMAZENAMENTO, N_ACOES_CONSUMO, N_ACOES_GERENTE,
+    N_ESTADOS_TOTAL,
 )
 
 
 class AgenteQL:
-    """
-    Agente Q-learning histérico para gestão de energia.
+    """Q-learning histérico (alpha otimista, beta pessimista)."""
 
-    Hysteretic Q-learning: usa alpha (otimista) para atualizações positivas
-    e beta (pessimista, beta << alpha) para negativas. Estabiliza ambientes
-    com múltiplos agentes ou recompensas não-estacionárias.
+    def __init__(self, n_acoes: int, nome: str = "ql", cfg: dict = CONFIG):
+        self.n_acoes  = n_acoes
+        self.nome     = nome
+        self.cfg      = cfg
+        self.alpha    = cfg["alpha"]
+        self.beta     = cfg.get("beta", 0.01)
+        self.gamma    = cfg["gamma"]
+        self.epsilon  = cfg["epsilon_inicial"]
+        self.eps_min  = cfg["epsilon_final"]
+        self.eps_decay = cfg["epsilon_decay"]
 
-    Espaço de ações combinado: a_arm × a_cons × a_ger = 3 × 8 × 3 = 72 ações.
-    """
-
-    def __init__(
-        self,
-        n_episodios: int = DEFAULT_HYPERPARAMS["n_episodios"],
-        alpha: float = DEFAULT_HYPERPARAMS["alpha"],
-        gamma: float = DEFAULT_HYPERPARAMS["gamma"],
-        beta: float = DEFAULT_HYPERPARAMS["beta"],
-        epsilon_inicial: float = DEFAULT_HYPERPARAMS["epsilon_inicial"],
-        epsilon_final: float = DEFAULT_HYPERPARAMS["epsilon_final"],
-        epsilon_decay: float = DEFAULT_HYPERPARAMS["epsilon_decay"],
-    ):
-        self.n_episodios = n_episodios
-        self.alpha = alpha
-        self.gamma = gamma
-        self.beta = beta
-        self.epsilon_inicial = epsilon_inicial
-        self.epsilon_final = epsilon_final
-        self.epsilon_decay = epsilon_decay
-
-        # Q-table: state_tuple -> array[N_ACOES_TOTAL]
         self.q_table: dict[tuple, np.ndarray] = defaultdict(
-            lambda: np.zeros(N_ACOES_TOTAL, dtype=np.float64)
+            lambda: np.zeros(n_acoes, dtype=np.float64)
+        )
+        self.rng = np.random.default_rng()
+        self.n_updates = 0
+
+        # Métricas de convergência (Sprint 2 — aproveitamos a reescrita)
+        self.td_errors: list[float] = []
+        self.td_errors_max_len = 5000   # janela rolante para diagnóstico
+
+    def agir(self, estado: tuple, explorando: bool = True) -> int:
+        if explorando and self.rng.random() < self.epsilon:
+            return int(self.rng.integers(self.n_acoes))
+        return int(np.argmax(self.q_table[estado]))
+
+    def aprender(self, s: tuple, a: int, r: float, s2: tuple, done: bool) -> None:
+        q_atual = self.q_table[s][a]
+        q_alvo  = r if done else r + self.gamma * float(np.max(self.q_table[s2]))
+        td = q_alvo - q_atual
+        lr = self.alpha if td >= 0 else self.beta
+        self.q_table[s][a] += lr * td
+        self.n_updates += 1
+        self.td_errors.append(td)
+        if len(self.td_errors) > self.td_errors_max_len:
+            self.td_errors = self.td_errors[-self.td_errors_max_len:]
+
+    def decair_epsilon(self) -> None:
+        self.epsilon = max(self.eps_min, self.epsilon * self.eps_decay)
+
+    @property
+    def n_estados(self) -> int:
+        return len(self.q_table)
+
+    def td_error_recente(self, janela: int = 500) -> dict:
+        if not self.td_errors:
+            return {"janela": 0, "td_abs_medio": 0.0, "td_std": 0.0}
+        amostra = self.td_errors[-janela:]
+        return {
+            "janela": len(amostra),
+            "td_abs_medio": float(np.mean(np.abs(amostra))),
+            "td_std": float(np.std(amostra)),
+        }
+
+    def get_info(self) -> dict:
+        return {
+            "nome": self.nome,
+            "n_acoes": self.n_acoes,
+            "n_estados_visitados": self.n_estados,
+            "n_updates": self.n_updates,
+            "epsilon": float(self.epsilon),
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "gamma": self.gamma,
+            "td_error_recente": self.td_error_recente(),
+        }
+
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump({
+                "nome": self.nome,
+                "n_acoes": self.n_acoes,
+                "q_table": dict(self.q_table),
+                "epsilon": self.epsilon,
+                "n_updates": self.n_updates,
+            }, f)
+
+    def load(self, path: str | Path) -> None:
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+        self.n_acoes   = data.get("n_acoes", self.n_acoes)
+        self.q_table   = defaultdict(lambda: np.zeros(self.n_acoes, dtype=np.float64), data["q_table"])
+        self.epsilon   = data.get("epsilon", self.epsilon)
+        self.n_updates = data.get("n_updates", 0)
+
+
+class IQLSystem:
+    """Orquestra os 3 agentes IQL (armazenamento, consumo, gerente)."""
+
+    def __init__(self, cfg: dict = CONFIG):
+        self.cfg = cfg
+        self.agentes = {
+            "armazenamento": AgenteQL(N_ACOES_ARMAZENAMENTO, "armazenamento", cfg),
+            "consumo":       AgenteQL(N_ACOES_CONSUMO,       "consumo",       cfg),
+            "gerente":       AgenteQL(N_ACOES_GERENTE,       "gerente",       cfg),
+        }
+        self.n_episodios = cfg["n_episodios"]
+        self.soc_propagado = cfg["soc_inicial_pct"]   # SOC inicial do próximo episódio
+
+    # ------------------------------------------------------------------ #
+    # API uniforme                                                         #
+    # ------------------------------------------------------------------ #
+
+    def agir_todos(self, estado: tuple, explorando: bool = True) -> tuple[int, int, int]:
+        return (
+            self.agentes["armazenamento"].agir(estado, explorando),
+            self.agentes["consumo"].agir(estado,       explorando),
+            self.agentes["gerente"].agir(estado,       explorando),
         )
 
-        # RNG encapsulado para reprodutibilidade
-        self.rng = np.random.default_rng()
+    def aprender_todos(self, s, acoes: tuple[int, int, int], r, s2, done):
+        a_arm, a_cons, a_ger = acoes
+        self.agentes["armazenamento"].aprender(s, a_arm,  r, s2, done)
+        self.agentes["consumo"].aprender(      s, a_cons, r, s2, done)
+        self.agentes["gerente"].aprender(      s, a_ger,  r, s2, done)
 
-        # Métricas do agente
-        self.epsilon = epsilon_inicial
-        self.n_updates: int = 0
+    def decair_epsilon_todos(self):
+        for ag in self.agentes.values():
+            ag.decair_epsilon()
 
-        # Histórico de treino
-        self.rewards_hist: list[float] = []
-        self.custos_hist: list[float] = []
-        self.epsilons: list[float] = []
+    def reconfigurar(self, novos_params: dict):
+        """Atualiza hiperparâmetros (sem destruir as Q-tables)."""
+        for ag in self.agentes.values():
+            for k, v in novos_params.items():
+                if k == "alpha":
+                    ag.alpha = v
+                elif k == "beta":
+                    ag.beta = v
+                elif k == "gamma":
+                    ag.gamma = v
+                elif k == "epsilon_inicial":
+                    ag.epsilon = v
+                elif k == "epsilon_final":
+                    ag.eps_min = v
+                elif k == "epsilon_decay":
+                    ag.eps_decay = v
+        if "n_episodios" in novos_params:
+            self.n_episodios = novos_params["n_episodios"]
 
-    # ------------------------------------------------------------------ #
-    # Discretização do estado                                              #
-    # ------------------------------------------------------------------ #
-
-    def discretize(self, obs: dict) -> tuple:
-        """Converte obs contínua em tupla discreta para indexar a Q-table."""
-        hora = int(obs["hora"])
-        soc_bucket = int(min(obs["soc"] * 5, 4))           # 0–4
-        em_pico = int(obs["em_pico_tarifa"])                # 0–1
-
-        g = obs["geracao_kw"]
-        if g < 8.0:
-            ger_bucket = 0
-        elif g < 22.0:
-            ger_bucket = 1
-        else:
-            ger_bucket = 2
-
-        c = obs["consumo_base_kw"]
-        if c < 30.0:
-            cons_bucket = 0
-        elif c < 55.0:
-            cons_bucket = 1
-        else:
-            cons_bucket = 2
-
-        # horas que a bomba já operou hoje: <2h, 2–3h, ≥4h
-        hb = obs.get("horas_bomba_hoje", 0)
-        bomba_bucket = 0 if hb < 2 else (1 if hb < 4 else 2)
-
-        return (hora, soc_bucket, em_pico, ger_bucket, cons_bucket, bomba_bucket)
-        # Espaço: 24 × 5 × 2 × 3 × 3 × 3 = 6 480 estados
+    def reset_qtables(self):
+        for ag in self.agentes.values():
+            ag.q_table = defaultdict(lambda n=ag.n_acoes: np.zeros(n, dtype=np.float64))
+            ag.n_updates = 0
+            ag.td_errors = []
+            ag.epsilon = ag.cfg["epsilon_inicial"]
 
     # ------------------------------------------------------------------ #
-    # Codificação de ações                                                 #
+    # Treino IQL com SOC propagado entre dias                              #
     # ------------------------------------------------------------------ #
 
-    @staticmethod
-    def encode_action(a_arm: int, a_cons: int, a_ger: int) -> int:
-        return a_arm * (N_ACOES_CONSUMO * N_ACOES_GERENTE) + a_cons * N_ACOES_GERENTE + a_ger
+    def treinar(self, dias, tarifa_24h, env_cls, tracker=None) -> dict:
+        """Loop IQL espelhando training.treinar do Smart_Energy.
 
-    @staticmethod
-    def decode_action(action_id: int) -> tuple[int, int, int]:
-        a_arm = action_id // (N_ACOES_CONSUMO * N_ACOES_GERENTE)
-        rem = action_id % (N_ACOES_CONSUMO * N_ACOES_GERENTE)
-        a_cons = rem // N_ACOES_GERENTE
-        a_ger = rem % N_ACOES_GERENTE
-        return a_arm, a_cons, a_ger
-
-    # ------------------------------------------------------------------ #
-    # Política                                                             #
-    # ------------------------------------------------------------------ #
-
-    def choose_action(self, state: tuple, explore: bool = True) -> int:
-        if explore and self.rng.random() < self.epsilon:
-            return int(self.rng.integers(N_ACOES_TOTAL))
-        return int(np.argmax(self.q_table[state]))
-
-    # ------------------------------------------------------------------ #
-    # Atualização histérica                                                #
-    # ------------------------------------------------------------------ #
-
-    def update(
-        self,
-        state: tuple,
-        action: int,
-        reward: float,
-        next_state: tuple,
-        done: bool,
-    ):
-        q_atual = self.q_table[state][action]
-
-        if done:
-            q_alvo = reward
-        else:
-            q_alvo = reward + self.gamma * float(np.max(self.q_table[next_state]))
-
-        delta = q_alvo - q_atual
-
-        # Hysteretic: alpha para melhorias, beta para degradações
-        lr = self.alpha if delta >= 0.0 else self.beta
-        self.q_table[state][action] += lr * delta
-        self.n_updates += 1
-
-    def _decay_epsilon(self):
-        self.epsilon = max(self.epsilon_final, self.epsilon * self.epsilon_decay)
-
-    # ------------------------------------------------------------------ #
-    # Loop de treino                                                       #
-    # ------------------------------------------------------------------ #
-
-    def train(self, env, tracker=None) -> dict:
+        env_cls é a classe FazendaEnergyEnv passada por injeção (evita import circular).
+        SOC inicial de cada episódio = SOC final do anterior, simulando continuidade real.
         """
-        Treina o agente por self.n_episodios episódios.
-        Retorna sumário das métricas de treino.
-        """
-        self.rewards_hist.clear()
-        self.custos_hist.clear()
-        self.epsilons.clear()
-        self.epsilon = self.epsilon_inicial
+        rewards_hist, custos_hist, eps_hist = [], [], []
+        soc_proximo = self.cfg["soc_inicial_pct"]
 
         for ep in range(self.n_episodios):
-            obs = env.reset()
-            state = self.discretize(obs)
-            reward_ep = 0.0
-            custo_ep = 0.0
-            done = False
+            dados_dia = dias[ep % len(dias)]
+            env = env_cls(dados_dia, tarifa_24h, self.cfg)
+            est = env.reset(soc_inicial=soc_proximo)
+            s   = env.discretizar(est)
 
-            while not done:
-                action_id = self.choose_action(state, explore=True)
-                a_arm, a_cons, a_ger = self.decode_action(action_id)
-                next_obs, reward, done, info = env.step(a_arm, a_cons, a_ger)
-                next_state = self.discretize(next_obs)
+            ep_reward = 0.0
+            ep_custo  = 0.0
 
-                self.update(state, action_id, reward, next_state, done)
+            for _ in range(24):
+                acoes = self.agir_todos(s, explorando=True)
+                prox, reward, done, info = env.step(*acoes)
+                s2 = env.discretizar(prox)
+                self.aprender_todos(s, acoes, reward, s2, done)
+                s = s2
+                ep_reward += reward
+                ep_custo  += info["custo_r"]
+                if tracker:
+                    tracker.registrar_passo(info, agente="iql_treino")
 
-                state = next_state
-                reward_ep += reward
-                custo_ep += info["custo_r"]
-
-            self._decay_epsilon()
-            self.rewards_hist.append(reward_ep)
-            self.custos_hist.append(custo_ep)
-            self.epsilons.append(self.epsilon)
+            soc_proximo = env.soc
+            self.decair_epsilon_todos()
+            rewards_hist.append(ep_reward)
+            custos_hist.append(ep_custo)
+            eps_hist.append(self.agentes["armazenamento"].epsilon)
 
             if tracker:
                 tracker.fechar_episodio(
-                    agente="ql_treino",
-                    reward_total=reward_ep,
-                    custo_total=custo_ep,
-                    epsilon=self.epsilon,
-                    cenario=getattr(env, "cenario_dia", "EQUILIBRADO"),
+                    agente="iql_treino",
+                    reward_total=ep_reward,
+                    custo_total=ep_custo,
+                    epsilon=self.agentes["armazenamento"].epsilon,
+                    cenario="REAL",   # cenário viria de classificação ex-post
                 )
 
-        return self._sumario_treino()
+        self.soc_propagado = soc_proximo
+        n = len(rewards_hist)
+        janela = min(50, n)
+        return {
+            "episodios_treinados": n,
+            "reward_ultimo_ep": float(rewards_hist[-1]) if n else 0.0,
+            "reward_media_ultimos_50": float(np.mean(rewards_hist[-janela:])) if n else 0.0,
+            "custo_medio_ultimos_50_rs": float(np.mean(custos_hist[-janela:])) if n else 0.0,
+            "epsilon_final": float(eps_hist[-1]) if n else 0.0,
+            "soc_propagado_final_pct": float(soc_proximo),
+            "agentes": {n: ag.get_info() for n, ag in self.agentes.items()},
+        }
 
     # ------------------------------------------------------------------ #
-    # Loop de avaliação                                                    #
+    # Avaliação greedy                                                     #
     # ------------------------------------------------------------------ #
 
-    def evaluate(self, env, n_dias: int = 30, tracker=None) -> dict:
-        """
-        Avalia a política greedy por n_dias (sem exploração).
-        Retorna métricas mensais.
-        """
-        custos, redes, violacoes_soc, rewards = [], [], [], []
+    def avaliar(self, dias, tarifa_24h, env_cls, n_dias: int = 30,
+                tracker=None, tracker_key: str = "iql_eval",
+                propagar_soc: bool = True) -> dict:
+        custos, redes, viols_soc, rewards = [], [], [], []
+        soc_proximo = self.cfg["soc_inicial_pct"]
 
-        for _ in range(n_dias):
-            obs = env.reset()
-            state = self.discretize(obs)
-            custo_dia = 0.0
-            rede_dia = 0.0
-            viols_soc = 0
-            reward_dia = 0.0
-            done = False
+        for ep in range(n_dias):
+            dados_dia = dias[ep % len(dias)]
+            env = env_cls(dados_dia, tarifa_24h, self.cfg)
+            est = env.reset(soc_inicial=soc_proximo)
+            s   = env.discretizar(est)
 
-            while not done:
-                action_id = self.choose_action(state, explore=False)
-                a_arm, a_cons, a_ger = self.decode_action(action_id)
-                next_obs, reward, done, info = env.step(a_arm, a_cons, a_ger)
-                next_state = self.discretize(next_obs)
-
-                if tracker:
-                    tracker.registrar_passo(info, agente="ql_eval")
-
-                state = next_state
+            custo_dia = rede_dia = viols = reward_dia = 0.0
+            for _ in range(24):
+                acoes = self.agir_todos(s, explorando=False)
+                prox, reward, done, info = env.step(*acoes)
+                s2 = env.discretizar(prox)
+                s = s2
                 custo_dia += info["custo_r"]
-                rede_dia += info["rede_kwh"]
+                rede_dia  += info["rede_kwh"]
                 reward_dia += info["reward"]
-                if info["soc"] < SOC_MINIMO:
-                    viols_soc += 1
+                if info["soc"] < self.cfg["soc_min_pct"]:
+                    viols += 1
+                if tracker:
+                    tracker.registrar_passo(info, agente=tracker_key)
+
+            if propagar_soc:
+                soc_proximo = env.soc
 
             custos.append(custo_dia)
             redes.append(rede_dia)
-            violacoes_soc.append(viols_soc)
+            viols_soc.append(viols)
             rewards.append(reward_dia)
 
             if tracker:
                 tracker.fechar_episodio(
-                    agente="ql_eval",
+                    agente=tracker_key,
                     reward_total=reward_dia,
                     custo_total=custo_dia,
                     epsilon=0.0,
-                    cenario=getattr(env, "cenario_dia", "EQUILIBRADO"),
+                    cenario="REAL",
                 )
 
         return {
@@ -244,67 +286,25 @@ class AgenteQL:
             "custo_medio_dia_rs": float(np.mean(custos)),
             "custo_std": float(np.std(custos)),
             "rede_media_dia_kwh": float(np.mean(redes)),
-            "violacoes_soc_media_h_dia": float(np.mean(violacoes_soc)),
+            "violacoes_soc_media_h_dia": float(np.mean(viols_soc)),
             "reward_medio_dia": float(np.mean(rewards)),
         }
 
     # ------------------------------------------------------------------ #
-    # Métricas do agente                                                   #
+    # Persistência                                                         #
     # ------------------------------------------------------------------ #
 
-    def get_qtable_info(self) -> dict:
-        return {
-            "n_estados": len(self.q_table),
-            "n_updates": self.n_updates,
-            "epsilon": float(self.epsilon),
-            "alpha": self.alpha,
-            "gamma": self.gamma,
-            "beta": self.beta,
-            "n_episodios_config": self.n_episodios,
-        }
+    def save_all(self, dir_path: str | Path):
+        dir_path = Path(dir_path)
+        dir_path.mkdir(parents=True, exist_ok=True)
+        for nome, ag in self.agentes.items():
+            ag.save(dir_path / f"qtable_{nome}.pkl")
 
-    def save_qtable(self, filepath: str):
-        """Salva Q-table em JSON. Chaves de tuple são serializadas como strings."""
-        data = {
-            "hyperparams": {
-                "alpha": self.alpha, "gamma": self.gamma, "beta": self.beta,
-                "epsilon": float(self.epsilon),
-                "epsilon_inicial": self.epsilon_inicial,
-                "epsilon_final": self.epsilon_final,
-                "epsilon_decay": self.epsilon_decay,
-                "n_episodios": self.n_episodios,
-            },
-            "n_updates": self.n_updates,
-            "qtable": {str(k): v.tolist() for k, v in self.q_table.items()},
-        }
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-
-    def load_qtable(self, filepath: str):
-        """Carrega Q-table de JSON salvo por save_qtable."""
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        self.n_updates = data.get("n_updates", 0)
-        self.q_table = defaultdict(lambda: np.zeros(N_ACOES_TOTAL, dtype=np.float64))
-        for k_str, v in data["qtable"].items():
-            # converte "('1', '2', ...)" de volta para tuple de ints
-            key = tuple(int(x) for x in k_str.strip("()").split(", "))
-            self.q_table[key] = np.array(v, dtype=np.float64)
-        if "hyperparams" in data:
-            hp = data["hyperparams"]
-            self.epsilon = hp.get("epsilon", self.epsilon)
-
-    def _sumario_treino(self) -> dict:
-        n = len(self.rewards_hist)
-        if n == 0:
-            return {}
-        janela = min(50, n)
-        return {
-            "episodios_treinados": n,
-            "reward_ultimo_ep": float(self.rewards_hist[-1]),
-            "reward_media_ultimos_50ep": float(np.mean(self.rewards_hist[-janela:])),
-            "custo_medio_ultimos_50ep_rs": float(np.mean(self.custos_hist[-janela:])),
-            "epsilon_final": float(self.epsilon),
-            "n_updates_total": self.n_updates,
-            "n_estados_visitados": len(self.q_table),
-        }
+    def load_all(self, dir_path: str | Path):
+        dir_path = Path(dir_path)
+        for nome, ag in self.agentes.items():
+            p = dir_path / f"qtable_{nome}.pkl"
+            if p.exists():
+                ag.load(p)
+            else:
+                raise FileNotFoundError(f"Q-table não encontrada: {p}")
