@@ -58,15 +58,23 @@ def _criar_aba_explorar(notebook: ttk.Notebook, dados: dict) -> None:
     combo.current(0)
     combo.pack(side=tk.LEFT)
 
+    ttk.Label(controle, text="Máquina:", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(20, 8))
+    opcoes_maq = ["Todas", "Pivô", "Bomba Captação", "Sede/Escritório", "Silo", "Secador"]
+    combo_maq = ttk.Combobox(controle, values=opcoes_maq, state="readonly", width=18, font=("Segoe UI", 10))
+    combo_maq.current(0)
+    combo_maq.pack(side=tk.LEFT)
+
     fig = Figure(figsize=(15, 12))
     canvas = _embutir_figura(frame, fig)
 
     def _atualizar(_event=None):
         idx = combo.current()
-        plot_explorar_dia(fig, dias[idx], res_h[idx], res_r[idx], labels[idx], todos_dias=dias)
+        plot_explorar_dia(fig, dias[idx], res_h[idx], res_r[idx], labels[idx],
+                          todos_dias=dias, filtro_maquina=combo_maq.get())
         canvas.draw_idle()
 
     combo.bind("<<ComboboxSelected>>", _atualizar)
+    combo_maq.bind("<<ComboboxSelected>>", _atualizar)
     _atualizar()
 
 
@@ -105,6 +113,25 @@ def _criar_aba_fonte_energia(notebook: ttk.Notebook, dados: dict) -> None:
 
     combo.bind("<<ComboboxSelected>>", _atualizar)
     _atualizar()
+
+
+def _criar_aba_visao_geral(notebook: ttk.Notebook, dados: dict) -> None:
+    """Aba consolidada com KPIs operacionais e métricas de microgrid."""
+    from smarty_energy.visualization import plot_visao_geral_operacional
+
+    frame = ttk.Frame(notebook)
+    notebook.add(frame, text="Visão Geral Operacional")
+
+    info = ttk.Label(
+        frame,
+        text="KPIs por máquina  •  comparação mensal por estratégia  •  SCR/SSR/PAR  •  heatmap consolidado",
+        font=("Segoe UI", 9), foreground="#555",
+    )
+    info.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(6, 0))
+
+    fig = Figure(figsize=(15, 10))
+    _embutir_figura(frame, fig)
+    plot_visao_geral_operacional(fig, dados["dias"], dados["res_s"], dados["res_h"], dados["res_r"])
 
 
 def _criar_aba_maquina_detalhada(notebook: ttk.Notebook, dados: dict) -> None:
@@ -186,6 +213,7 @@ def abrir_dashboard(
     if dados_fonte is not None:
         _criar_aba_fonte_energia(notebook, dados_fonte)
     if dados_maquina is not None:
+        _criar_aba_visao_geral(notebook, dados_maquina)
         _criar_aba_maquina_detalhada(notebook, dados_maquina)
 
     rodape = ttk.Label(

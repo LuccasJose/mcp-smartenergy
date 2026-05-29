@@ -375,6 +375,7 @@ def plot_explorar_dia(
     hist_r: list[dict],
     data_str: str = "",
     todos_dias: list | None = None,
+    filtro_maquina: str = "Todas",
 ) -> None:
     """Desenha painéis detalhados de um dia na Figure fornecida (in-place).
 
@@ -435,39 +436,37 @@ def plot_explorar_dia(
     # Mostra o consumo que o RL EFETIVAMENTE deixou rodar; a linha cinza
     # tracejada por trás é a demanda histórica (o que a fazenda "queria").
     ax = axes[1, 0]
-    _maq_cols_dem  = ["pivo_kw",         "captacao_kw",         "sede_kw",         "silo_kw"]
-    _maq_cols_real = ["pivo_kw_consumido", "captacao_kw_consumido", "sede_kw_consumido", "silo_kw_consumido"]
-    _maq_labels    = ["Pivô",            "Bomba Captação",       "Sede/Escritório", "Silo/Secador"]
-    _maq_cores     = ["#e74c3c",         "#3498db",              "#9b59b6",         "#e67e22"]
+    _maq_cols_dem  = ["pivo_kw",         "captacao_kw",         "sede_kw",         "silo_kw",            None]
+    _maq_cols_real = ["pivo_kw_consumido", "captacao_kw_consumido", "sede_kw_consumido", "silo_kw_consumido", "secador_kw_consumido"]
+    _maq_labels    = ["Pivô",            "Bomba Captação",       "Sede/Escritório", "Silo",                "Secador"]
+    _maq_cores     = ["#e74c3c",         "#3498db",              "#9b59b6",         "#e67e22",            "#d35400"]
+
+    # Filtragem: "Todas" mostra tudo; nome específico isola só aquela máquina.
+    if filtro_maquina != "Todas" and filtro_maquina in _maq_labels:
+        idx = _maq_labels.index(filtro_maquina)
+        _maq_cols_dem  = [_maq_cols_dem[idx]]
+        _maq_cols_real = [_maq_cols_real[idx]]
+        _maq_labels    = [_maq_labels[idx]]
+        _maq_cores     = [_maq_cores[idx]]
 
     # Demanda histórica empilhada como contorno fantasma
     demanda_total = np.zeros(24)
     for col in _maq_cols_dem:
-        demanda_total += dados_dia[col].to_numpy(dtype=float)
+        if col is not None:
+            demanda_total += dados_dia[col].to_numpy(dtype=float)
     ax.step(np.arange(24) + 0.5, demanda_total, where="mid", color="#7f8c8d",
             ls="--", lw=1.2, alpha=0.85, label="Demanda histórica")
 
     # Consumo realizado pelo RL (stacked)
     bottom = np.zeros(24)
-    captacao_top = None
     for col, label, cor in zip(_maq_cols_real, _maq_labels, _maq_cores):
         vals = np.array([h.get(col, 0.0) for h in hist_r])
         ax.bar(horas, vals, bottom=bottom, label=label, color=cor, alpha=0.85, width=0.8)
         bottom += vals
-        if col == "captacao_kw_consumido":
-            captacao_top = bottom.copy()
     ax.axvspan(17.5, 20.5, alpha=0.1, color="orange")
 
-    # Marcador do cronograma da bomba: triângulo acima das horas agendadas (h0-1, 6-7, 12-13, 21-22).
-    sched_horas = [h for h, reg in enumerate(hist_r) if reg.get("bomba_agendada")]
-    if sched_horas and captacao_top is not None:
-        topo_max  = float(np.max(bottom)) if bottom.size else 1.0
-        offset    = topo_max * 0.06 + 0.5
-        sched_y   = [captacao_top[h] + offset for h in sched_horas]
-        ax.scatter(sched_horas, sched_y, marker="v", color="#2980b9",
-                   s=60, zorder=5, label="Bomba agendada")
-
-    ax.set_title("Consumo REALIZADO pelo RL (kW)  —  cinza tracejado = demanda histórica")
+    sub = f" — {filtro_maquina}" if filtro_maquina != "Todas" else ""
+    ax.set_title(f"Consumo REALIZADO pelo RL (kW){sub}  —  cinza tracejado = demanda histórica")
     ax.set_xlabel("Hora"); ax.set_ylabel("kW")
     ax.set_xticks(range(24))
     ax.set_xticklabels(range(24), fontsize=8)
@@ -823,14 +822,18 @@ def plot_maquina_detalhada(
       (0,0) Heatmap dia × hora do consumo nominal (demanda) da máquina
       (0,1) Perfil horário médio (linha) — demanda vs consumo nas 3 estratégias
       (1,0) Consumo diário total (kWh) — 3 estratégias lado a lado
-      (1,1) Resumo textual com métricas e dicas de uso
+      (1,1) Boxplot da distribuição de kWh diário
+      (2,0) Cumprimento da restrição operacional (texto)
+      (2,1) Origem da energia (donut) — geração/bateria/rede
     """
     fig.clf()
-    gs = fig.add_gridspec(2, 2)
+    gs = fig.add_gridspec(3, 2)
     ax_heat    = fig.add_subplot(gs[0, 0])
     ax_perfil  = fig.add_subplot(gs[0, 1])
     ax_diario  = fig.add_subplot(gs[1, 0])
-    ax_texto   = fig.add_subplot(gs[1, 1])
+    ax_box     = fig.add_subplot(gs[1, 1])
+    ax_texto   = fig.add_subplot(gs[2, 0])
+    ax_donut   = fig.add_subplot(gs[2, 1])
 
     col_nom, col_cons, cor, cmap = _MAQUINAS_DETALHE[nome_maquina]
     fig.suptitle(f"Máquina: {nome_maquina}", fontsize=13, fontweight="bold")
@@ -904,43 +907,267 @@ def plot_maquina_detalhada(
     ax_diario.set_xlabel("Dia"); ax_diario.set_ylabel("kWh")
     ax_diario.legend(fontsize=7); ax_diario.grid(axis="y", alpha=0.3)
 
-    # ── Resumo textual ──────────────────────────────────────────
+    # ── Boxplot da distribuição diária ──────────────────────────
+    bp = ax_box.boxplot(
+        [diario_s, diario_h, diario_r],
+        labels=["Sem Agente", "Heurístico", "RL"],
+        patch_artist=True, widths=0.55,
+    )
+    for patch, c in zip(bp["boxes"], [_COR_S, _COR_H, _COR_R]):
+        patch.set_facecolor(c); patch.set_alpha(0.6)
+    ax_box.set_title("Distribuição de kWh diário")
+    ax_box.set_ylabel("kWh/dia"); ax_box.grid(axis="y", alpha=0.3)
+
+    # ── Cumprimento da restrição operacional (texto) ────────────
     ax_texto.axis("off")
     total_s, total_h, total_r = diario_s.sum(), diario_h.sum(), diario_r.sum()
+    pct_pico_r = sum(h.get(col_cons, 0.0) for hist in res_r for h in hist if 18 <= h["hora"] <= 20)
+    pct_pico_r = (pct_pico_r / max(total_r, 1e-9)) * 100
 
-    # Uso no pico tarifário (18-20h): fração do consumo total que cai no pico
-    def _pct_pico(resultados):
-        tot = 0.0
-        pico = 0.0
-        for hist in resultados:
-            for h in hist:
-                v = h.get(col_cons, 0.0)
-                tot += v
-                if 18 <= h["hora"] <= 20:
-                    pico += v
-        return (pico / max(tot, 1e-9)) * 100, pico
-
-    pct_s, pico_s = _pct_pico(res_s)
-    pct_h, pico_h = _pct_pico(res_h)
-    pct_r, pico_r = _pct_pico(res_r)
+    # Cálculos específicos por máquina
+    extra_linhas = []
+    if nome_maquina == "Pivô (irrigação)":
+        dias_ativ = sum(1 for hist in res_r if any(h.get(col_cons, 0.0) > 0 for h in hist))
+        horas_inicio = [next((h["hora"] for h in hist if h.get(col_cons, 0.0) > 0), None)
+                        for hist in res_r]
+        horas_inicio = [h for h in horas_inicio if h is not None]
+        h_med = float(np.mean(horas_inicio)) if horas_inicio else 0.0
+        # Verifica 8h consecutivas
+        dias_8h = 0
+        for hist in res_r:
+            on = [h.get(col_cons, 0.0) > 0 for h in hist]
+            streak = 0; max_streak = 0
+            for v in on:
+                streak = streak + 1 if v else 0
+                max_streak = max(max_streak, streak)
+            if max_streak >= 8:
+                dias_8h += 1
+        extra_linhas += [
+            f"Dias ativado     : {dias_ativ}/{n_dias}",
+            f"Hora início méd. : {h_med:5.1f}h",
+            f"Dias com 8h cons.: {dias_8h}/{n_dias}",
+        ]
+    elif nome_maquina == "Bomba de Captação":
+        # Schedule fixo {0,1,6,7,12,13,21,22}
+        from .config import BOMBA_HORAS_ON
+        horas_esperadas = sum(len(BOMBA_HORAS_ON) for _ in res_r)
+        horas_cumpridas = sum(1 for hist in res_r for h in hist
+                              if h["hora"] in BOMBA_HORAS_ON and h.get(col_cons, 0.0) > 0)
+        pct_cumpr = (horas_cumpridas / max(horas_esperadas, 1)) * 100
+        kwh_med_dia = total_r / max(n_dias, 1)
+        extra_linhas += [
+            f"Schedule cumprido: {pct_cumpr:5.1f}% ({horas_cumpridas}/{horas_esperadas})",
+            f"kWh médio/dia    : {kwh_med_dia:6.1f}",
+            f"kWh em pico (RL) : {pct_pico_r:5.1f}%  (esperado: 0)",
+        ]
+    elif nome_maquina == "Secador (no reward)":
+        meta = CONFIG["secador_meta_kwh"]
+        dias_meta = sum(1 for d in diario_r if d >= meta)
+        media_dia = float(np.mean(diario_r))
+        extra_linhas += [
+            f"Meta diária      : {meta:.1f} kWh",
+            f"Dias atingiram   : {dias_meta}/{n_dias}",
+            f"kWh médio/dia    : {media_dia:6.1f}",
+        ]
+    else:
+        extra_linhas += [
+            f"Carga não controlada pelo agente",
+            f"kWh médio/dia (RL): {total_r/max(n_dias,1):6.1f}",
+        ]
 
     resumo = (
         f"RESUMO — {nome_maquina}\n"
-        f"{'─' * 44}\n"
-        f"Consumo total mensal (kWh):\n"
+        f"{'─' * 42}\n"
+        f"Consumo total (kWh):\n"
         f"  Sem Agente : {total_s:>8.1f}\n"
-        f"  Heurístico : {total_h:>8.1f}  ({(total_h-total_s)/max(total_s,1e-9)*100:+.1f}%)\n"
-        f"  RL         : {total_r:>8.1f}  ({(total_r-total_s)/max(total_s,1e-9)*100:+.1f}%)\n"
-        f"{'─' * 44}\n"
-        f"Uso em HORÁRIO DE PICO (18-20h):\n"
-        f"  Sem Agente : {pico_s:>6.1f} kWh  ({pct_s:>5.1f}%)\n"
-        f"  Heurístico : {pico_h:>6.1f} kWh  ({pct_h:>5.1f}%)\n"
-        f"  RL         : {pico_r:>6.1f} kWh  ({pct_r:>5.1f}%)\n"
-        f"{'─' * 44}\n"
-        f"Δ pico (RL vs Sem Agente): {pct_r - pct_s:+.1f} pontos %"
+        f"  Heurístico : {total_h:>8.1f}\n"
+        f"  RL         : {total_r:>8.1f}\n"
+        f"{'─' * 42}\n"
+        f"Restrição operacional:\n"
     )
-    ax_texto.text(0.02, 0.98, resumo, transform=ax_texto.transAxes, fontsize=10,
+    for ln in extra_linhas:
+        resumo += f"  {ln}\n"
+    ax_texto.text(0.02, 0.98, resumo, transform=ax_texto.transAxes, fontsize=9,
                   va="top", fontfamily="monospace",
                   bbox=dict(boxstyle="round,pad=0.5", facecolor="#f5f5f5", alpha=0.9))
+
+    # ── Donut da origem da energia (RL) ─────────────────────────
+    # Calcula a energia gasta pela máquina dividida entre geração/bateria/rede
+    # usando a proporção das fontes na hora respectiva.
+    ger_kwh = bat_kwh = rede_kwh = 0.0
+    for hist in res_r:
+        for h in hist:
+            v = h.get(col_cons, 0.0)
+            if v <= 0:
+                continue
+            cons_total_h = h.get("consumo_kw", 0.0)
+            if cons_total_h <= 0:
+                continue
+            frac = v / cons_total_h
+            ger_kwh  += frac * h.get("fonte_geracao_kwh", 0.0)
+            bat_kwh  += frac * h.get("fonte_bateria_kwh", 0.0)
+            rede_kwh += frac * h.get("fonte_rede_kwh",    0.0)
+    soma_origem = ger_kwh + bat_kwh + rede_kwh
+    if soma_origem > 0:
+        wedges, _, autotexts = ax_donut.pie(
+            [ger_kwh, bat_kwh, rede_kwh],
+            labels=["Geração", "Bateria", "Rede"],
+            colors=["#f1c40f", "#3498db", "#e74c3c"],
+            autopct="%1.0f%%", startangle=90,
+            wedgeprops=dict(width=0.4, edgecolor="white"),
+            textprops=dict(fontsize=9),
+        )
+        for t in autotexts:
+            t.set_color("white"); t.set_fontweight("bold")
+        ax_donut.set_title(f"Origem da energia consumida (RL)\nTotal: {soma_origem:.0f} kWh",
+                           fontsize=10)
+    else:
+        ax_donut.axis("off")
+        ax_donut.text(0.5, 0.5, "Sem consumo no RL",
+                      ha="center", va="center", fontsize=11, color="#666")
+
+    fig.tight_layout()
+
+
+# ──────────────────────────────────────────────────────────────
+# Visão Geral Operacional — BI consolidado
+# ──────────────────────────────────────────────────────────────
+
+# Pares (coluna_consumida, label) para iterar as 5 máquinas do modelo.
+_MAQ_KPI = [
+    ("pivo_kw_consumido",     "Pivô",            "#e74c3c"),
+    ("captacao_kw_consumido", "Bomba Captação",  "#3498db"),
+    ("sede_kw_consumido",     "Sede/Escritório", "#9b59b6"),
+    ("silo_kw_consumido",     "Silo",            "#e67e22"),
+    ("secador_kw_consumido",  "Secador",         "#d35400"),
+]
+
+
+def _kpis_maquinas(historicos: list[list[dict]]) -> dict[str, dict]:
+    """Calcula KPIs operacionais por máquina ao longo de todos os dias."""
+    saida = {}
+    for col, label, _ in _MAQ_KPI:
+        vals = np.array([[h.get(col, 0.0) for h in hist] for hist in historicos])
+        kwh_mes  = float(vals.sum())
+        h_ativ   = int((vals > 0).sum())
+        pico_arr = vals[:, 18:21]
+        kwh_pico = float(pico_arr.sum())
+        pct_pico = (kwh_pico / kwh_mes * 100) if kwh_mes > 0 else 0.0
+        kwh_dia  = float(vals.sum(axis=1).mean())
+        saida[label] = dict(kwh_mes=kwh_mes, h_ativ=h_ativ,
+                            kwh_pico=kwh_pico, pct_pico=pct_pico,
+                            kwh_dia=kwh_dia)
+    return saida
+
+
+def _metricas_microgrid(hist: list[list[dict]]) -> dict[str, float]:
+    """Calcula SCR, SSR e PAR para uma estratégia.
+
+    SCR = (geração consumida na hora) / (geração total)
+    SSR = (consumo atendido por geração própria) / (consumo total)
+    PAR = pico da rede / média da rede (importação)
+    """
+    ger_total = sum(h["geracao_kw"]   for d in hist for h in d)
+    con_total = sum(h["consumo_kw"]   for d in hist for h in d)
+    ger_dir   = sum(h.get("fonte_geracao_kwh", 0.0) for d in hist for h in d)
+    bat_used  = sum(h.get("fonte_bateria_kwh", 0.0) for d in hist for h in d)
+    rede_arr  = np.array([h["rede_kwh"] for d in hist for h in d])
+    rede_med  = float(rede_arr.mean()) if rede_arr.size else 0.0
+    rede_max  = float(rede_arr.max())  if rede_arr.size else 0.0
+
+    scr = (ger_dir / ger_total * 100) if ger_total > 0 else 0.0
+    ssr = ((ger_dir + bat_used) / con_total * 100) if con_total > 0 else 0.0
+    par = (rede_max / rede_med) if rede_med > 0 else 0.0
+    return {"SCR": scr, "SSR": ssr, "PAR": par}
+
+
+def plot_visao_geral_operacional(
+    fig: plt.Figure,
+    dias: list[pd.DataFrame],
+    res_s: list[list[dict]],
+    res_h: list[list[dict]],
+    res_r: list[list[dict]],
+) -> None:
+    """Painel BI consolidado de métricas operacionais e de microgrid."""
+    fig.clf()
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.1])
+    ax_tab = fig.add_subplot(gs[0, 0])
+    ax_bar = fig.add_subplot(gs[0, 1])
+    ax_mg  = fig.add_subplot(gs[1, 0])
+    ax_heat = fig.add_subplot(gs[1, 1])
+
+    fig.suptitle("Visão Geral Operacional — todas as máquinas",
+                 fontsize=13, fontweight="bold")
+
+    kpi_s = _kpis_maquinas(res_s)
+    kpi_h = _kpis_maquinas(res_h)
+    kpi_r = _kpis_maquinas(res_r)
+
+    # ── 1. Tabela de KPIs por máquina (RL) ──────────────────────
+    ax_tab.axis("off")
+    headers = ["Máquina", "kWh mês", "Horas ativas", "kWh pico", "% pico", "Δ vs Heur"]
+    linhas = []
+    for col, label, _ in _MAQ_KPI:
+        r = kpi_r[label]; h = kpi_h[label]
+        delta = ((r["kwh_mes"] - h["kwh_mes"]) / h["kwh_mes"] * 100) if h["kwh_mes"] > 0 else 0.0
+        linhas.append([label, f"{r['kwh_mes']:.0f}", f"{r['h_ativ']}",
+                       f"{r['kwh_pico']:.0f}", f"{r['pct_pico']:.1f}%",
+                       f"{delta:+.1f}%"])
+    tabela = ax_tab.table(cellText=linhas, colLabels=headers,
+                          cellLoc="center", loc="center")
+    tabela.auto_set_font_size(False); tabela.set_fontsize(9)
+    tabela.scale(1.0, 1.6)
+    for j in range(len(headers)):
+        tabela[(0, j)].set_facecolor("#2c3e50")
+        tabela[(0, j)].set_text_props(color="white", fontweight="bold")
+    ax_tab.set_title("KPIs operacionais por máquina (RL)", fontsize=11)
+
+    # ── 2. Barras empilhadas kWh mensal por máquina × estratégia ─
+    labels_est = ["Sem Agente", "Heurístico", "RL"]
+    bottoms = np.zeros(3)
+    for col, label, cor in _MAQ_KPI:
+        vals = np.array([kpi_s[label]["kwh_mes"], kpi_h[label]["kwh_mes"], kpi_r[label]["kwh_mes"]])
+        ax_bar.bar(labels_est, vals, bottom=bottoms, label=label, color=cor, alpha=0.85)
+        bottoms += vals
+    ax_bar.set_title("kWh mensal por máquina × estratégia", fontsize=11)
+    ax_bar.set_ylabel("kWh")
+    ax_bar.legend(fontsize=7, loc="upper right")
+    ax_bar.grid(axis="y", alpha=0.3)
+
+    # ── 3. Métricas de microgrid (SCR, SSR, PAR) ────────────────
+    mg_s = _metricas_microgrid(res_s)
+    mg_h = _metricas_microgrid(res_h)
+    mg_r = _metricas_microgrid(res_r)
+    metricas = ["SCR", "SSR", "PAR"]
+    x = np.arange(len(metricas)); w = 0.27
+    ax_mg.bar(x - w, [mg_s[m] for m in metricas], w, label="Sem Agente", color=_COR_S)
+    ax_mg.bar(x,     [mg_h[m] for m in metricas], w, label="Heurístico", color=_COR_H)
+    ax_mg.bar(x + w, [mg_r[m] for m in metricas], w, label="RL",          color=_COR_R)
+    ax_mg.set_xticks(x); ax_mg.set_xticklabels(metricas)
+    ax_mg.set_title("Métricas de microgrid (SCR/SSR em %, PAR em razão)", fontsize=11)
+    ax_mg.legend(fontsize=8); ax_mg.grid(axis="y", alpha=0.3)
+    for i, m in enumerate(metricas):
+        suf = "%" if m in ("SCR", "SSR") else ""
+        ax_mg.text(i - w, mg_s[m] + 0.5, f"{mg_s[m]:.1f}{suf}", ha="center", fontsize=7)
+        ax_mg.text(i,     mg_h[m] + 0.5, f"{mg_h[m]:.1f}{suf}", ha="center", fontsize=7)
+        ax_mg.text(i + w, mg_r[m] + 0.5, f"{mg_r[m]:.1f}{suf}", ha="center", fontsize=7)
+
+    # ── 4. Heatmap consolidado: uso total × hora ─────────────────
+    # Soma kW de todas as máquinas do RL, agregado em (dia × hora).
+    matriz = np.zeros((len(res_r), 24))
+    for d, hist in enumerate(res_r):
+        for h in hist:
+            soma = sum(h.get(col, 0.0) for col, _, _ in _MAQ_KPI)
+            matriz[d, int(h["hora"])] = soma
+    im = ax_heat.imshow(matriz, aspect="auto", cmap="viridis", interpolation="nearest")
+    fig.colorbar(im, ax=ax_heat, fraction=0.04, pad=0.02, label="kW total")
+    ax_heat.axvspan(17.5, 20.5, alpha=0.18, color="white")
+    ax_heat.set_title("Carga total (dia × hora) — RL", fontsize=11)
+    ax_heat.set_xlabel("Hora"); ax_heat.set_ylabel("Dia")
+    ax_heat.set_xticks(range(0, 24, 3))
+    step = max(1, len(dias) // 10)
+    datas_labels = [d["data"].iloc[0].strftime("%d") for d in dias]
+    ax_heat.set_yticks(range(0, len(dias), step))
+    ax_heat.set_yticklabels(datas_labels[::step], fontsize=7)
 
     fig.tight_layout()
