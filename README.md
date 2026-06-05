@@ -64,3 +64,27 @@ smarty_energy_RL/
    python main.py
    ```
 3. O sistema irá treinar por 20.000 episódios e abrirá o dashboard automaticamente ao final.
+
+---
+
+## Documentação
+
+A documentação do projeto fica em `docs/`, construída com o framework
+[Retype](https://retype.com).
+
+### Servidor de desenvolvimento
+
+```bash
+cd docs
+npm install            # instala o retypeapp (dev dependency)
+npm run docs:dev       # retype start — abre o site e recarrega ao editar
+```
+
+### Gerar o site estático
+
+```bash
+cd docs
+npm run docs:build     # retype build — gera o site em docs/site/
+```
+
+O site é publicado em `docs/site/` (pasta ignorada pelo Git).

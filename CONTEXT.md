@@ -67,11 +67,12 @@ Agentes baseados em regras com um **índice de estresse financeiro** (0–100) c
 
 ## Dados de Entrada
 
-Planilha Excel local (`dados/base_nova.xlsx`), com duas fazendas (`FAZ-001`,
-`FAZ-002`); a fazenda usada é definida por `ID_FAZENDA` no `config.py` (padrão
-`FAZ-002`). Abas relevantes:
+Planilha Excel local (`dados/modelo_gestao_energia_fazenda_v8.xlsx`), com duas
+fazendas (`FAZ-001`, `FAZ-002`); a fazenda usada é definida por `ID_FAZENDA` no
+`config.py` (padrão `FAZ-002`). Abas relevantes:
 - **Tarifa**: curva horária única em R$/kWh (`Fora Ponta` / `Ponta`), 24 valores
-- **Geracao**: colunas `Solar_kW` e `Eólica_kW` por fazenda/dia/hora
+- **Geracao**: formato longo — uma linha por gerador (`ID_Gerador`, `Tipo` =
+  `Solar FV`/`Eólica`, valor em `Energia_Gerada_kWh`) por fazenda/dia/hora
 - **Cargas**: consumo por equipamento nomeado por fazenda/dia/hora
 
 O `data_loader.py` mapeia as 7 cargas da base para as 4 colunas do modelo:

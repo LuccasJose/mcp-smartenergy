@@ -11,8 +11,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 # Defina SHEET_ID (env) para baixar de um Google Sheets com o mesmo esquema.
 SHEET_ID = os.getenv("SHEET_ID", "")
 
-# Base de dados local (base nova — contém FAZ-001 e FAZ-002)
-DATA_PATH = _ROOT / os.getenv("DATA_PATH", "dados/base_nova.xlsx")
+# Base de dados local (contém FAZ-001 e FAZ-002)
+DATA_PATH = _ROOT / os.getenv("DATA_PATH", "dados/modelo_gestao_energia_fazenda_v8.xlsx")
 OUTPUT_DIR = _ROOT / os.getenv("OUTPUT_DIR", "outputs")
 
 # Fazenda usada no modelo (a base nova traz duas: FAZ-001 e FAZ-002)

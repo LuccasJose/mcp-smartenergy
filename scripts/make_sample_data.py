@@ -5,7 +5,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "dados"
 OUT.mkdir(exist_ok=True)
-PATH = OUT / "base_nova.xlsx"
+# Fixture sintética (2 dias) — nome propositalmente distinto da base real
+# (modelo_gestao_energia_fazenda_v8.xlsx) para nunca sobrescrevê-la.
+# Para usá-la: DATA_PATH=dados/sample_base.xlsx
+PATH = OUT / "sample_base.xlsx"
 
 # Create tarifa sheet
 horas = [f"{h:02d}:00" for h in range(24)]
@@ -14,17 +17,19 @@ tarifa = pd.DataFrame({
     "Energia_R$/kWh": np.linspace(0.5, 0.9, 24)
 })
 
-# Create geracao sheet for two days
+# Create geracao sheet for two days (formato longo: uma linha por gerador)
 rows = []
 for day in ["2025-01-01", "2025-01-02"]:
     for h in range(24):
-        rows.append({
+        base = {
             "ID_Fazenda": "FAZ-002",
             "Data_Hora": f"{day} {h:02d}:00:00",
             "Hora": h,
-            "Solar_kW": max(0, 10 * np.sin((h-6)/24*2*np.pi)),
-            "Eólica_kW": 2.0 if h%6==0 else 0.5,
-        })
+        }
+        rows.append({**base, "ID_Gerador": "SOL-MED", "Tipo": "Solar FV",
+                     "Energia_Gerada_kWh": max(0, 10 * np.sin((h-6)/24*2*np.pi))})
+        rows.append({**base, "ID_Gerador": "EOL-MED", "Tipo": "Eólica",
+                     "Energia_Gerada_kWh": 2.0 if h%6==0 else 0.5})
 ger = pd.DataFrame(rows)
 
 # Create cargas sheet

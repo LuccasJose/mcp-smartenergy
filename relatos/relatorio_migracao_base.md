@@ -77,3 +77,42 @@ A base nova tem 7 cargas por fazenda; o modelo opera com 4. Mapeamento aplicado
    ~5–6 kW. Recomenda-se revisar esse override para condizer com a base nova.
 2. Trocar `ID_FAZENDA` para `FAZ-001` deixa bomba e secador sem dados reais.
 3. `dados/base_antiga.xlsx` foi mantido na pasta (pode ser removido).
+
+---
+
+# Atualização — Migração para `modelo_gestao_energia_fazenda_v8.xlsx`
+
+**Data:** 04/06/2026
+**Escopo:** Substituição de `dados/base_nova.xlsx` pela base
+`dados/modelo_gestao_energia_fazenda_v8.xlsx`.
+
+## A. Mudança de esquema
+
+A nova base é compatível em quase tudo (**Tarifa** e **Cargas** mantêm estrutura
+e nomes). A única quebra é a aba **Geracao**, que passou de **formato largo**
+(colunas `Solar_kW` / `Eólica_kW`) para **formato longo**: uma linha por gerador,
+discriminada pela coluna `Tipo` (`Solar FV` / `Eólica`), com o valor em
+`Energia_Gerada_kWh` (colunas: `Data_Hora, Hora, ID_Fazenda, ID_Gerador, Tipo,
+Energia_Gerada_kWh`).
+
+Abas novas disponíveis e ainda não consumidas pelo modelo: `Cadastro_Fazenda`,
+`Cadastro_Cargas`, `Config_Geracao`, `Base_Irradiacao`, `Consumo_Fatura`,
+`Resumo_Mensal`.
+
+## B. Arquivos alterados
+
+- **`config.py`**: `DATA_PATH` → `dados/modelo_gestao_energia_fazenda_v8.xlsx`.
+- **`data_loader.py`**: leitura da geração filtra por `Tipo` (`Solar FV` /
+  `Eólica`) sobre `Energia_Gerada_kWh`, em vez das antigas colunas
+  `Solar_kW` / `Eólica_kW`. Saída (`solar_kw, eolico_kw, …`) inalterada.
+- **`scripts/make_sample_data.py`**: passa a gerar a aba `Geracao` no formato
+  longo e grava com o novo nome de arquivo.
+- **`CONTEXT.md`**: seção "Dados de Entrada" atualizada.
+
+## C. Validação
+
+- 31 dias × 24h carregados sem erro.
+- **Conservação de geração confirmada** contra a aba `Resumo_Mensal` da própria
+  base (FAZ-002): solar 6680,0 + eólica 2072,8 = **8752,8 kWh**, idêntico ao
+  `Geração_kWh` da Fazenda São Pedro.
+- Testes (`tests/test_environment.py`) usam fixtures sintéticas e seguem passando.
