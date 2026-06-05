@@ -43,7 +43,7 @@ from smarty_energy import visualization as viz
 from smarty_energy.dashboard import abrir_dashboard
 
 
-def main(replot: bool = False) -> None:
+def main(replot: bool = False, web: bool = False) -> None:
     # ── 1. Dados ──────────────────────────────────────────────────
     print("Carregando dados...")
     DIAS, TARIFA = carregar_dados()
@@ -202,9 +202,15 @@ def main(replot: bool = False) -> None:
         print(f"{line:<63}║")
     print("╚══════════════════════════════════════════════════════════════╝")
 
-    # ── 9. Dashboard unificado (abas em uma única janela) ─────────
-    print("\nAbrindo dashboard unificado... (feche a janela para encerrar)")
+    # ── 9. Dashboard ──────────────────────────────────────────────
     dados_3 = {"dias": DIAS, "res_s": RES_S, "res_h": RES_H, "res_r": RES_R}
+    if web:
+        from smarty_energy.dashboard_web import abrir_dashboard_web
+        print("\nAbrindo dashboard web em localhost... (Ctrl+C para encerrar)")
+        abrir_dashboard_web(DIAS, RES_S, RES_H, RES_R)
+        return
+
+    print("\nAbrindo dashboard unificado... (feche a janela para encerrar)")
     abrir_dashboard(
         {
             "Aprendizado"       : fig_aprendizado,
@@ -228,5 +234,11 @@ if __name__ == "__main__":
         help="Pula o treinamento, carrega Q-tables e training_history.pkl salvos "
              "e regenera todas as visualizações com base no último treino.",
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Abre o dashboard web (Dash/Plotly) em localhost:8050 em vez do "
+             "dashboard tkinter. Pode ser combinado com --replot.",
+    )
     args = parser.parse_args()
-    main(replot=args.replot)
+    main(replot=args.replot, web=args.web)

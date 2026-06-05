@@ -59,7 +59,7 @@ def _criar_aba_explorar(notebook: ttk.Notebook, dados: dict) -> None:
     combo.pack(side=tk.LEFT)
 
     ttk.Label(controle, text="Máquina:", font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(20, 8))
-    opcoes_maq = ["Todas", "Pivô", "Bomba Captação", "Sede/Escritório", "Silo", "Secador"]
+    opcoes_maq = ["Todas", "Pivô", "Bomba Captação", "Sede/Escritório", "Secadora/silo"]
     combo_maq = ttk.Combobox(controle, values=opcoes_maq, state="readonly", width=18, font=("Segoe UI", 10))
     combo_maq.current(0)
     combo_maq.pack(side=tk.LEFT)

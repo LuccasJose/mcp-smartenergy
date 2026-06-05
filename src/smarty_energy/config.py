@@ -50,10 +50,11 @@ CONFIG = {
 
     # Metas Operacionais
     "pivo_horas_alvo": 8,           # duração do ciclo travado de irrigação
-    "pivo_nominal_kw": 3.0,         # potência do pivô durante lock (override de dados)
-    "bomba_cap_nominal_kw": 15.0,   # potência da bomba durante hora agendada (override de dados)
-    "secador_meta_kwh": 20.0,
-    "sede_desvio_max": 0.20,     # 20%
+    "pivo_nominal_kw": 8.0,         # potência do pivô durante lock (Cons_Max V8 FAZ-002)
+    "bomba_cap_nominal_kw": 17.6,   # potência da bomba durante hora agendada (Cons_Max V8 FAZ-002)
+    "secador_meta_kwh": 20.0,       # meta diária de energia do secador
+    "secador_max_kw": 2.4,          # potência máxima do secador (Cons_Max V8 FAZ-002)
+    "sede_desvio_max": 0.20,        # 20%
 
     # Pesos do reward cooperativo (rebalanceados — custo como sinal dominante)
     "w_custo": 8.0,         # peso do custo monetário no reward

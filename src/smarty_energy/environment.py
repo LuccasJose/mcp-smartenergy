@@ -126,7 +126,8 @@ class FazendaEnergyEnv:
         # ║ garante que sede_real ∈ [0.8, 1.2] × sede_ideal.        ║
         # ╚═════════════════════════════════════════════════════════╝
         sede_ideal = float(r["sede_kw"])
-        sede_real  = sede_ideal * 0.8 if stress_lvl > 80 else sede_ideal
+        sede_eco_ativo = stress_lvl > 80
+        sede_real  = sede_ideal * 0.8 if sede_eco_ativo else sede_ideal
         sede_lo    = sede_ideal * (1.0 - cfg["sede_desvio_max"])
         sede_hi    = sede_ideal * (1.0 + cfg["sede_desvio_max"])
         sede_real  = max(sede_lo, min(sede_hi, sede_real))
@@ -166,18 +167,19 @@ class FazendaEnergyEnv:
             self.bomba_total_h += 1
 
         # ╔═════════════════════════════════════════════════════════╗
-        # ║ R-SECADOR — potência 0.44-2.2 kW + meta diária ≥ 20 kWh ║
-        # ║ Rescue tardio: nas últimas 4h do dia, se faltar energia,║
-        # ║ força ON em 2.2 kW (HARD).                              ║
+        # ║ R-SECADOR — usa Secadora real da base + meta ≥ 20 kWh   ║
+        # ║ Agente decide cortar (c_sec=True) ou permitir.          ║
+        # ║ Rescue: se adiar tornaria a meta inviável, força ON na  ║
+        # ║ potência máxima (cfg.secador_max_kw).                   ║
         # ╚═════════════════════════════════════════════════════════╝
-        p_sec_pot   = 2.2 if stress_lvl < 40 else 0.44
-        p_sec_max   = 2.2
+        p_sec_pot   = float(r.get("secador_kw", 0.0))    # potência agendada na hora
+        p_sec_max   = cfg["secador_max_kw"]              # teto físico para rescue
         horas_restantes = 24 - self.hora
         kwh_faltam  = cfg["secador_meta_kwh"] - self.secador_kwh_ac
         # Adiar essa hora torna a meta inviável? → força ON na potência máxima.
         if kwh_faltam > 0 and (horas_restantes - 1) * p_sec_max < kwh_faltam:
             c_sec = False
-            p_sec_pot = p_sec_max
+            p_sec_pot = max(p_sec_pot, p_sec_max)
         p_sec = 0.0 if c_sec else p_sec_pot
         if not c_sec:
             self.secador_kwh_ac += p_sec
@@ -338,6 +340,7 @@ class FazendaEnergyEnv:
             "em_pico_tarifa": em_pico_tarifa,
             "bomba_ligada"  : bomba_ligada,
             "bomba_agendada": self.hora - 1 in BOMBA_HORAS_ON,
+            "sede_eco"      : sede_eco_ativo,
             "kwh_cortado"   : kwh_cortado,
         })
 
