@@ -1,0 +1,5 @@
+# Dependências e saída de build do Retype
+node_modules/
+site/
+.retype/
+retype.manifest

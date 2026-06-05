@@ -1,0 +1,63 @@
+---
+label: Configuração
+icon: gear
+order: 40
+---
+
+# Configuração
+
+Todos os parâmetros vivem em `src/smarty_energy/config.py`.
+
+## Hiperparâmetros de treino
+
+| Parâmetro | Descrição |
+|---|---|
+| `n_episodios` | Dias simulados no treinamento |
+| `alpha` | Taxa de aprendizado (otimista) |
+| `gamma` | Fator de desconto futuro |
+| `epsilon_inicial` → `epsilon_final` | Exploração ε-greedy (com decaimento) |
+| `epsilon_decay` | Decaimento de ε por episódio |
+
+## Bateria
+
+| Parâmetro | Valor | Descrição |
+|---|---|---|
+| `bateria_cap_kwh` | 24.0 | Capacidade da bateria |
+| `soc_inicial_pct` | 50.0 | SOC inicial |
+| `soc_min_pct` | 15.0 | SOC crítico (penalizado) |
+| `soc_max_pct` | 95.0 | SOC máximo (para de carregar) |
+| `eficiencia_carga` | 0.92 | η de carga |
+| `eficiencia_descarga` | 0.95 | η de descarga |
+
+## Pesos do reward cooperativo
+
+O custo financeiro é o **sinal dominante** da recompensa, evitando que os
+agentes manipulem o SOC da bateria em detrimento da economia real.
+
+| Componente | Peso | Papel |
+|---|---|---|
+| `w_custo` | 8.0 | Custo diário — sinal dominante |
+| `pen_soc` | 12.0 | Barreira de segurança do SOC |
+| `pen_teto` | 8.0 | Estouro do teto de consumo |
+| `pen_producao` | 5.0 | Captação cortada |
+| `bonus_excedente` | 0.5 | Incentivo à exportação de excedente |
+| `bonus_soc_ok` | 1.0 | SOC em faixa saudável |
+
+## Limites operacionais
+
+| Parâmetro | Valor | Descrição |
+|---|---|---|
+| `pcc_max_kw` | 65.8 | Limite do ponto de conexão (import/export) |
+| `inversor_fv_max_kw` | 50.0 | Teto do inversor fotovoltaico |
+| `eolico_nominal_kw` | 10.0 | Potência nominal do aerogerador |
+
+## Tetos do Gerente de Carga
+
+```python
+TETOS_KW = {0: 20.0, 1: 30.0, 2: 40.0}  # conservador / moderado / liberal
+```
+
+!!!note
+Esta página resume os parâmetros mais relevantes. Consulte o `config.py` para a
+lista completa, incluindo penalidades operacionais e shaping por máquina.
+!!!

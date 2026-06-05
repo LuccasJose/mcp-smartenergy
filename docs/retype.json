@@ -1,0 +1,13 @@
+{
+  "$schema": "https://retype.com/schema/retype-config-schema.json",
+  "input": ".",
+  "output": "site",
+  "url": "https://smartenergy-mas.example.com",
+  "branding": {
+    "title": "SmartEnergy MAS",
+    "label": "Docs"
+  },
+  "footer": {
+    "copyright": "&copy; {{ year }} SmartEnergy MAS — TCC. Dados reais da Fazenda Buritis (Luziânia, GO)."
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "smartenergy-docs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Documentação Retype do projeto SmartEnergy MAS (TCC).",
+  "scripts": {
+    "docs:dev": "retype start",
+    "docs:build": "retype build"
+  },
+  "devDependencies": {
+    "retypeapp": "^4.6.0"
+  }
+}
