@@ -69,8 +69,37 @@ smarty_energy_RL/
 
 ## Documentação
 
-A documentação do projeto fica em `docs/`, construída com o framework
-[Retype](https://retype.com).
+A documentação do projeto fica em `docs/` e é construída com o
+[**Retype**](https://retype.com), um framework que transforma arquivos Markdown
+em um site de documentação estático, com busca, navegação lateral e tema
+claro/escuro — sem necessidade de escrever HTML.
+
+### O que está documentado
+
+| Página | Conteúdo |
+| :--- | :--- |
+| **Início** | Visão geral do projeto e resultados finais |
+| **Instalação** | Pré-requisitos, ambiente virtual e variáveis de ambiente |
+| **Execução** | Pipeline `python main.py` e artefatos gerados |
+| **Arquitetura** | Os três agentes, espaço de estados, reward e Hysteretic Q-Learning |
+| **Componentes** | Papel de cada módulo de `src/smarty_energy/` |
+| **Dados de entrada** | Base Excel, abas e mapeamento de cargas/geração |
+| **Configuração** | Hiperparâmetros e pesos do reward |
+
+### Estrutura
+
+```text
+docs/
+├── retype.json        # Configuração do site (branding, navegação, saída)
+├── package.json       # Declara o retypeapp e os scripts npm
+├── index.md           # Página inicial
+├── instalacao.md
+├── execucao.md
+├── arquitetura.md
+├── componentes.md
+├── dados.md
+└── configuracao.md
+```
 
 ### Servidor de desenvolvimento
 
@@ -88,3 +117,6 @@ npm run docs:build     # retype build — gera o site em docs/site/
 ```
 
 O site é publicado em `docs/site/` (pasta ignorada pelo Git).
+
+> Antes de publicar, ajuste o campo `url` em `docs/retype.json` para o domínio
+> real (ex.: GitHub Pages) — o `retype build` exige esse campo.
