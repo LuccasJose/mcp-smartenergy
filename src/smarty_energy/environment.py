@@ -126,7 +126,8 @@ class FazendaEnergyEnv:
         # ║ garante que sede_real ∈ [0.8, 1.2] × sede_ideal.        ║
         # ╚═════════════════════════════════════════════════════════╝
         sede_ideal = float(r["sede_kw"])
-        sede_eco_ativo = stress_lvl > 80
+        # Eco-mode: reduz 20% quando estresse alto (≥70 dispara em pico tarifário).
+        sede_eco_ativo = stress_lvl >= 70
         sede_real  = sede_ideal * 0.8 if sede_eco_ativo else sede_ideal
         sede_lo    = sede_ideal * (1.0 - cfg["sede_desvio_max"])
         sede_hi    = sede_ideal * (1.0 + cfg["sede_desvio_max"])

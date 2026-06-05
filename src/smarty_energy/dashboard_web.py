@@ -203,25 +203,40 @@ def _tabela_kpis(res_r, res_h) -> list[dict]:
         c_r = cst_r_maq[label]; c_h = cst_h_maq[label]
         d_custo = ((c_r - c_h) / c_h * 100) if c_h > 0 else 0.0
         linhas.append({
-            "Máquina"     : label,
-            "kWh mês"     : f"{r['kwh_mes']:.0f}",
-            "Custo R$"    : f"R$ {c_r:,.0f}".replace(",", "."),
-            "Horas ativas": r["h_ativ"],
-            "kWh pico"    : f"{r['kwh_pico']:.0f}",
-            "% pico"      : f"{r['pct_pico']:.1f}%",
-            "Δ$ vs Heur"  : f"{d_custo:+.1f}%",
+            "Máquina"          : label,
+            "kWh mês"          : f"{r['kwh_mes']:.0f}",
+            "Custo teórico R$" : f"R$ {c_r:,.0f}".replace(",", "."),
+            "Horas ativas"     : r["h_ativ"],
+            "kWh pico"         : f"{r['kwh_pico']:.0f}",
+            "% pico"           : f"{r['pct_pico']:.1f}%",
+            "Δ$ vs Heur"       : f"{d_custo:+.1f}%",
         })
-    # Linha de total (fatura real)
-    d_total = ((cst_r["custo_fatura_total"] - cst_h["custo_fatura_total"])
-               / max(cst_h["custo_fatura_total"], 1e-9) * 100)
+    # Cascata: soma teórica → economia bat./solar → fatura real
+    teorico_total = sum(cst_r_maq.values())
+    economia_bs = teorico_total - cst_r["custo_fatura_total"]
+    pct_econ = (economia_bs / teorico_total * 100) if teorico_total > 0 else 0.0
+    d_fatura = ((cst_r["custo_fatura_total"] - cst_h["custo_fatura_total"])
+                / max(cst_h["custo_fatura_total"], 1e-9) * 100)
     linhas.append({
-        "Máquina"     : "TOTAL FATURA",
-        "kWh mês"     : f"{cst_r['rede_kwh_total']:.0f}",
-        "Custo R$"    : f"R$ {cst_r['custo_fatura_total']:,.0f}".replace(",", "."),
-        "Horas ativas": "—",
-        "kWh pico"    : "—",
-        "% pico"      : "—",
-        "Δ$ vs Heur"  : f"{d_total:+.1f}%",
+        "Máquina"          : "Soma teórica",
+        "kWh mês"          : "—",
+        "Custo teórico R$" : f"R$ {teorico_total:,.0f}".replace(",", "."),
+        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
+        "Δ$ vs Heur"       : "—",
+    })
+    linhas.append({
+        "Máquina"          : "(−) Bat./solar",
+        "kWh mês"          : "—",
+        "Custo teórico R$" : f"−R$ {economia_bs:,.0f}".replace(",", "."),
+        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
+        "Δ$ vs Heur"       : f"−{pct_econ:.1f}%",
+    })
+    linhas.append({
+        "Máquina"          : "TOTAL FATURA (real)",
+        "kWh mês"          : f"{cst_r['rede_kwh_total']:.0f}",
+        "Custo teórico R$" : f"R$ {cst_r['custo_fatura_total']:,.0f}".replace(",", "."),
+        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
+        "Δ$ vs Heur"       : f"{d_fatura:+.1f}%",
     })
     return linhas
 
@@ -252,18 +267,27 @@ def _fig_visao_geral(dias, res_s, res_h, res_r) -> go.Figure:
                              marker_color=cor, opacity=0.85,
                              hovertemplate=f"<b>{label}</b><br>R$ %{{y:,.2f}}<extra></extra>"),
                       row=1, col=1)
-    # Anotação com fatura real acima de cada barra
-    totais_stack = [sum(d[label] for d in [cst_s_maq, cst_h_maq, cst_r_maq][i:i+1] for label in cst_s_maq)
-                    for i in range(3)]
-    faturas = [cst_s["custo_fatura_total"], cst_h["custo_fatura_total"], cst_r["custo_fatura_total"]]
+    # Marcador "diamante" no nível da fatura real em cada barra
+    faturas = [cst_s["custo_fatura_total"], cst_h["custo_fatura_total"],
+               cst_r["custo_fatura_total"]]
     stack_tots = [sum(cst_s_maq.values()), sum(cst_h_maq.values()), sum(cst_r_maq.values())]
-    max_top = max(stack_tots)
+    fig.add_trace(go.Scatter(
+        x=estr, y=faturas, mode="markers+text",
+        marker=dict(symbol="diamond", size=18, color="#1b4f72",
+                    line=dict(color="white", width=2)),
+        text=[f"R${f:,.0f}".replace(",", ".") for f in faturas],
+        textposition="middle right",
+        textfont=dict(size=10, color="#1b4f72", family="Arial Black"),
+        name="Fatura real (após bat./solar)",
+        hovertemplate="<b>Fatura real</b><br>R$ %{y:,.2f}<extra></extra>"),
+        row=1, col=1)
+    # Anotação de topo: custo teórico total
     for i, e in enumerate(estr):
         fig.add_annotation(
-            xref=f"x", yref=f"y",
+            xref="x", yref="y",
             x=e, y=stack_tots[i],
-            text=f"<b>Fatura<br>R$ {faturas[i]:,.0f}</b>".replace(",", "."),
-            showarrow=False, yshift=24, font=dict(size=10, color="#2c3e50"),
+            text=f"Teórico<br>R$ {stack_tots[i]:,.0f}".replace(",", "."),
+            showarrow=False, yshift=18, font=dict(size=9, color="#566573"),
         )
 
     # (0,1) SCR/SSR/PAR
@@ -566,14 +590,18 @@ def _content_visao():
         dash_table.DataTable(
             id="tab-kpis",
             columns=[{"name": c, "id": c} for c in
-                     ["Máquina", "kWh mês", "Custo R$", "Horas ativas",
+                     ["Máquina", "kWh mês", "Custo teórico R$", "Horas ativas",
                       "kWh pico", "% pico", "Δ$ vs Heur"]],
             style_cell={"textAlign": "center", "padding": "6px",
                         "fontFamily": "Segoe UI", "fontSize": "0.92em"},
             style_header={"backgroundColor": "#2c3e50", "color": "white", "fontWeight": "bold"},
             style_data_conditional=[
-                {"if": {"filter_query": '{Máquina} = "TOTAL FATURA"'},
+                {"if": {"filter_query": '{Máquina} = "Soma teórica"'},
                  "backgroundColor": "#ecf0f1", "fontWeight": "bold"},
+                {"if": {"filter_query": '{Máquina} = "(−) Bat./solar"'},
+                 "backgroundColor": "#d5f5e3", "fontWeight": "bold"},
+                {"if": {"filter_query": '{Máquina} = "TOTAL FATURA (real)"'},
+                 "backgroundColor": "#d6eaf8", "fontWeight": "bold"},
             ],
         ),
         dcc.Graph(id="g-visao"),
