@@ -23,7 +23,7 @@ ID_FAZENDA = os.getenv("ID_FAZENDA", "FAZ-002")
 # ──────────────────────────────────────────────────────────────
 CONFIG = {
     # Treinamento
-    "n_episodios": 200000,    # dias simulados no treino (reduzido para testes rápidos)
+    "n_episodios": 100000,    # dias simulados no treino (cap para evitar drift IQL+hysteretic)
     "alpha": 0.1,           # taxa de aprendizado
     "gamma": 0.98,          # fator de desconto futuro
     "epsilon_inicial": 1.0, # exploração inicial (100 %)

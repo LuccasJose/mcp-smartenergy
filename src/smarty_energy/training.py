@@ -1,6 +1,8 @@
 """Loop de treinamento IQL (Independent Q-Learning) cooperativo."""
 
+import copy
 import pickle
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
@@ -26,6 +28,12 @@ def treinar(
     dia anterior. Os dias são percorridos em ordem (ep % len(dias)),
     reiniciando o ciclo após o último dia do mês.
 
+    Early stopping: a cada episódio, calcula a média móvel do custo
+    sobre os últimos `EARLY_STOP_WINDOW` episódios; se o valor atual
+    for o melhor já observado (após `min_ep_to_save` episódios), faz
+    snapshot das Q-tables. Ao final, restaura as Q-tables do snapshot
+    com menor custo médio — protege contra drift do IQL+Hysteretic.
+
     Args:
         dias       : lista de DataFrames diários (saída de carregar_dados)
         tarifa_24h : array (24,) com tarifa em R$/kWh
@@ -40,6 +48,13 @@ def treinar(
     eps_hist     = []
     n_ep         = cfg["n_episodios"]
     soc_proximo  = cfg["soc_inicial_pct"]   # SOC inicial do 1º episódio
+
+    # ── Early stopping: snapshot da melhor política observada ──────
+    EARLY_STOP_WINDOW = 1000           # janela da média móvel
+    min_ep_to_save    = max(EARLY_STOP_WINDOW, n_ep // 5)  # ignora primeiros 20%
+    best_custo_med    = float("inf")
+    best_ep           = -1
+    best_state        = None           # snapshot das q_tables
 
     for ep in range(n_ep):
         dados_dia = dias[ep % len(dias)]            # sequencial, com wrap-around
@@ -76,6 +91,17 @@ def treinar(
         custos_hist.append(ep_custo)
         eps_hist.append(agentes["armazenamento"].epsilon)
 
+        # \u2500\u2500 Early-stopping: snapshot quando a m\u00e9dia m\u00f3vel atinge novo m\u00ednimo \u2500\u2500
+        if (ep + 1) >= EARLY_STOP_WINDOW:
+            c_movel = float(np.mean(custos_hist[-EARLY_STOP_WINDOW:]))
+            if (ep + 1) >= min_ep_to_save and c_movel < best_custo_med:
+                best_custo_med = c_movel
+                best_ep = ep + 1
+                best_state = {
+                    nome: copy.deepcopy(dict(ag.q_table))
+                    for nome, ag in agentes.items()
+                }
+
         # Print adaptativo: ~50 prints independente do tamanho do treino
         intervalo_print = max(200, n_ep // 50)
         if (ep + 1) % intervalo_print == 0:
@@ -84,10 +110,26 @@ def treinar(
             c_med = np.mean(custos_hist[-w:])
             eps   = agentes["armazenamento"].epsilon
             n_est = agentes["armazenamento"].n_estados
+            best_tag = f"  [best ep {best_ep}: R${best_custo_med:.2f}]" if best_state else ""
             print(
                 f"Ep {ep+1:>6}/{n_ep}  reward={r_med:>8.2f}  "
-                f"custo=R${c_med:>5.2f}  \u03b5={eps:.3f}  estados={n_est}"
+                f"custo=R${c_med:>5.2f}  \u03b5={eps:.3f}  estados={n_est}{best_tag}"
             )
+
+    # \u2500\u2500 Restaura Q-tables do melhor checkpoint observado \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    if best_state is not None:
+        custo_final = float(np.mean(custos_hist[-EARLY_STOP_WINDOW:]))
+        print(
+            f"\n  Early stopping: restaurando Q-tables do ep {best_ep} "
+            f"(custo m\u00e9dio R${best_custo_med:.2f})"
+        )
+        print(f"  Custo m\u00e9dio nos \u00faltimos {EARLY_STOP_WINDOW} ep: R${custo_final:.2f}  "
+              f"(ganho do checkpoint: R${custo_final - best_custo_med:+.2f})")
+        for nome, snapshot in best_state.items():
+            ag = agentes[nome]
+            ag.q_table = defaultdict(lambda n=ag.n_acoes: np.zeros(n), snapshot)
+    else:
+        print(f"\n  [aviso] Sem snapshot \u2014 treino muito curto ou sem melhora detectada")
 
     # Persiste hist\u00f3rico de treino para revisualiza\u00e7\u00e3o sem retreinar
     models_dir = OUTPUT_DIR / "models"
@@ -99,6 +141,8 @@ def treinar(
             "custos"  : custos_hist,
             "epsilons": eps_hist,
             "n_episodios": n_ep,
+            "best_ep" : best_ep,
+            "best_custo_med": best_custo_med,
         }, f)
     print(f"  Hist\u00f3rico de treino salvo em: {hist_path}")
 
