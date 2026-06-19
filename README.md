@@ -124,6 +124,7 @@ Baixado uma vez no startup do servidor via `urllib.request.urlopen`:
 | Tool | Parâmetros | Descrição |
 |---|---|---|
 | `configure_agents` | hiperparâmetros opcionais | Atualiza α/β/γ/ε dos 3 agentes (sem destruir Q-tables) |
+| `configure_reward_weights` | 15 pesos opcionais (`w_*`, `pen_*`, `bonus_*`) | Ajusta a função de reward em runtime. Pesos omitidos preservam o valor atual. Restrições físicas (PCC, SOC, capacidade de bateria) permanecem imutáveis. **Após mudar pesos, retreine** — Q-tables existentes ficam parcialmente obsoletas. |
 
 ### Treino e avaliação
 | Tool | Parâmetros | Descrição |
@@ -170,7 +171,7 @@ Baixado uma vez no startup do servidor via `urllib.request.urlopen`:
 ### Diagnóstico para LLM-as-a-judge
 | Tool | Descrição |
 |---|---|
-| `health_report` | Payload consolidado: cobertura/TD-error dos 3 agentes, sumário treino, comparação com baselines, alertas heurísticos |
+| `health_report` | Payload consolidado: cobertura/TD-error dos 3 agentes, sumário treino, comparação com baselines, `pesos_reward_modificados` (quando aplicável) e alertas heurísticos |
 | `describe_schema` | Esquema completo: estado, ações, restrições HARD, reward, tarifa |
 
 ---
@@ -188,6 +189,26 @@ Baixado uma vez no startup do servidor via `urllib.request.urlopen`:
 8. get_hourly_violations(...)         ← se houver violações
 9. identify_scenarios()               ← análise por dia extremo
 10. run_episode(dia_idx=...)           ← trace detalhado
+```
+
+## Loop LLM-as-a-judge (autônomo)
+
+Com `configure_reward_weights`, o cliente LLM pode rodar um ciclo
+fechado de auto-ajuste — diagnosticar → decidir → agir → reavaliar:
+
+```
+health_report()                       ← lê veredito atual
+    ↓
+decisão do LLM
+    ├─ "treinar mais" ──────────► train_agents(n_episodios=N)
+    ├─ "aprovar"     ──────────► fim
+    └─ "ajustar pesos" ────────► configure_reward_weights(pen_pcc=25, ...)
+                                  └─► reset_environment(reset_agents=True)
+                                  └─► train_agents()
+    ↓
+evaluate_agents() + health_report()   ← reavaliação
+    ↓
+(repete até aprovar)
 ```
 
 ---

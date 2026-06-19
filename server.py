@@ -50,6 +50,20 @@ env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
 mcp = FastMCP("mcpsmartenergy")
 
 
+# Pesos do reward — alteráveis em runtime via configure_reward_weights.
+# Restrições físicas (pcc_max_kw, soc_min_pct, bat_throughput_max_kwh, etc.)
+# ficam imutáveis para preservar fidelidade ao projeto Smart_Energy real.
+_REWARD_WEIGHT_KEYS = (
+    "w_custo", "w_estresse", "w_bonus_carga",
+    "pen_soc", "pen_teto", "pen_producao", "pen_pcc",
+    "pen_secador_meta", "pen_sede_desvio",
+    "pen_pivo_pico", "pen_secador_pico",
+    "bonus_excedente", "bonus_soc_ok",
+    "bonus_pivo_solar", "bonus_sec_excedente",
+)
+_DEFAULT_REWARD_WEIGHTS = {k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS}
+
+
 def _err(e: Exception) -> str:
     return json.dumps({"erro": f"{type(e).__name__}: {e}"}, indent=2, default=str)
 
@@ -101,6 +115,90 @@ def configure_agents(
             "hiperparametros_atuais": {n: iql.agentes[n].get_info()
                                         for n in iql.agentes},
             "n_episodios": iql.n_episodios,
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def configure_reward_weights(
+    w_custo: float | None = None,
+    w_estresse: float | None = None,
+    w_bonus_carga: float | None = None,
+    pen_soc: float | None = None,
+    pen_teto: float | None = None,
+    pen_producao: float | None = None,
+    pen_pcc: float | None = None,
+    pen_secador_meta: float | None = None,
+    pen_sede_desvio: float | None = None,
+    pen_pivo_pico: float | None = None,
+    pen_secador_pico: float | None = None,
+    bonus_excedente: float | None = None,
+    bonus_soc_ok: float | None = None,
+    bonus_pivo_solar: float | None = None,
+    bonus_sec_excedente: float | None = None,
+) -> str:
+    """Ajusta os pesos do reward cooperativo em runtime.
+
+    ATENÇÃO: Q-tables já treinadas ficam parcialmente obsoletas após
+    mudar pesos. Sempre chame train_agents() antes de avaliar.
+
+    Todos os pesos devem ser ≥ 0 — o sinal (penalidade vs bônus) está
+    embutido na fórmula do reward em FazendaEnergyEnv. Parâmetros
+    omitidos mantêm o valor atual. Restrições físicas (PCC, SOC min/max,
+    capacidade de bateria, etc.) não são alteráveis para preservar
+    fidelidade ao projeto Smart_Energy real.
+    """
+    try:
+        candidatos = {
+            "w_custo": w_custo, "w_estresse": w_estresse,
+            "w_bonus_carga": w_bonus_carga,
+            "pen_soc": pen_soc, "pen_teto": pen_teto,
+            "pen_producao": pen_producao, "pen_pcc": pen_pcc,
+            "pen_secador_meta": pen_secador_meta,
+            "pen_sede_desvio": pen_sede_desvio,
+            "pen_pivo_pico": pen_pivo_pico,
+            "pen_secador_pico": pen_secador_pico,
+            "bonus_excedente": bonus_excedente,
+            "bonus_soc_ok": bonus_soc_ok,
+            "bonus_pivo_solar": bonus_pivo_solar,
+            "bonus_sec_excedente": bonus_sec_excedente,
+        }
+        novos = {k: float(v) for k, v in candidatos.items() if v is not None}
+
+        if not novos:
+            return json.dumps({
+                "status": "nenhum peso fornecido",
+                "pesos_atuais": {k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS},
+                "defaults": _DEFAULT_REWARD_WEIGHTS,
+            }, indent=2)
+
+        invalidos = [k for k, v in novos.items() if v < 0]
+        if invalidos:
+            return json.dumps({
+                "erro": f"Pesos devem ser >= 0: {invalidos}",
+                "nota": "O sinal (penalidade vs bônus) está na fórmula do reward.",
+            }, indent=2)
+
+        CONFIG.update(novos)
+        # Recria env global para refletir mudanças em step_environment.
+        # Treino/avaliação criam env próprio por dia e já usam o CONFIG novo.
+        global env
+        env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+
+        delta_vs_default = {
+            k: round(CONFIG[k] - _DEFAULT_REWARD_WEIGHTS[k], 4)
+            for k in _REWARD_WEIGHT_KEYS
+            if abs(CONFIG[k] - _DEFAULT_REWARD_WEIGHTS[k]) > 1e-9
+        }
+
+        return json.dumps({
+            "status": "pesos atualizados",
+            "alterados_nesta_chamada": novos,
+            "pesos_atuais": {k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS},
+            "delta_vs_default": delta_vs_default,
+            "aviso": ("Q-tables atuais foram aprendidas com pesos diferentes. "
+                      "Chame train_agents() antes de avaliar a nova política."),
         }, indent=2)
     except Exception as e:
         return _err(e)
@@ -588,6 +686,17 @@ def health_report() -> str:
         if eval_iql.get("violacoes_soc_total_h", 0) > 0:
             alertas.append(f"violacoes_soc: {eval_iql['violacoes_soc_total_h']} horas com SOC < 15%.")
 
+        pesos_modificados = {
+            k: {"atual": CONFIG[k], "default": _DEFAULT_REWARD_WEIGHTS[k]}
+            for k in _REWARD_WEIGHT_KEYS
+            if abs(CONFIG[k] - _DEFAULT_REWARD_WEIGHTS[k]) > 1e-9
+        }
+        if pesos_modificados:
+            alertas.append(
+                f"pesos_reward_modificados: {len(pesos_modificados)} peso(s) diferem do default — "
+                "verifique se retreinou após configure_reward_weights."
+            )
+
         return json.dumps({
             "dataset": {
                 "fazenda": DATASET_META["id_fazenda"],
@@ -602,6 +711,7 @@ def health_report() -> str:
             "treino": treino_resumo,
             "avaliacao_atual": eval_iql,
             "comparacao_baselines": comparacao,
+            "pesos_reward_modificados": pesos_modificados or None,
             "alertas": alertas,
         }, indent=2)
     except Exception as e:
