@@ -43,8 +43,24 @@ MCP_SmartEnergy/
 │   ├── baselines.py           # AgentesHeuristicos, SemAgente
 │   └── financeiro.py          # AgenteFinanceiro (estresse + créditos)
 │
-└── metrics/
-    └── tracker.py             # Tracker com violações por hora
+├── metrics/
+│   └── tracker.py             # Tracker com violações por hora
+│
+├── dashboard/                 # UI Streamlit (opcional, importa direto)
+│   ├── app.py                 # Entry — sidebar com setup/treino/avaliação
+│   ├── state.py               # Estado compartilhado via st.session_state
+│   └── pages/
+│       ├── 1_Overview.py              # health_report em cards
+│       ├── 2_Curva_de_Aprendizado.py  # reward/custo/epsilon + TD-error
+│       └── 3_Trace_Diario.py          # trace hora-a-hora + violações
+│
+└── tests/                     # 47 testes pytest (sem rede)
+    ├── conftest.py            # Fixtures sintéticas (dia + tarifa)
+    ├── test_env.py            # PCC, SOC, throughput, schedules, reward
+    ├── test_agent.py          # Hysteretic, save/load, IQL
+    ├── test_baselines.py      # Heurístico + SemAgente
+    ├── test_tracker.py        # Hourly, peak/offpeak, eval
+    └── test_tools.py          # configure_*, compare, health_report
 ```
 
 ---
@@ -213,6 +229,42 @@ evaluate_agents() + health_report()   ← reavaliação
 
 ---
 
+## Dashboard Streamlit (opcional)
+
+UI interativa que importa os módulos do projeto diretamente
+(não passa pelo transporte MCP — para debug e inspeção rápida).
+
+```bash
+pip install streamlit plotly
+python -m streamlit run dashboard/app.py
+```
+
+3 páginas:
+
+| Página | O que mostra |
+|---|---|
+| **Overview** | health_report renderizado em cards: cobertura/TD-error dos 3 agentes, comparação com baselines, alertas heurísticos |
+| **Curva de Aprendizado** | Reward/custo/epsilon por episódio com média móvel + TD-error rolante dos 3 agentes |
+| **Trace Diário** | Navega pelos 31 dias, renderiza geração/consumo/SOC/custo hora-a-hora + heatmap de violações por hora |
+
+A sidebar concentra setup (download do dataset), treino (slider de
+episódios) e avaliação (com toggle de propagação de SOC).
+
+---
+
+## Testes
+
+```bash
+pip install pytest
+python -m pytest tests/ -v
+```
+
+47 testes cobrindo invariantes físicos do env (PCC, SOC, throughput,
+schedules HARD), hysteretic Q-learning, baselines, tracker e tools do
+servidor. Testes usam fixtures sintéticas, **sem download** do Sheets.
+
+---
+
 ## Dependências
 
 ```
@@ -220,6 +272,10 @@ mcp >= 1.0.0
 numpy >= 1.24.0
 pandas >= 2.0
 openpyxl >= 3.1
+
+streamlit >= 1.30   # opcional (dashboard)
+plotly >= 5.18      # opcional (dashboard)
+pytest >= 8.0       # opcional (testes)
 ```
 
 Python 3.10+ requerido (sintaxe `int | None`). Conexão à internet requerida no

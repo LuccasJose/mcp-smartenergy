@@ -2,3 +2,10 @@ mcp>=1.0.0
 numpy>=1.24.0
 pandas>=2.0
 openpyxl>=3.1
+
+# Dashboard (opcional — dashboard/ usa streamlit + plotly)
+streamlit>=1.30
+plotly>=5.18
+
+# Testes (opcional)
+pytest>=8.0
