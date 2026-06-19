@@ -52,7 +52,7 @@ if st.sidebar.button("Treinar IQL", use_container_width=True,
     with st.spinner(f"Treinando {n_eps} episodios..."):
         sumario = treinar(n_eps)
     st.sidebar.success(
-        f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50ep_rs']:.2f}/dia, "
+        f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia, "
         f"epsilon = {sumario['epsilon_final']:.3f}"
     )
 
