@@ -81,5 +81,6 @@ CONFIG = {
 # Tetos de consumo por decisão do Gerente de Carga
 TETOS_KW = {0: 20.0, 1: 30.0, 2: 40.0}  # conservador / moderado / liberal
 
-# Cronograma fixo da bomba — 4 ciclos de 2h espaçados 6h, evitando pico (18-20h)
-BOMBA_HORAS_ON = frozenset({0, 1, 6, 7, 12, 13, 21, 22})
+# Cronograma fixo da bomba — 4 ciclos de 2h igualmente espaçados (6h),
+# evitando o pico tarifário (18-20h). Horas ON: 3-4, 9-10, 15-16, 21-22.
+BOMBA_HORAS_ON = frozenset({3, 4, 9, 10, 15, 16, 21, 22})

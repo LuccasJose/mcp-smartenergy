@@ -159,7 +159,7 @@ class FazendaEnergyEnv:
         # ╔═════════════════════════════════════════════════════════╗
         # ║ R-BOMBA — Cronograma fixo (HARD)                        ║
         # ║ 4 ciclos × 2h = 8h/dia, espaçados 6h, evitando pico.    ║
-        # ║ Horas ON: 0-1, 6-7, 12-13, 21-22 (BOMBA_HORAS_ON).      ║
+        # ║ Horas ON: 3-4, 9-10, 15-16, 21-22 (BOMBA_HORAS_ON).     ║
         # ║ Ação do agente é ignorada — sem espaço para violação.   ║
         # ╚═════════════════════════════════════════════════════════╝
         c_bomba = self.hora not in BOMBA_HORAS_ON
