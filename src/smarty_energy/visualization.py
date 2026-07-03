@@ -1105,6 +1105,30 @@ def _custo_por_maquina(historicos: list[list[dict]]) -> dict[str, float]:
     return saida
 
 
+def _custo_real_por_maquina(historicos: list[list[dict]]) -> dict[str, float]:
+    """Custo real (R$) por máquina = rateio da fatura paga à rede.
+
+    A cada hora, o custo efetivo da rede (`custo_r`, já líquido de bateria/solar)
+    é distribuído entre as máquinas proporcionalmente à sua participação no
+    consumo daquela hora. Soma exata = fatura total da estratégia, permitindo
+    comparar onde cada estratégia efetivamente gasta.
+    """
+    saida = {label: 0.0 for _, label, _ in _MAQ_KPI}
+    for hist in historicos:
+        for h in hist:
+            custo_h = h.get("custo_r", 0.0)
+            if custo_h == 0:
+                continue
+            kwh_maq = {label: sum(h.get(c, 0.0) for c in cols)
+                       for cols, label, _ in _MAQ_KPI}
+            total = sum(kwh_maq.values())
+            if total <= 0:
+                continue
+            for label, kwh in kwh_maq.items():
+                saida[label] += custo_h * (kwh / total)
+    return saida
+
+
 def _custos_estrategia(historicos: list[list[dict]]) -> dict[str, float]:
     """Custos reais (fatura) e teóricos de uma estratégia.
 
@@ -1172,22 +1196,26 @@ def plot_visao_geral_operacional(
     cst_s_maq = _custo_por_maquina(res_s)
     cst_h_maq = _custo_por_maquina(res_h)
     cst_r_maq = _custo_por_maquina(res_r)
+    real_h_maq = _custo_real_por_maquina(res_h)
+    real_r_maq = _custo_real_por_maquina(res_r)
     cst_s = _custos_estrategia(res_s)
     cst_h = _custos_estrategia(res_h)
     cst_r = _custos_estrategia(res_r)
 
     # ── 1. Tabela de KPIs por máquina (RL) — com cascata de custo ────
     ax_tab.axis("off")
-    headers = ["Máquina", "kWh mês", "Custo teórico R$",
-               "kWh pico", "% pico", "Δ$ vs Heur"]
+    headers = ["Máquina", "kWh mês", "Custo teórico R$", "Custo real R$",
+               "% pico", "Δ$ real vs Heur"]
     linhas = []
     for cols, label, _ in _MAQ_KPI:
-        r = kpi_r[label]; h = kpi_h[label]
-        c_r = cst_r_maq[label]; c_h = cst_h_maq[label]
-        d_custo = ((c_r - c_h) / c_h * 100) if c_h > 0 else 0.0
+        r = kpi_r[label]
+        c_r = cst_r_maq[label]
+        real_r = real_r_maq[label]; real_h = real_h_maq[label]
+        d_custo = ((real_r - real_h) / real_h * 100) if real_h > 0 else 0.0
         linhas.append([label, f"{r['kwh_mes']:.0f}",
                        f"R$ {c_r:,.0f}".replace(",", "."),
-                       f"{r['kwh_pico']:.0f}", f"{r['pct_pico']:.1f}%",
+                       f"R$ {real_r:,.0f}".replace(",", "."),
+                       f"{r['pct_pico']:.1f}%",
                        f"{d_custo:+.1f}%"])
     # Cascata: soma teórica → economia bat./solar → fatura real
     teorico_total = sum(cst_r_maq.values())
@@ -1202,9 +1230,9 @@ def plot_visao_geral_operacional(
                    f"−R$ {economia_bs:,.0f}".replace(",", "."),
                    "—", "—", f"−{pct_econ:.1f}%"])
     linhas.append(["TOTAL FATURA (real)",
-                   f"{cst_r['rede_kwh_total']:.0f}",
+                   f"{cst_r['rede_kwh_total']:.0f}", "—",
                    f"R$ {cst_r['custo_fatura_total']:,.0f}".replace(",", "."),
-                   "—", "—", f"{d_fatura:+.1f}%"])
+                   "—", f"{d_fatura:+.1f}%"])
 
     tabela = ax_tab.table(cellText=linhas, colLabels=headers,
                           cellLoc="center", loc="center")
@@ -1220,35 +1248,29 @@ def plot_visao_geral_operacional(
         for j in range(len(headers)):
             tabela[(k, j)].set_facecolor(cor)
             tabela[(k, j)].set_text_props(fontweight="bold")
-    ax_tab.set_title("KPIs por máquina (RL) — linhas individuais: kWh × tarifa | cascata final: fatura real",
+    ax_tab.set_title("KPIs por máquina (RL) — teórico (kWh × tarifa) vs real (rateio da fatura) | cascata final: fatura paga",
                      fontsize=10)
 
-    # ── 2. Custo R$ mensal por máquina × estratégia (stacked) ────
+    # ── 2. Custo R$ real por máquina × estratégia (stacked) ──────
+    # Rateio da fatura paga (líquida de bateria/solar): pilha soma a fatura
+    # real de cada estratégia, evidenciando onde o RL efetivamente economiza.
     labels_est = ["Sem Agente", "Heurístico", "RL"]
+    real_s_maq = _custo_real_por_maquina(res_s)
+    real_maq_por_est = [real_s_maq, real_h_maq, real_r_maq]
     bottoms = np.zeros(3)
     for cols, label, cor in _MAQ_KPI:
-        vals = np.array([cst_s_maq[label], cst_h_maq[label], cst_r_maq[label]])
+        vals = np.array([m[label] for m in real_maq_por_est])
         ax_bar.bar(labels_est, vals, bottom=bottoms, label=label, color=cor, alpha=0.85)
         bottoms += vals
-    # Marcador "diamante" no nível da fatura real em cada barra (visualiza
-    # quanto da pilha teórica foi efetivamente pago após bateria/solar).
-    faturas = [cst_s["custo_fatura_total"], cst_h["custo_fatura_total"],
-               cst_r["custo_fatura_total"]]
-    for i, (custos, fatura) in enumerate(zip([cst_s, cst_h, cst_r], faturas)):
-        ax_bar.scatter([i], [fatura], marker="D", s=140, color="#1b4f72",
-                       edgecolors="white", linewidths=1.6, zorder=6,
-                       label="Fatura real" if i == 0 else None)
-        ax_bar.text(i, fatura + max(bottoms) * 0.012,
-                    f"R${fatura:,.0f}".replace(",", "."),
+    # Rótulo do total (= fatura real) no topo de cada pilha
+    for i, total in enumerate(bottoms):
+        ax_bar.text(i, total + max(bottoms) * 0.015,
+                    f"R${total:,.0f}".replace(",", "."),
                     ha="center", va="bottom",
                     fontsize=8, fontweight="bold", color="#1b4f72")
-        ax_bar.text(i, bottoms[i] + max(bottoms) * 0.02,
-                    f"Teórico\nR${sum(cst_r_maq.values() if i==2 else cst_h_maq.values() if i==1 else cst_s_maq.values()):,.0f}".replace(",", "."),
-                    ha="center", va="bottom",
-                    fontsize=8, color="#566573")
     ax_bar.set_title(
-        "Custo R$ por máquina × estratégia\n"
-        "Pilha = custo teórico (kWh × tarifa)  |  ♦ azul = fatura real (após bat./solar)",
+        "Custo R$ real por máquina × estratégia\n"
+        "Pilha = rateio da fatura paga (após bateria/solar)",
         fontsize=10)
     ax_bar.set_ylabel("R$")
     ax_bar.legend(fontsize=7, loc="upper left")

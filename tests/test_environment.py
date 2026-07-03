@@ -1,49 +1,13 @@
-"""Testes básicos do ambiente, agentes e carregamento de dados."""
+"""Testes básicos do ambiente, agentes e configuração.
 
-import sys
-from pathlib import Path
+Fixtures compartilhadas (`env`, `dia_fake`, `tarifa_fake`) vêm de conftest.py.
+"""
 
 import numpy as np
-import pandas as pd
 import pytest
 
-# Garante que src/ está no path mesmo sem instalar o pacote
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
 from smarty_energy.config import CONFIG, TETOS_KW
-from smarty_energy.environment import FazendaEnergyEnv
 from smarty_energy.agents import AgenteQL, AgentesHeuristicos
-
-
-# ── Fixtures ──────────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def tarifa_fake() -> np.ndarray:
-    """Tarifa constante de R$0,70 com pico de R$1,10 das 18h às 20h."""
-    t = np.full(24, 0.70)
-    t[18:21] = 1.10
-    return t
-
-
-@pytest.fixture
-def dia_fake() -> pd.DataFrame:
-    """Dia sintético com geração e consumo constantes."""
-    df = pd.DataFrame({
-        "hora"       : range(24),
-        "solar_kw"   : [10.0] * 24,
-        "eolico_kw"  : [2.0]  * 24,
-        "pivo_kw"    : [5.0]  * 24,
-        "captacao_kw": [3.0]  * 24,
-        "sede_kw"    : [1.0]  * 24,
-        "silo_kw"    : [0.5]  * 24,
-        "data"       : pd.Timestamp("2025-01-01"),
-    })
-    return df
-
-
-@pytest.fixture
-def env(dia_fake, tarifa_fake) -> FazendaEnergyEnv:
-    return FazendaEnergyEnv(dia_fake, tarifa_fake, CONFIG)
 
 
 # ── Testes do Ambiente ─────────────────────────────────────────────────────────
@@ -80,17 +44,18 @@ def test_env_episodio_completo(env):
     assert len(env.historico) == 24
 
 
-def test_env_discretizar_retorna_tupla_de_5(env):
+def test_env_discretizar_retorna_tupla_de_6(env):
     estado = env.reset()
     disc = env.discretizar(estado)
     assert isinstance(disc, tuple)
-    assert len(disc) == 5
-    h, s, g, st, m = disc
-    assert 0 <= h <= 3
-    assert 0 <= s <= 100
-    assert g in (0, 1, 2)
-    assert st in (0, 1, 2)
-    assert m in (0, 1)
+    assert len(disc) == 6
+    h, s, g, st, meta, b = disc
+    assert 0 <= h <= 3          # bucket hora
+    assert 0 <= s <= 9          # bucket soc (10 buckets)
+    assert g in (0, 1, 2)       # bucket solar
+    assert st in (0, 1, 2)      # bucket estresse
+    assert meta in (0, 1)       # meta secador
+    assert b in (0, 1, 2)       # progresso bomba
 
 
 def test_env_soc_nunca_ultrapassa_limites(env):
@@ -153,16 +118,25 @@ def test_heuristica_retorna_acoes_validas(dia_fake, tarifa_fake):
 
 def test_config_chaves_obrigatorias():
     chaves = [
+        # Treino
         "n_episodios", "alpha", "gamma", "epsilon_inicial", "epsilon_final",
-        "epsilon_decay", "bateria_cap_kwh", "soc_inicial_pct", "soc_min_pct",
-        "soc_max_pct", "eficiencia_carga", "eficiencia_descarga",
-        "bat_throughput_max_kwh", "pcc_max_kw", "inversor_fv_max_kw",
-        "eolico_nominal_kw", "w_custo", "pen_soc", "pen_teto",
-        "pen_pcc", "bonus_excedente", "bonus_soc_ok",
+        "epsilon_decay",
+        # Bateria
+        "bateria_cap_kwh", "soc_inicial_pct", "soc_min_pct", "soc_max_pct",
+        "eficiencia_carga", "eficiencia_descarga", "bat_throughput_max_kwh",
+        # Conexão e geração
+        "pcc_max_kw", "inversor_fv_max_kw", "eolico_nominal_kw",
+        # Financeiro
         "credito_inicial_kwh", "tarifa_estresse_limiar",
-        "pivo_horas_alvo", "bomba_on_max", "bomba_off_min",
-        "secador_meta_kwh", "sede_desvio_max", "w_estresse",
-        "pen_pivo_quebra", "pen_bomba_ciclo", "pen_secador_meta", "pen_sede_desvio"
+        # Metas operacionais
+        "pivo_horas_alvo", "pivo_nominal_kw", "bomba_cap_nominal_kw",
+        "secador_meta_kwh", "secador_max_kw", "sede_desvio_max",
+        # Pesos do reward
+        "w_custo", "w_estresse", "w_bonus_carga", "pen_soc", "pen_teto",
+        "pen_producao", "pen_pcc", "bonus_excedente", "bonus_soc_ok",
+        # Penalidades operacionais e shaping
+        "pen_secador_meta", "pen_sede_desvio", "pen_pivo_pico",
+        "pen_secador_pico", "bonus_pivo_solar", "bonus_sec_excedente",
     ]
     for chave in chaves:
         assert chave in CONFIG, f"Chave ausente em CONFIG: {chave}"

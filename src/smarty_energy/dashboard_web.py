@@ -18,7 +18,7 @@ from .config import CONFIG, BOMBA_HORAS_ON
 from .visualization import (
     _MAQUINAS_DETALHE, _MAQ_KPI,
     _kpis_maquinas, _metricas_microgrid,
-    _custo_por_maquina, _custos_estrategia,
+    _custo_por_maquina, _custo_real_por_maquina, _custos_estrategia,
 )
 
 
@@ -194,22 +194,24 @@ def _tabela_kpis(res_r, res_h) -> list[dict]:
     kpi_r = _kpis_maquinas(res_r)
     kpi_h = _kpis_maquinas(res_h)
     cst_r_maq = _custo_por_maquina(res_r)
-    cst_h_maq = _custo_por_maquina(res_h)
+    real_r_maq = _custo_real_por_maquina(res_r)
+    real_h_maq = _custo_real_por_maquina(res_h)
     cst_r = _custos_estrategia(res_r)
     cst_h = _custos_estrategia(res_h)
     linhas = []
     for cols, label, _ in _MAQ_KPI:
-        r = kpi_r[label]; h = kpi_h[label]
-        c_r = cst_r_maq[label]; c_h = cst_h_maq[label]
-        d_custo = ((c_r - c_h) / c_h * 100) if c_h > 0 else 0.0
+        r = kpi_r[label]
+        c_r = cst_r_maq[label]
+        real_r = real_r_maq[label]; real_h = real_h_maq[label]
+        d_custo = ((real_r - real_h) / real_h * 100) if real_h > 0 else 0.0
         linhas.append({
             "Máquina"          : label,
             "kWh mês"          : f"{r['kwh_mes']:.0f}",
             "Custo teórico R$" : f"R$ {c_r:,.0f}".replace(",", "."),
+            "Custo real R$"    : f"R$ {real_r:,.0f}".replace(",", "."),
             "Horas ativas"     : r["h_ativ"],
-            "kWh pico"         : f"{r['kwh_pico']:.0f}",
             "% pico"           : f"{r['pct_pico']:.1f}%",
-            "Δ$ vs Heur"       : f"{d_custo:+.1f}%",
+            "Δ$ real vs Heur"  : f"{d_custo:+.1f}%",
         })
     # Cascata: soma teórica → economia bat./solar → fatura real
     teorico_total = sum(cst_r_maq.values())
@@ -221,37 +223,40 @@ def _tabela_kpis(res_r, res_h) -> list[dict]:
         "Máquina"          : "Soma teórica",
         "kWh mês"          : "—",
         "Custo teórico R$" : f"R$ {teorico_total:,.0f}".replace(",", "."),
-        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
-        "Δ$ vs Heur"       : "—",
+        "Custo real R$"    : "—",
+        "Horas ativas"     : "—", "% pico": "—",
+        "Δ$ real vs Heur"  : "—",
     })
     linhas.append({
         "Máquina"          : "(−) Bat./solar",
         "kWh mês"          : "—",
         "Custo teórico R$" : f"−R$ {economia_bs:,.0f}".replace(",", "."),
-        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
-        "Δ$ vs Heur"       : f"−{pct_econ:.1f}%",
+        "Custo real R$"    : "—",
+        "Horas ativas"     : "—", "% pico": "—",
+        "Δ$ real vs Heur"  : f"−{pct_econ:.1f}%",
     })
     linhas.append({
         "Máquina"          : "TOTAL FATURA (real)",
         "kWh mês"          : f"{cst_r['rede_kwh_total']:.0f}",
-        "Custo teórico R$" : f"R$ {cst_r['custo_fatura_total']:,.0f}".replace(",", "."),
-        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
-        "Δ$ vs Heur"       : f"{d_fatura:+.1f}%",
+        "Custo teórico R$" : "—",
+        "Custo real R$"    : f"R$ {cst_r['custo_fatura_total']:,.0f}".replace(",", "."),
+        "Horas ativas"     : "—", "% pico": "—",
+        "Δ$ real vs Heur"  : f"{d_fatura:+.1f}%",
     })
     return linhas
 
 
 def _fig_visao_geral(dias, res_s, res_h, res_r) -> go.Figure:
-    cst_s_maq = _custo_por_maquina(res_s)
-    cst_h_maq = _custo_por_maquina(res_h)
-    cst_r_maq = _custo_por_maquina(res_r)
+    real_s_maq = _custo_real_por_maquina(res_s)
+    real_h_maq = _custo_real_por_maquina(res_h)
+    real_r_maq = _custo_real_por_maquina(res_r)
     cst_s = _custos_estrategia(res_s)
     cst_h = _custos_estrategia(res_h)
     cst_r = _custos_estrategia(res_r)
 
     fig = make_subplots(
         rows=2, cols=2,
-        subplot_titles=("Custo R$ por máquina × estratégia (s/ bat./solar)",
+        subplot_titles=("Custo R$ real por máquina × estratégia (rateio da fatura paga)",
                         "Métricas de microgrid (SCR/SSR em %, PAR razão)",
                         "Carga total — heatmap dia × hora (RL)", ""),
         vertical_spacing=0.15, horizontal_spacing=0.10,
@@ -259,35 +264,26 @@ def _fig_visao_geral(dias, res_s, res_h, res_r) -> go.Figure:
                [{"type": "heatmap", "colspan": 2}, None]],
     )
 
-    # (0,0) Custo R$ por máquina × estratégia (stacked)
+    # (0,0) Custo R$ real por máquina × estratégia (stacked)
+    # Rateio da fatura paga (líquida de bateria/solar): a pilha soma a fatura
+    # real de cada estratégia, evidenciando onde o RL economiza de fato.
     estr = ["Sem Agente", "Heurístico", "RL"]
+    real_maq_por_est = [real_s_maq, real_h_maq, real_r_maq]
     for cols, label, cor in _MAQ_KPI:
         fig.add_trace(go.Bar(name=label, x=estr,
-                             y=[cst_s_maq[label], cst_h_maq[label], cst_r_maq[label]],
+                             y=[m[label] for m in real_maq_por_est],
                              marker_color=cor, opacity=0.85,
                              hovertemplate=f"<b>{label}</b><br>R$ %{{y:,.2f}}<extra></extra>"),
                       row=1, col=1)
-    # Marcador "diamante" no nível da fatura real em cada barra
-    faturas = [cst_s["custo_fatura_total"], cst_h["custo_fatura_total"],
-               cst_r["custo_fatura_total"]]
-    stack_tots = [sum(cst_s_maq.values()), sum(cst_h_maq.values()), sum(cst_r_maq.values())]
-    fig.add_trace(go.Scatter(
-        x=estr, y=faturas, mode="markers+text",
-        marker=dict(symbol="diamond", size=18, color="#1b4f72",
-                    line=dict(color="white", width=2)),
-        text=[f"R${f:,.0f}".replace(",", ".") for f in faturas],
-        textposition="middle right",
-        textfont=dict(size=10, color="#1b4f72", family="Arial Black"),
-        name="Fatura real (após bat./solar)",
-        hovertemplate="<b>Fatura real</b><br>R$ %{y:,.2f}<extra></extra>"),
-        row=1, col=1)
-    # Anotação de topo: custo teórico total
+    # Anotação de topo: total da pilha = fatura real
+    stack_tots = [sum(m.values()) for m in real_maq_por_est]
     for i, e in enumerate(estr):
         fig.add_annotation(
             xref="x", yref="y",
             x=e, y=stack_tots[i],
-            text=f"Teórico<br>R$ {stack_tots[i]:,.0f}".replace(",", "."),
-            showarrow=False, yshift=18, font=dict(size=9, color="#566573"),
+            text=f"R$ {stack_tots[i]:,.0f}".replace(",", "."),
+            showarrow=False, yshift=14,
+            font=dict(size=10, color="#1b4f72", family="Arial Black"),
         )
 
     # (0,1) SCR/SSR/PAR
@@ -582,16 +578,16 @@ def _content_visao():
     return html.Div([
         html.Div([
             html.Span("KPIs por máquina (RL)", style={"fontWeight": "bold"}),
-            html.Span("  •  custo R$ é teórico (kWh × tarifa, sem desconto de bateria/solar)",
+            html.Span("  •  custo teórico = kWh × tarifa (sem desconto de bateria/solar)",
                       style={"fontSize": "0.85em", "color": "#7f8c8d", "marginLeft": "8px"}),
-            html.Span("  •  TOTAL FATURA = R$ realmente pagos à rede",
+            html.Span("  •  custo real = rateio da fatura paga  •  TOTAL FATURA = R$ pagos à rede",
                       style={"fontSize": "0.85em", "color": "#7f8c8d", "marginLeft": "8px"}),
         ], style={"marginTop": "8px", "marginBottom": "4px"}),
         dash_table.DataTable(
             id="tab-kpis",
             columns=[{"name": c, "id": c} for c in
-                     ["Máquina", "kWh mês", "Custo teórico R$", "Horas ativas",
-                      "kWh pico", "% pico", "Δ$ vs Heur"]],
+                     ["Máquina", "kWh mês", "Custo teórico R$", "Custo real R$",
+                      "Horas ativas", "% pico", "Δ$ real vs Heur"]],
             style_cell={"textAlign": "center", "padding": "6px",
                         "fontFamily": "Segoe UI", "fontSize": "0.92em"},
             style_header={"backgroundColor": "#2c3e50", "color": "white", "fontWeight": "bold"},

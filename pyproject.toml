@@ -23,3 +23,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: testes lentos (treino longo/reprodutibilidade). Rode com '-m slow'.",
+]
