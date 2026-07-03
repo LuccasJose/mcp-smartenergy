@@ -1,13 +1,13 @@
 """Loop de treinamento IQL (Independent Q-Learning) cooperativo."""
 
 import copy
-import pickle
+import time
 from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 
-from .config import CONFIG, OUTPUT_DIR
+from .config import CONFIG
 from .environment import FazendaEnergyEnv
 
 
@@ -16,7 +16,7 @@ def treinar(
     tarifa_24h: np.ndarray,
     agentes: dict,
     cfg: dict = CONFIG,
-) -> tuple[list[float], list[float]]:
+) -> dict:
     """Treina os três agentes por `cfg['n_episodios']` episódios.
 
     Cada episódio simula um dia completo (24 timesteps). Os agentes
@@ -41,7 +41,8 @@ def treinar(
         cfg        : dicionário de hiperparâmetros (padrão: CONFIG)
 
     Returns:
-        (rewards_hist, custos_hist) — listas com valor acumulado por episódio
+        dict de histórico com as chaves: 'rewards', 'custos', 'epsilons'
+        (listas por episódio), 'n_episodios', 'best_ep' e 'best_custo_med'.
     """
     rewards_hist = []
     custos_hist  = []
@@ -56,6 +57,7 @@ def treinar(
     best_ep           = -1
     best_state        = None           # snapshot das q_tables
 
+    t0 = time.perf_counter()
     for ep in range(n_ep):
         dados_dia = dias[ep % len(dias)]            # sequencial, com wrap-around
         env       = FazendaEnergyEnv(dados_dia, tarifa_24h, cfg)
@@ -131,19 +133,31 @@ def treinar(
     else:
         print(f"\n  [aviso] Sem snapshot \u2014 treino muito curto ou sem melhora detectada")
 
-    # Persiste hist\u00f3rico de treino para revisualiza\u00e7\u00e3o sem retreinar
-    models_dir = OUTPUT_DIR / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
-    hist_path = models_dir / "training_history.pkl"
-    with open(hist_path, "wb") as f:
-        pickle.dump({
-            "rewards" : rewards_hist,
-            "custos"  : custos_hist,
-            "epsilons": eps_hist,
-            "n_episodios": n_ep,
-            "best_ep" : best_ep,
-            "best_custo_med": best_custo_med,
-        }, f)
-    print(f"  Hist\u00f3rico de treino salvo em: {hist_path}")
+    # M\u00e9tricas-resumo do treino (m\u00e9dias da janela final de early stopping)
+    janela = min(EARLY_STOP_WINDOW, len(custos_hist))
+    custo_final  = float(np.mean(custos_hist[-janela:]))  if custos_hist  else None
+    reward_final = float(np.mean(rewards_hist[-janela:])) if rewards_hist else None
+    duracao_s = round(time.perf_counter() - t0, 1)
 
-    return rewards_hist, custos_hist
+    # Hiperpar\u00e2metros-chave que distinguem um run (para o meta.json)
+    hiperparametros = {
+        k: cfg.get(k) for k in (
+            "alpha", "gamma", "epsilon_inicial", "epsilon_final",
+            "epsilon_decay", "bateria_cap_kwh",
+        ) if k in cfg
+    }
+
+    # Hist\u00f3rico de treino \u2014 a persist\u00eancia (versionada por run) fica a cargo
+    # do chamador (ver smarty_energy.runs.salvar_run).
+    return {
+        "rewards" : rewards_hist,
+        "custos"  : custos_hist,
+        "epsilons": eps_hist,
+        "n_episodios": n_ep,
+        "best_ep" : best_ep,
+        "best_custo_med": best_custo_med,
+        "custo_final": custo_final,
+        "reward_final": reward_final,
+        "duracao_s": duracao_s,
+        "hiperparametros": hiperparametros,
+    }

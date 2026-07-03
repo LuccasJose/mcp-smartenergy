@@ -74,6 +74,19 @@ class AgenteQL:
         self.n_updates = data["n_updates"]
 
 
+def construir_agentes(cfg: dict = CONFIG) -> dict:
+    """Instancia os três agentes Q-Learning com os tamanhos de ação padrão.
+
+    Fonte única da topologia dos agentes — usada tanto no treino quanto ao
+    recarregar um run salvo para revisualização.
+    """
+    return {
+        "armazenamento": AgenteQL(3, "Armazenamento", cfg),
+        "consumo"      : AgenteQL(8, "Consumo",       cfg),
+        "gerente"      : AgenteQL(3, "Gerente",       cfg),
+    }
+
+
 class AgenteFinanceiro:
     """Implementa a lógica de monitoramento de custos e créditos solares.
 
