@@ -22,6 +22,8 @@ outputs/plots/*.png
 outputs/plots/*.jpg
 outputs/models/*.pkl
 outputs/models/*.json
+# Runs versionados de treino (qtables + histórico + meta por run)
+outputs/runs/
 
 # Jupyter
 .ipynb_checkpoints/

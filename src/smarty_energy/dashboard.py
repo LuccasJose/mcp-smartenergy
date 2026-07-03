@@ -170,21 +170,39 @@ def _criar_aba_maquina_detalhada(notebook: ttk.Notebook, dados: dict) -> None:
     _atualizar()
 
 
+def _derivar_dados(dados_3: dict) -> tuple[dict, dict, dict]:
+    """Quebra um dict {dias,res_s,res_h,res_r} nos 3 dados das abas interativas."""
+    d_explorar = {
+        "dias" : dados_3["dias"],
+        "res_h": dados_3["res_h"],
+        "res_r": dados_3["res_r"],
+    }
+    return d_explorar, dados_3, dados_3
+
+
 def abrir_dashboard(
     figuras: dict[str, Figure],
     titulo: str = "SmartEnergy MAS — Dashboard",
     dados_explorar: dict | None = None,
     dados_fonte: dict | None = None,
     dados_maquina: dict | None = None,
+    construtor=None,
+    runs_disp: list[dict] | None = None,
+    run_inicial: str | None = None,
 ) -> None:
     """Abre uma janela única com uma aba por figura + abas interativas.
 
     Args:
-        figuras        : dict ordenado {nome_aba: Figure}.
+        figuras        : dict ordenado {nome_aba: Figure} do run inicial.
         titulo         : título da janela.
         dados_explorar : {"dias", "res_h", "res_r"} — aba "Explorar Dia".
         dados_fonte    : {"dias", "res_s", "res_h", "res_r"} — aba "Fonte de Energia".
         dados_maquina  : {"dias", "res_s", "res_h", "res_r"} — aba "Máquina Detalhada".
+        construtor     : callable(run_id) -> (figuras, dados_3) usado para
+                         reconstruir as abas ao trocar de run. Se None, o
+                         seletor de run não é exibido.
+        runs_disp      : lista de runs (saída de runs.listar_runs) p/ o seletor.
+        run_inicial    : run_id selecionado ao abrir.
     """
     root = tk.Tk()
     root.title(titulo)
@@ -200,21 +218,69 @@ def abrir_dashboard(
         pass
     estilo.configure("TNotebook.Tab", padding=(14, 6), font=("Segoe UI", 10, "bold"))
 
-    notebook = ttk.Notebook(root)
-    notebook.pack(fill="both", expand=True)
+    usar_seletor = construtor is not None and runs_disp
 
-    for nome, fig in figuras.items():
-        frame = ttk.Frame(notebook)
-        notebook.add(frame, text=nome)
-        _embutir_figura(frame, fig).draw()
+    # ── Barra superior com seletor de run (opcional) ──────────────
+    status_var = tk.StringVar(value="")
+    if usar_seletor:
+        labels = [r["label"] for r in runs_disp]
+        ids    = [r["run_id"] for r in runs_disp]
+        try:
+            idx_ini = ids.index(run_inicial)
+        except ValueError:
+            idx_ini = 0
 
-    if dados_explorar is not None:
-        _criar_aba_explorar(notebook, dados_explorar)
-    if dados_fonte is not None:
-        _criar_aba_fonte_energia(notebook, dados_fonte)
-    if dados_maquina is not None:
-        _criar_aba_visao_geral(notebook, dados_maquina)
-        _criar_aba_maquina_detalhada(notebook, dados_maquina)
+        barra = ttk.Frame(root)
+        barra.pack(side=tk.TOP, fill=tk.X, padx=10, pady=6)
+        ttk.Label(barra, text="Run (treino):", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 8))
+        combo_run = ttk.Combobox(barra, values=labels, state="readonly",
+                                 width=46, font=("Segoe UI", 10))
+        combo_run.current(idx_ini)
+        combo_run.pack(side=tk.LEFT)
+        root.title(f"{titulo} — {labels[idx_ini]}")
+        ttk.Label(barra, textvariable=status_var, foreground="#c0392b",
+                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(12, 0))
+
+    container = ttk.Frame(root)
+    container.pack(fill="both", expand=True)
+
+    estado: dict = {"notebook": None}
+
+    def _popular(figs, d_explorar, d_fonte, d_maquina):
+        if estado["notebook"] is not None:
+            estado["notebook"].destroy()
+        notebook = ttk.Notebook(container)
+        notebook.pack(fill="both", expand=True)
+        estado["notebook"] = notebook
+
+        for nome, fig in figs.items():
+            frame = ttk.Frame(notebook)
+            notebook.add(frame, text=nome)
+            _embutir_figura(frame, fig).draw()
+
+        if d_explorar is not None:
+            _criar_aba_explorar(notebook, d_explorar)
+        if d_fonte is not None:
+            _criar_aba_fonte_energia(notebook, d_fonte)
+        if d_maquina is not None:
+            _criar_aba_visao_geral(notebook, d_maquina)
+            _criar_aba_maquina_detalhada(notebook, d_maquina)
+
+    _popular(figuras, dados_explorar, dados_fonte, dados_maquina)
+
+    if usar_seletor:
+        def _trocar_run(_event=None):
+            i = combo_run.current()
+            run_id = ids[i]
+            status_var.set(f"Recalculando run {run_id}…")
+            root.update_idletasks()
+            figs, dados_3 = construtor(run_id)
+            d_expl, d_fonte, d_maq = _derivar_dados(dados_3)
+            _popular(figs, d_expl, d_fonte, d_maq)
+            root.title(f"{titulo} — {labels[i]}")
+            status_var.set("")
+
+        combo_run.bind("<<ComboboxSelected>>", _trocar_run)
 
     rodape = ttk.Label(
         root,

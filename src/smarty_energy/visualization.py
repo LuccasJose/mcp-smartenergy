@@ -932,9 +932,10 @@ def plot_maquina_detalhada(
     # ── Boxplot da distribuição diária ──────────────────────────
     bp = ax_box.boxplot(
         [diario_s, diario_h, diario_r],
-        labels=["Sem Agente", "Heurístico", "RL"],
         patch_artist=True, widths=0.55,
     )
+    ax_box.set_xticks([1, 2, 3])
+    ax_box.set_xticklabels(["Sem Agente", "Heurístico", "RL"], fontsize=8)
     for patch, c in zip(bp["boxes"], [_COR_S, _COR_H, _COR_R]):
         patch.set_facecolor(c); patch.set_alpha(0.6)
     ax_box.set_title("Distribuição de kWh diário")
@@ -1158,17 +1159,13 @@ def plot_visao_geral_operacional(
     """Painel BI consolidado de métricas operacionais e de microgrid."""
     fig.clf()
     gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.1])
-    ax_tab = fig.add_subplot(gs[0, 0])
-    ax_bar = fig.add_subplot(gs[0, 1])
-    ax_mg  = fig.add_subplot(gs[1, 0])
-    ax_heat = fig.add_subplot(gs[1, 1])
+    ax_bar = fig.add_subplot(gs[0, 0])
+    ax_mg  = fig.add_subplot(gs[0, 1])
+    ax_heat = fig.add_subplot(gs[1, :])
 
     fig.suptitle("Visão Geral Operacional — todas as máquinas",
                  fontsize=13, fontweight="bold")
 
-    kpi_s = _kpis_maquinas(res_s)
-    kpi_h = _kpis_maquinas(res_h)
-    kpi_r = _kpis_maquinas(res_r)
     cst_s_maq = _custo_por_maquina(res_s)
     cst_h_maq = _custo_por_maquina(res_h)
     cst_r_maq = _custo_por_maquina(res_r)
@@ -1176,54 +1173,7 @@ def plot_visao_geral_operacional(
     cst_h = _custos_estrategia(res_h)
     cst_r = _custos_estrategia(res_r)
 
-    # ── 1. Tabela de KPIs por máquina (RL) — com cascata de custo ────
-    ax_tab.axis("off")
-    headers = ["Máquina", "kWh mês", "Custo teórico R$",
-               "kWh pico", "% pico", "Δ$ vs Heur"]
-    linhas = []
-    for cols, label, _ in _MAQ_KPI:
-        r = kpi_r[label]; h = kpi_h[label]
-        c_r = cst_r_maq[label]; c_h = cst_h_maq[label]
-        d_custo = ((c_r - c_h) / c_h * 100) if c_h > 0 else 0.0
-        linhas.append([label, f"{r['kwh_mes']:.0f}",
-                       f"R$ {c_r:,.0f}".replace(",", "."),
-                       f"{r['kwh_pico']:.0f}", f"{r['pct_pico']:.1f}%",
-                       f"{d_custo:+.1f}%"])
-    # Cascata: soma teórica → economia bat./solar → fatura real
-    teorico_total = sum(cst_r_maq.values())
-    economia_bs = teorico_total - cst_r["custo_fatura_total"]
-    pct_econ = (economia_bs / teorico_total * 100) if teorico_total > 0 else 0.0
-    d_fatura = ((cst_r["custo_fatura_total"] - cst_h["custo_fatura_total"])
-                / max(cst_h["custo_fatura_total"], 1e-9) * 100)
-    linhas.append(["Soma teórica", "—",
-                   f"R$ {teorico_total:,.0f}".replace(",", "."),
-                   "—", "—", "—"])
-    linhas.append(["(−) Bat./solar", "—",
-                   f"−R$ {economia_bs:,.0f}".replace(",", "."),
-                   "—", "—", f"−{pct_econ:.1f}%"])
-    linhas.append(["TOTAL FATURA (real)",
-                   f"{cst_r['rede_kwh_total']:.0f}",
-                   f"R$ {cst_r['custo_fatura_total']:,.0f}".replace(",", "."),
-                   "—", "—", f"{d_fatura:+.1f}%"])
-
-    tabela = ax_tab.table(cellText=linhas, colLabels=headers,
-                          cellLoc="center", loc="center")
-    tabela.auto_set_font_size(False); tabela.set_fontsize(9)
-    tabela.scale(1.0, 1.4)
-    for j in range(len(headers)):
-        tabela[(0, j)].set_facecolor("#2c3e50")
-        tabela[(0, j)].set_text_props(color="white", fontweight="bold")
-    # Cores: soma=cinza, economia=verde, fatura=destaque azul
-    n_linhas = len(linhas)
-    cores_tot = ["#ecf0f1", "#d5f5e3", "#d6eaf8"]
-    for k, cor in zip(range(n_linhas - 2, n_linhas + 1), cores_tot):
-        for j in range(len(headers)):
-            tabela[(k, j)].set_facecolor(cor)
-            tabela[(k, j)].set_text_props(fontweight="bold")
-    ax_tab.set_title("KPIs por máquina (RL) — linhas individuais: kWh × tarifa | cascata final: fatura real",
-                     fontsize=10)
-
-    # ── 2. Custo R$ mensal por máquina × estratégia (stacked) ────
+    # ── 1. Custo R$ mensal por máquina × estratégia (stacked) ────
     labels_est = ["Sem Agente", "Heurístico", "RL"]
     bottoms = np.zeros(3)
     for cols, label, cor in _MAQ_KPI:
@@ -1255,7 +1205,7 @@ def plot_visao_geral_operacional(
     ax_bar.grid(axis="y", alpha=0.3)
     ax_bar.set_ylim(0, max(bottoms) * 1.20)
 
-    # ── 3. Métricas de microgrid (SCR, SSR, PAR) ────────────────
+    # ── 2. Métricas de microgrid (SCR, SSR, PAR) ────────────────
     mg_s = _metricas_microgrid(res_s)
     mg_h = _metricas_microgrid(res_h)
     mg_r = _metricas_microgrid(res_r)
@@ -1282,7 +1232,7 @@ def plot_visao_geral_operacional(
                   edgecolor="#bdc3c7", linewidth=0.8, alpha=0.95),
     )
 
-    # ── 4. Heatmap consolidado: uso total × hora ─────────────────
+    # ── 3. Heatmap consolidado: uso total × hora ─────────────────
     # Soma kW de todas as máquinas do RL, agregado em (dia × hora).
     matriz = np.zeros((len(res_r), 24))
     for d, hist in enumerate(res_r):

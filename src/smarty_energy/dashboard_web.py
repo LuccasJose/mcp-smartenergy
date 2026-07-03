@@ -10,14 +10,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from dash import Dash, dcc, html, dash_table, Input, Output
+from dash import Dash, dcc, html, Input, Output, State, ctx, no_update
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from . import runs
 from .config import CONFIG, BOMBA_HORAS_ON
 from .visualization import (
     _MAQUINAS_DETALHE, _MAQ_KPI,
-    _kpis_maquinas, _metricas_microgrid,
+    _metricas_microgrid,
     _custo_por_maquina, _custos_estrategia,
 )
 
@@ -189,57 +190,6 @@ def _fig_explorar_dia(
 # ──────────────────────────────────────────────────────────────
 # Tab 2 — Visão Geral Operacional
 # ──────────────────────────────────────────────────────────────
-
-def _tabela_kpis(res_r, res_h) -> list[dict]:
-    kpi_r = _kpis_maquinas(res_r)
-    kpi_h = _kpis_maquinas(res_h)
-    cst_r_maq = _custo_por_maquina(res_r)
-    cst_h_maq = _custo_por_maquina(res_h)
-    cst_r = _custos_estrategia(res_r)
-    cst_h = _custos_estrategia(res_h)
-    linhas = []
-    for cols, label, _ in _MAQ_KPI:
-        r = kpi_r[label]; h = kpi_h[label]
-        c_r = cst_r_maq[label]; c_h = cst_h_maq[label]
-        d_custo = ((c_r - c_h) / c_h * 100) if c_h > 0 else 0.0
-        linhas.append({
-            "Máquina"          : label,
-            "kWh mês"          : f"{r['kwh_mes']:.0f}",
-            "Custo teórico R$" : f"R$ {c_r:,.0f}".replace(",", "."),
-            "Horas ativas"     : r["h_ativ"],
-            "kWh pico"         : f"{r['kwh_pico']:.0f}",
-            "% pico"           : f"{r['pct_pico']:.1f}%",
-            "Δ$ vs Heur"       : f"{d_custo:+.1f}%",
-        })
-    # Cascata: soma teórica → economia bat./solar → fatura real
-    teorico_total = sum(cst_r_maq.values())
-    economia_bs = teorico_total - cst_r["custo_fatura_total"]
-    pct_econ = (economia_bs / teorico_total * 100) if teorico_total > 0 else 0.0
-    d_fatura = ((cst_r["custo_fatura_total"] - cst_h["custo_fatura_total"])
-                / max(cst_h["custo_fatura_total"], 1e-9) * 100)
-    linhas.append({
-        "Máquina"          : "Soma teórica",
-        "kWh mês"          : "—",
-        "Custo teórico R$" : f"R$ {teorico_total:,.0f}".replace(",", "."),
-        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
-        "Δ$ vs Heur"       : "—",
-    })
-    linhas.append({
-        "Máquina"          : "(−) Bat./solar",
-        "kWh mês"          : "—",
-        "Custo teórico R$" : f"−R$ {economia_bs:,.0f}".replace(",", "."),
-        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
-        "Δ$ vs Heur"       : f"−{pct_econ:.1f}%",
-    })
-    linhas.append({
-        "Máquina"          : "TOTAL FATURA (real)",
-        "kWh mês"          : f"{cst_r['rede_kwh_total']:.0f}",
-        "Custo teórico R$" : f"R$ {cst_r['custo_fatura_total']:,.0f}".replace(",", "."),
-        "Horas ativas"     : "—", "kWh pico": "—", "% pico": "—",
-        "Δ$ vs Heur"       : f"{d_fatura:+.1f}%",
-    })
-    return linhas
-
 
 def _fig_visao_geral(dias, res_s, res_h, res_r) -> go.Figure:
     cst_s_maq = _custo_por_maquina(res_s)
@@ -534,29 +484,54 @@ def _fig_maquina_detalhada(
 # Layout
 # ──────────────────────────────────────────────────────────────
 
-def _layout(dias, res_s, res_h, res_r):
+def _opcoes_run(runs_disp):
+    return [{"label": r["label"], "value": r["run_id"]} for r in runs_disp]
+
+
+def _layout(dias, runs_disp, run_inicial):
     labels_d = _labels_dias(dias)
     nomes_maq = list(_MAQUINAS_DETALHE.keys())
+    opcoes_run = _opcoes_run(runs_disp)
 
     return html.Div([
         html.Div([
-            html.H2("SmartEnergy MAS — Dashboard BI",
-                    style={"margin": "0", "padding": "10px 20px",
-                           "background": "#2c3e50", "color": "white"}),
-            html.Div(f"{len(dias)} dias  •  3 estratégias (Sem Agente / Heurístico / RL)",
-                     style={"padding": "6px 20px", "background": "#34495e",
-                            "color": "#ecf0f1", "fontSize": "0.9em"}),
+            html.Div([
+                html.H2("SmartEnergy MAS — Dashboard BI",
+                        style={"margin": "0"}),
+                html.Span(id="run-atual-badge",
+                          style={"color": "#aed6f1", "fontSize": "0.9em",
+                                 "fontWeight": "bold"}),
+            ], style={"padding": "10px 20px", "background": "#2c3e50",
+                      "color": "white", "display": "flex",
+                      "alignItems": "baseline", "gap": "16px"}),
+            html.Div([
+                html.Span(f"{len(dias)} dias  •  3 estratégias (Sem Agente / Heurístico / RL)",
+                          style={"color": "#ecf0f1", "fontSize": "0.9em"}),
+                html.Div([
+                    html.Label("Run (treino):",
+                               style={"color": "#ecf0f1", "fontSize": "0.85em",
+                                      "marginRight": "8px"}),
+                    dcc.Dropdown(id="dd-run", options=opcoes_run, value=run_inicial,
+                                 clearable=False,
+                                 style={"width": "360px", "color": "#2c3e50"}),
+                ], style={"display": "flex", "alignItems": "center"}),
+            ], style={"padding": "6px 20px", "background": "#34495e",
+                      "display": "flex", "alignItems": "center",
+                      "justifyContent": "space-between"}),
         ]),
         dcc.Tabs(id="tabs", value="t-explorar", children=[
             dcc.Tab(label="Explorar Dia", value="t-explorar"),
             dcc.Tab(label="Visão Geral Operacional", value="t-visao"),
             dcc.Tab(label="Máquina Detalhada", value="t-maquina"),
+            dcc.Tab(label="Runs / Comparação", value="t-runs"),
         ]),
         html.Div(id="tab-content", style={"padding": "12px 18px"}),
 
         # Dados invisíveis para callback referenciar
         dcc.Store(id="store-labels", data=labels_d),
         dcc.Store(id="store-maqs",   data=nomes_maq),
+        # Tick incrementado a cada mutação de run (rótulo/favorito/apagar)
+        dcc.Store(id="store-runs-tick", data=0),
     ])
 
 
@@ -574,37 +549,13 @@ def _content_explorar(labels_d):
                          value="Todas", clearable=False,
                          style={"width": "220px", "display": "inline-block"}),
         ], style={"display": "flex", "alignItems": "center", "padding": "10px 0"}),
-        dcc.Graph(id="g-explorar"),
+        dcc.Loading(dcc.Graph(id="g-explorar")),
     ])
 
 
 def _content_visao():
     return html.Div([
-        html.Div([
-            html.Span("KPIs por máquina (RL)", style={"fontWeight": "bold"}),
-            html.Span("  •  custo R$ é teórico (kWh × tarifa, sem desconto de bateria/solar)",
-                      style={"fontSize": "0.85em", "color": "#7f8c8d", "marginLeft": "8px"}),
-            html.Span("  •  TOTAL FATURA = R$ realmente pagos à rede",
-                      style={"fontSize": "0.85em", "color": "#7f8c8d", "marginLeft": "8px"}),
-        ], style={"marginTop": "8px", "marginBottom": "4px"}),
-        dash_table.DataTable(
-            id="tab-kpis",
-            columns=[{"name": c, "id": c} for c in
-                     ["Máquina", "kWh mês", "Custo teórico R$", "Horas ativas",
-                      "kWh pico", "% pico", "Δ$ vs Heur"]],
-            style_cell={"textAlign": "center", "padding": "6px",
-                        "fontFamily": "Segoe UI", "fontSize": "0.92em"},
-            style_header={"backgroundColor": "#2c3e50", "color": "white", "fontWeight": "bold"},
-            style_data_conditional=[
-                {"if": {"filter_query": '{Máquina} = "Soma teórica"'},
-                 "backgroundColor": "#ecf0f1", "fontWeight": "bold"},
-                {"if": {"filter_query": '{Máquina} = "(−) Bat./solar"'},
-                 "backgroundColor": "#d5f5e3", "fontWeight": "bold"},
-                {"if": {"filter_query": '{Máquina} = "TOTAL FATURA (real)"'},
-                 "backgroundColor": "#d6eaf8", "fontWeight": "bold"},
-            ],
-        ),
-        dcc.Graph(id="g-visao"),
+        dcc.Loading(dcc.Graph(id="g-visao")),
     ])
 
 
@@ -621,7 +572,136 @@ def _content_maquina(nomes_maq):
                  style={"padding": "12px", "background": "#f5f5f5",
                         "borderRadius": "6px", "marginBottom": "10px",
                         "fontFamily": "Segoe UI"}),
-        dcc.Graph(id="g-maquina"),
+        dcc.Loading(dcc.Graph(id="g-maquina")),
+    ])
+
+
+# ──────────────────────────────────────────────────────────────
+# Aba Runs / Comparação
+# ──────────────────────────────────────────────────────────────
+
+_NONE_B = "__none__"
+_COR_RUN_A = "#2980b9"
+_COR_RUN_B = "#e67e22"
+_BTN = {"display": "block", "width": "100%", "marginBottom": "8px",
+        "padding": "8px", "cursor": "pointer"}
+
+
+def _reduzir(serie, alvo: int = 1200):
+    """Reduz uma série longa a ~`alvo` pontos por média de blocos (plot leve)."""
+    n = len(serie)
+    if n == 0:
+        return [], []
+    if n <= alvo:
+        return list(range(1, n + 1)), list(serie)
+    bloco = n // alvo
+    arr = np.asarray(serie[: bloco * alvo], dtype=float).reshape(-1, bloco).mean(axis=1)
+    xs = [(i + 1) * bloco for i in range(len(arr))]
+    return xs, arr.tolist()
+
+
+def _fig_comparacao_curvas(run_a, run_b=None):
+    fig = make_subplots(rows=1, cols=2,
+                        subplot_titles=("Custo por episódio (R$)",
+                                        "Reward por episódio"))
+
+    def _add(rid, cor):
+        if not rid:
+            return
+        try:
+            h = runs.ler_historico(rid)
+        except FileNotFoundError:
+            return
+        xc, yc = _reduzir(h.get("custos") or [])
+        xr, yr = _reduzir(h.get("rewards") or [])
+        fig.add_trace(go.Scatter(x=xc, y=yc, name=rid, legendgroup=rid,
+                                 line=dict(color=cor)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=xr, y=yr, name=rid, legendgroup=rid,
+                                 line=dict(color=cor), showlegend=False), row=1, col=2)
+
+    _add(run_a, _COR_RUN_A)
+    _add(run_b, _COR_RUN_B)
+    fig.update_layout(height=440, margin=dict(t=50, b=60),
+                      legend=dict(orientation="h", y=-0.2),
+                      title_text="Curvas de aprendizado — Run A (azul) vs Run B (laranja)")
+    fig.update_xaxes(title_text="Episódio")
+    return fig
+
+
+def _card_meta(run_id):
+    meta = runs.ler_meta(run_id)
+
+    def linha(rotulo, valor):
+        return html.Tr([
+            html.Td(rotulo, style={"color": "#7f8c8d", "paddingRight": "14px",
+                                   "verticalAlign": "top"}),
+            html.Td(valor, style={"fontWeight": "bold"}),
+        ])
+
+    n = meta.get("n_episodios")
+    n_txt = f"{n:,}".replace(",", ".") if isinstance(n, int) else "—"
+    custo = meta.get("custo_final")
+    if not isinstance(custo, (int, float)):
+        custo = meta.get("best_custo_med")
+    custo_txt = f"R$ {custo:.2f}" if isinstance(custo, (int, float)) else "—"
+    dur = meta.get("duracao_s")
+    dur_txt = f"{dur/60:.1f} min" if isinstance(dur, (int, float)) else "—"
+    hp = meta.get("hiperparametros") or {}
+    hp_txt = ", ".join(f"{k}={v}" for k, v in hp.items()) or "—"
+
+    return html.Table([
+        linha("Run", run_id),
+        linha("Criado em", meta.get("criado_em", "—")),
+        linha("Episódios", n_txt),
+        linha("Custo final", custo_txt),
+        linha("Best (episódio)", str(meta.get("best_ep", "—"))),
+        linha("Duração", dur_txt),
+        linha("Hiperparâmetros", hp_txt),
+        linha("Fonte de dados", meta.get("fonte_dados", "—")),
+        linha("Favorito", "⭐ sim" if meta.get("favorito") else "não"),
+    ], style={"fontFamily": "Segoe UI", "fontSize": "0.92em"})
+
+
+def _content_runs(runs_disp):
+    opcoes = _opcoes_run(runs_disp)
+    opcoes_b = [{"label": "— nenhum —", "value": _NONE_B}] + opcoes
+    return html.Div([
+        html.H3("Comparação de runs"),
+        html.Div([
+            html.Label("Comparar Run atual (A) com Run B:",
+                       style={"marginRight": "8px"}),
+            dcc.Dropdown(id="dd-run-b", options=opcoes_b, value=_NONE_B,
+                         clearable=False, style={"width": "400px"}),
+        ], style={"display": "flex", "alignItems": "center", "padding": "6px 0"}),
+        dcc.Loading(dcc.Graph(id="g-comparacao")),
+
+        html.Hr(),
+        html.H3("Gestão do run atual (A)"),
+        html.Div([
+            html.Div(id="painel-meta",
+                     style={"flex": "1", "background": "#f5f5f5",
+                            "borderRadius": "6px", "padding": "12px"}),
+            html.Div([
+                html.Label("Rótulo:"),
+                dcc.Input(id="in-label", type="text", placeholder="ex. alpha-decay",
+                          style={"width": "100%", "marginBottom": "8px"}),
+                html.Button("Salvar rótulo", id="btn-label", n_clicks=0, style=_BTN),
+                html.Button("⭐ Favoritar / desfavoritar", id="btn-fav",
+                            n_clicks=0, style=_BTN),
+                html.Button("Fixar como run padrão", id="btn-default",
+                            n_clicks=0, style=_BTN),
+                html.Button("Apagar run", id="btn-del", n_clicks=0,
+                            style={**_BTN, "background": "#c0392b", "color": "white"}),
+                html.Div(id="msg-gestao",
+                         style={"marginTop": "8px", "color": "#1e8449",
+                                "fontWeight": "bold"}),
+            ], style={"flex": "1", "paddingLeft": "16px"}),
+        ], style={"display": "flex", "gap": "16px"}),
+
+        dcc.ConfirmDialog(
+            id="confirm-del",
+            message="Apagar este run definitivamente? Esta ação não pode ser desfeita.",
+        ),
     ])
 
 
@@ -633,12 +713,28 @@ def criar_app(
     dias: list[pd.DataFrame],
     res_s: list[list[dict]],
     res_h: list[list[dict]],
-    res_r: list[list[dict]],
+    tarifa,
+    run_inicial: str,
+    runs_disp: list[dict],
+    res_r_inicial: list[list[dict]] | None = None,
 ) -> Dash:
-    app = Dash(__name__, title="SmartEnergy MAS — BI")
-    app.layout = _layout(dias, res_s, res_h, res_r)
+    app = Dash(__name__, title="SmartEnergy MAS — BI",
+               suppress_callback_exceptions=True)
+    app.layout = _layout(dias, runs_disp, run_inicial)
     labels_d = _labels_dias(dias)
     nomes_maq = list(_MAQUINAS_DETALHE.keys())
+
+    # Cache run_id → res_r. RES_R é recomputado sob demanda ao trocar de run
+    # (RES_S/RES_H independem do run). O run inicial já vem pronto.
+    _cache_res_r: dict[str, list] = {}
+    if res_r_inicial is not None:
+        _cache_res_r[run_inicial] = res_r_inicial
+
+    def _get_res_r(run_id):
+        if run_id not in _cache_res_r:
+            res_r, _ = runs.resultados_rl(run_id, dias, tarifa)
+            _cache_res_r[run_id] = res_r
+        return _cache_res_r[run_id]
 
     @app.callback(Output("tab-content", "children"), Input("tabs", "value"))
     def _render_tab(tab):
@@ -648,44 +744,131 @@ def criar_app(
             return _content_visao()
         if tab == "t-maquina":
             return _content_maquina(nomes_maq)
+        if tab == "t-runs":
+            return _content_runs(runs.listar_runs())
         return html.Div("Aba não encontrada")
+
+    @app.callback(Output("run-atual-badge", "children"), Input("dd-run", "value"))
+    def _badge(run_id):
+        meta = runs.ler_meta(run_id)
+        label = (meta.get("label") or "").strip()
+        star = "⭐ " if meta.get("favorito") else ""
+        nome = f"{label} · {run_id}" if label else run_id
+        return f"▶ {star}{nome}"
 
     @app.callback(Output("g-explorar", "figure"),
                   Input("dd-dia", "value"),
-                  Input("dd-maq-filtro", "value"))
-    def _upd_explorar(idx, filtro):
+                  Input("dd-maq-filtro", "value"),
+                  Input("dd-run", "value"))
+    def _upd_explorar(idx, filtro, run_id):
+        res_r = _get_res_r(run_id)
         return _fig_explorar_dia(dias[idx], res_h[idx], res_r[idx], filtro)
 
-    @app.callback(Output("tab-kpis", "data"),
-                  Output("g-visao", "figure"),
-                  Input("tabs", "value"))
-    def _upd_visao(tab):
+    @app.callback(Output("g-visao", "figure"),
+                  Input("tabs", "value"),
+                  Input("dd-run", "value"))
+    def _upd_visao(tab, run_id):
         if tab != "t-visao":
-            return [], go.Figure()
-        return _tabela_kpis(res_r, res_h), _fig_visao_geral(dias, res_s, res_h, res_r)
+            return go.Figure()
+        return _fig_visao_geral(dias, res_s, res_h, _get_res_r(run_id))
 
     @app.callback(Output("g-maquina", "figure"),
                   Output("resumo-maq", "children"),
-                  Input("dd-maq", "value"))
-    def _upd_maquina(nome):
+                  Input("dd-maq", "value"),
+                  Input("dd-run", "value"))
+    def _upd_maquina(nome, run_id):
+        res_r = _get_res_r(run_id)
         fig, resumo_html = _fig_maquina_detalhada(nome, dias, res_s, res_h, res_r)
         return fig, dcc.Markdown(resumo_html, dangerously_allow_html=True)
+
+    # ── Aba Runs / Comparação ─────────────────────────────────────
+    @app.callback(Output("g-comparacao", "figure"),
+                  Input("dd-run", "value"),
+                  Input("dd-run-b", "value"))
+    def _upd_comparacao(run_a, run_b):
+        rb = None if run_b in (None, _NONE_B) else run_b
+        return _fig_comparacao_curvas(run_a, rb)
+
+    @app.callback(Output("painel-meta", "children"),
+                  Output("in-label", "value"),
+                  Input("dd-run", "value"),
+                  Input("store-runs-tick", "data"))
+    def _sync_meta(run_id, _tick):
+        meta = runs.ler_meta(run_id)
+        return _card_meta(run_id), (meta.get("label") or "")
+
+    @app.callback(Output("dd-run", "options"),
+                  Output("dd-run-b", "options"),
+                  Input("store-runs-tick", "data"))
+    def _refresh_opcoes(_tick):
+        op = _opcoes_run(runs.listar_runs())
+        op_b = [{"label": "— nenhum —", "value": _NONE_B}] + op
+        return op, op_b
+
+    @app.callback(Output("confirm-del", "displayed"),
+                  Input("btn-del", "n_clicks"),
+                  prevent_initial_call=True)
+    def _ask_del(_n):
+        return True
+
+    @app.callback(
+        Output("store-runs-tick", "data"),
+        Output("msg-gestao", "children"),
+        Output("dd-run", "value"),
+        Input("btn-label", "n_clicks"),
+        Input("btn-fav", "n_clicks"),
+        Input("btn-default", "n_clicks"),
+        Input("confirm-del", "submit_n_clicks"),
+        State("dd-run", "value"),
+        State("in-label", "value"),
+        State("store-runs-tick", "data"),
+        prevent_initial_call=True,
+    )
+    def _mutate(_nl, _nf, _nd, _ndel, run_id, label, tick):
+        quem = ctx.triggered_id
+        novo_valor = no_update
+        if quem == "btn-label":
+            runs.definir_label(run_id, label or "")
+            msg = "Rótulo salvo."
+        elif quem == "btn-fav":
+            meta = runs.alternar_favorito(run_id)
+            msg = "Adicionado aos favoritos." if meta.get("favorito") \
+                else "Removido dos favoritos."
+        elif quem == "btn-default":
+            runs.definir_latest(run_id)
+            msg = "Fixado como run padrão (latest)."
+        elif quem == "confirm-del":
+            novo = runs.deletar_run(run_id)
+            if novo is None:
+                msg = "Run apagado. Nenhum run restante."
+            else:
+                msg = f"Run apagado. Exibindo agora: {novo}."
+                novo_valor = novo
+        else:
+            return no_update, no_update, no_update
+        return (tick or 0) + 1, msg, novo_valor
 
     return app
 
 
 def abrir_dashboard_web(
-    dias, res_s, res_h, res_r,
+    dias, res_s, res_h, tarifa,
+    run_inicial: str,
+    runs_disp: list[dict],
+    res_r_inicial=None,
     porta: int = 8050,
     abrir_browser: bool = True,
 ) -> None:
     """Inicia o servidor Dash em localhost.
 
     Args:
+        run_inicial   : run_id exibido ao abrir.
+        runs_disp     : lista de runs (saída de runs.listar_runs) p/ o seletor.
+        res_r_inicial : RES_R já calculado do run inicial (evita recomputar).
         porta         : porta TCP (default 8050).
         abrir_browser : abre o browser automaticamente.
     """
-    app = criar_app(dias, res_s, res_h, res_r)
+    app = criar_app(dias, res_s, res_h, tarifa, run_inicial, runs_disp, res_r_inicial)
     if abrir_browser:
         import threading
         import webbrowser
