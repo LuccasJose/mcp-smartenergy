@@ -65,6 +65,30 @@ def rodar_rl(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, agentes: dict) -> 
     return env.historico
 
 
+def rodar_llm(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, politica) -> list[dict]:
+    """Executa uma PoliticaLLM em um dia completo (braço 'com MCP').
+
+    Clone de ``rodar_rl`` trocando apenas o decisor: o LLM escolhe as 3 ações a
+    cada hora. Ambiente, dias, reward e métricas são idênticos — é um A/B onde a
+    única variável é o tomador de decisão. As métricas operacionais (latência,
+    tokens, fallback) ficam acumuladas em ``politica.eventos``.
+
+    Args:
+        politica : instância de ``llm_policy.PoliticaLLM`` (com método ``agir``).
+
+    Returns:
+        historico — lista de 24 dicts com métricas horárias (idêntico a rodar_rl).
+    """
+    env = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
+    est = env.reset()
+    for _ in range(24):
+        a_arm, a_cons, a_ger = politica.agir(est)
+        est, _, done, _ = env.step(a_arm, a_cons, a_ger)
+        if done:
+            break
+    return env.historico
+
+
 def resumo_mes(historicos: list[list[dict]]) -> tuple[float, float, float, float]:
     """Calcula métricas médias diárias para um mês de simulações.
 

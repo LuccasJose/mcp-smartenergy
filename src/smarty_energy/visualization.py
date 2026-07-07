@@ -1368,3 +1368,55 @@ def plot_comparacao_runs(fig, hist_a, hist_b, label_a, label_b=None) -> None:
     fig.suptitle("Curvas de aprendizado — Run A (azul) vs Run B (laranja)",
                  fontsize=12, fontweight="bold")
     fig.tight_layout()
+
+
+def plot_tradeoff_mcp(res: dict) -> plt.Figure:
+    """Gráfico de trade-off do benchmark RL × LLM-via-MCP.
+
+    Recebe o dict de ``benchmark.rodar_benchmark`` e plota dois painéis:
+      (a) Pareto — custo de energia (R$/dia, ↓ melhor) × custo operacional de
+          API (R$/mês). RL puro fica em X≈0; o LLM se desloca à direita. A
+          pergunta do TCC vira visual: o deslocamento em X se justifica?
+      (b) Custo operacional do LLM — latência (mediana/p95) e taxa de fallback.
+    """
+    q = res["eixo1_qualidade"]
+    op = res.get("eixo2_operacional", {}) or {}
+    ca = res.get("custo_api", {})
+
+    fig, (ax_p, ax_o) = plt.subplots(1, 2, figsize=(13, 5))
+
+    # ── (a) Pareto: custo energia × custo API ──────────────────────
+    pontos = [
+        ("Sem Agente", q["sem_agente"]["custo_r"], 0.0, "#7f8c8d"),
+        ("Heurístico", q["heuristico"]["custo_r"], 0.0, _COR_H),
+        ("RL puro",    q["rl"]["custo_r"],         0.0, _COR_R),
+        ("LLM/MCP",    q["llm"]["custo_r"], ca.get("brl_total", 0.0), "#8e44ad"),
+    ]
+    for nome, custo_e, custo_api, cor in pontos:
+        ax_p.scatter(custo_api, custo_e, s=160, color=cor, zorder=3,
+                     edgecolors="white", linewidths=1.5)
+        ax_p.annotate(f"{nome}\nR${custo_e:.2f}/dia", (custo_api, custo_e),
+                      textcoords="offset points", xytext=(8, 8), fontsize=9)
+    ax_p.set_xlabel("Custo operacional de API (R$/mês)")
+    ax_p.set_ylabel("Custo de energia (R$/dia)  ↓ melhor")
+    ax_p.set_title("Trade-off: economia × custo de API")
+    ax_p.grid(True, alpha=0.3)
+    if ca.get("preco", {}).get("snapshot"):
+        ax_p.text(0.98, 0.02, f"preço: {ca['preco']['snapshot']}",
+                  transform=ax_p.transAxes, ha="right", va="bottom",
+                  fontsize=7, color="gray")
+
+    # ── (b) Custo operacional do LLM ───────────────────────────────
+    lat_med = op.get("latencia_ms_mediana", 0.0)
+    lat_p95 = op.get("latencia_ms_p95", 0.0)
+    barras = ax_o.bar(["latência\nmediana", "latência\np95"], [lat_med, lat_p95],
+                      color=["#8e44ad", "#c39bd3"])
+    ax_o.bar_label(barras, fmt="%.0f ms", padding=3, fontsize=9)
+    ax_o.set_ylabel("Latência por decisão (ms)")
+    taxa_fb = op.get("taxa_fallback", 0.0) * 100
+    ax_o.set_title(f"Custo operacional do LLM  ·  fallback {taxa_fb:.1f}%")
+    ax_o.grid(True, axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    _save(fig, "tradeoff_mcp.png")
+    return fig
