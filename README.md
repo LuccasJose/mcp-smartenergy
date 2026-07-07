@@ -2,8 +2,17 @@
 
 Servidor MCP (Model Context Protocol) que espelha o projeto **Smart_Energy** —
 sistema multi-agente com Q-Learning cooperativo para gestão energética de
-fazenda de grãos. Expõe ~24 ferramentas para um LLM-juiz treinar, avaliar
+fazenda de grãos. Expõe ~25 ferramentas para um LLM-juiz treinar, avaliar
 e auditar a política aprendida.
+
+O MCP é o **intermediador obrigatório** de todo o sistema: `server.py` é o
+único processo que detém o dataset, as Q-tables e o tracker de métricas.
+O dashboard Streamlit (`dashboard/`) **não** importa mais `agents/`,
+`environment/` ou `metrics/` diretamente — ele é um cliente MCP que se
+conecta ao servidor via HTTP e só renderiza payloads retornados pelas
+tools. Não há caminho de treino, avaliação ou leitura de métrica que
+não passe pelo MCP. Veja o [MANUAL.md](MANUAL.md) para o passo a passo
+de instalação e inicialização.
 
 ---
 
@@ -46,13 +55,14 @@ MCP_SmartEnergy/
 ├── metrics/
 │   └── tracker.py             # Tracker com violações por hora
 │
-├── dashboard/                 # UI Streamlit (opcional, importa direto)
-│   ├── app.py                 # Entry — sidebar com setup/treino/avaliação
-│   ├── state.py               # Estado compartilhado via st.session_state
+├── dashboard/                  # UI Streamlit — CLIENTE MCP (não é opcional)
+│   ├── app.py                  # Entry — sidebar conecta ao servidor MCP
+│   ├── mcp_client.py           # Cliente MCP síncrono (streamable-http)
+│   ├── state.py                 # Wrappers de tool call para uso nas páginas
 │   └── pages/
-│       ├── 1_Overview.py              # health_report em cards
-│       ├── 2_Curva_de_Aprendizado.py  # reward/custo/epsilon + TD-error
-│       └── 3_Trace_Diario.py          # trace hora-a-hora + violações
+│       ├── 1_Overview.py              # health_report() em cards
+│       ├── 2_Curva_de_Aprendizado.py  # get_learning_curve + get_td_error_series
+│       └── 3_Trace_Diario.py          # run_episode + get_hourly_violations
 │
 └── tests/                     # 47 testes pytest (sem rede)
     ├── conftest.py            # Fixtures sintéticas (dia + tarifa)
@@ -155,7 +165,8 @@ Baixado uma vez no startup do servidor via `urllib.request.urlopen`:
 |---|---|---|
 | `get_training_metrics` | — | Sumário do treino + info dos 3 agentes |
 | `get_qtables_info` | — | Estatísticas detalhadas das 3 Q-tables |
-| `get_learning_curve` | janela_media_movel=20 | Reward e custo por episódio |
+| `get_td_error_series` | agente="armazenamento" | Série completa de TD-error (até 5000 pontos) de 1 agente — usado pelo dashboard para plotar convergência |
+| `get_learning_curve` | janela_media_movel=20 | Reward, custo e epsilon por episódio |
 | `get_eval_metrics` | agente="iql_eval" | Métricas da última avaliação |
 | `get_peak_offpeak_stats` | agente="iql_eval" | kWh e R$ pico vs fora-pico |
 | `get_stats_por_cenario` | agente="iql_eval" | Reward/custo médio por cenário |
@@ -229,33 +240,60 @@ evaluate_agents() + health_report()   ← reavaliação
 
 ---
 
-## Dashboard Streamlit (opcional)
+## Dashboard Streamlit (cliente MCP)
 
-UI interativa que importa os módulos do projeto diretamente
-(não passa pelo transporte MCP — para debug e inspeção rápida).
+UI interativa que se conecta ao servidor MCP via HTTP (`dashboard/mcp_client.py`)
+— **não** importa `agents/`, `environment/` ou `metrics/` diretamente.
+Toda métrica exibida vem de uma tool call. Requer o servidor rodando à parte.
+
+> **Antes de colar os comandos abaixo**: eles assumem que você já está
+> dentro da pasta `mcp-smartenergy/` (a raiz do projeto, onde ficam
+> `server.py` e `dashboard/`) e que já instalou as dependências num
+> ambiente virtual — veja [MANUAL.md](MANUAL.md). Rodar
+> `pip install` ou `streamlit run` fora dessa pasta, ou no Python global
+> em vez do venv, é a causa mais comum de erro aqui.
+
+```powershell
+# terminal 1 — servidor MCP (fica rodando)
+cd caminho\para\mcp-smartenergy
+.venv\Scripts\python.exe server.py
+
+# terminal 2 — dashboard (conecta no servidor acima)
+cd caminho\para\mcp-smartenergy
+.venv\Scripts\python.exe -m streamlit run dashboard\app.py
+```
 
 ```bash
-pip install streamlit plotly
+# Linux/Mac — mesma ideia, com o venv ativado
+cd caminho/para/mcp-smartenergy && source .venv/bin/activate
+
+# terminal 1
+python server.py
+
+# terminal 2
 python -m streamlit run dashboard/app.py
 ```
 
-3 páginas:
+3 páginas, todas construídas a partir de tool calls:
 
-| Página | O que mostra |
-|---|---|
-| **Overview** | health_report renderizado em cards: cobertura/TD-error dos 3 agentes, comparação com baselines, alertas heurísticos |
-| **Curva de Aprendizado** | Reward/custo/epsilon por episódio com média móvel + TD-error rolante dos 3 agentes |
-| **Trace Diário** | Navega pelos 31 dias, renderiza geração/consumo/SOC/custo hora-a-hora + heatmap de violações por hora |
+| Página | Tools usadas | O que mostra |
+|---|---|---|
+| **Overview** | `health_report`, `get_dataset_info` | Veredito consolidado: cobertura/TD-error dos 3 agentes, comparação com baselines, alertas heurísticos |
+| **Curva de Aprendizado** | `get_learning_curve`, `get_td_error_series` | Reward/custo/epsilon por episódio com média móvel + TD-error rolante dos 3 agentes |
+| **Trace Diário** | `run_episode`, `select_day`, `identify_scenarios`, `get_hourly_violations`, `describe_schema` | Roda 1 dia (greedy/exploração), geração/consumo/SOC/custo hora-a-hora + heatmap de violações |
 
-A sidebar concentra setup (download do dataset), treino (slider de
-episódios) e avaliação (com toggle de propagação de SOC).
+A sidebar concentra conexão ao MCP, treino (slider de episódios,
+`configure_agents` + `train_agents`) e avaliação (`evaluate_agents` /
+`compare_strategies`, com toggle de propagação de SOC).
 
 ---
 
 ## Testes
 
+Dentro da pasta `mcp-smartenergy/`, com o venv ativado (`pytest` já está
+em `requirements.txt`):
+
 ```bash
-pip install pytest
 python -m pytest tests/ -v
 ```
 
@@ -268,15 +306,16 @@ servidor. Testes usam fixtures sintéticas, **sem download** do Sheets.
 ## Dependências
 
 ```
-mcp >= 1.0.0
+mcp >= 1.9.0        # server.py e dashboard/mcp_client.py (streamable-http)
 numpy >= 1.24.0
 pandas >= 2.0
 openpyxl >= 3.1
 
-streamlit >= 1.30   # opcional (dashboard)
-plotly >= 5.18      # opcional (dashboard)
+streamlit >= 1.30   # dashboard (cliente MCP, não é mais opcional se for usá-lo)
+plotly >= 5.18      # dashboard
 pytest >= 8.0       # opcional (testes)
 ```
 
 Python 3.10+ requerido (sintaxe `int | None`). Conexão à internet requerida no
-startup para baixar a planilha (~1 MB).
+startup do **servidor** para baixar a planilha (~1 MB) — o dashboard não
+baixa nada, só conversa com o servidor.

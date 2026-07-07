@@ -1,126 +1,123 @@
 """Helpers para manter o estado do dashboard em st.session_state.
 
-Importa direto do projeto MCP (sem passar pelo transporte MCP) para
-simplicidade de debug. Cada pagina pode chamar `require_setup()` para
-garantir que o dataset/iql/env estao prontos.
+Toda operação aqui é uma chamada de ferramenta MCP contra o servidor
+`server.py` (via `dashboard.mcp_client`) — nenhuma métrica é calculada
+localmente. O servidor MCP é quem detém o dataset, as Q-tables e o
+tracker; o dashboard só armazena em cache o último payload JSON
+retornado por cada tool, para renderização.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import streamlit as st
 
-# Garante que a raiz do projeto esta no path (dashboard/ -> raiz)
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from dashboard.mcp_client import MCPServerError, call_tool
 
-from config import CONFIG, N_ESTADOS_TOTAL
-from environment.data_loader import carregar_dados
-from environment.energy_env import FazendaEnergyEnv
-from environment.scenarios import identificar_cenarios, classificar_dia
-from agents.qlearning_agent import IQLSystem
-from agents.baselines import AgentesHeuristicos, SemAgente
-from metrics.tracker import MetricsTracker
-
-
-# Reexporta nomes uteis (paginas podem fazer `from dashboard.state import ...`)
 __all__ = [
-    "ensure_state", "require_setup", "setup_dataset",
+    "ensure_state", "require_setup", "conectar_mcp",
     "treinar", "avaliar", "comparar",
-    "CONFIG", "N_ESTADOS_TOTAL",
-    "FazendaEnergyEnv", "identificar_cenarios", "classificar_dia",
+    "health_report", "get_dataset_info", "get_qtables_info",
+    "get_learning_curve", "get_td_error_series", "get_hourly_violations",
+    "run_episode", "select_day", "identify_scenarios", "describe_schema",
+    "MCPServerError",
 ]
 
 
 def ensure_state() -> None:
-    """Inicializa chaves esperadas no session_state, sem disparar download."""
+    """Inicializa chaves esperadas no session_state, sem chamar o MCP."""
     ss = st.session_state
-    ss.setdefault("dataset_carregado", False)
-    ss.setdefault("dias", None)
-    ss.setdefault("tarifa_24h", None)
+    ss.setdefault("mcp_conectado", False)
     ss.setdefault("meta", None)
-    ss.setdefault("iql", None)
-    ss.setdefault("heuristico", None)
-    ss.setdefault("sem_agente", None)
-    ss.setdefault("tracker", None)
     ss.setdefault("treinado", False)
     ss.setdefault("avaliado", False)
     ss.setdefault("comparado", False)
 
 
-def setup_dataset() -> None:
-    """Baixa o dataset e instancia IQL/baselines/tracker.
+def conectar_mcp() -> dict:
+    """Verifica conectividade com o servidor MCP e busca metadados do dataset.
 
-    Disparado por botao na sidebar. Demora ~1s (download xlsx).
+    O dataset já foi baixado e carregado dentro do processo do servidor
+    no startup dele (`python server.py`) — aqui só confirmamos que o
+    servidor está de pé e sincronizamos o dashboard com o que ele expõe.
     """
     ss = st.session_state
-    with st.spinner("Baixando dataset do Google Sheets..."):
-        dias, tarifa, meta = carregar_dados()
-    ss.dias = dias
-    ss.tarifa_24h = tarifa
+    meta = call_tool("get_dataset_info")
     ss.meta = meta
-    ss.iql = IQLSystem(CONFIG)
-    ss.heuristico = AgentesHeuristicos(CONFIG)
-    ss.sem_agente = SemAgente(CONFIG)
-    ss.tracker = MetricsTracker()
-    ss.dataset_carregado = True
-    ss.treinado = False
-    ss.avaliado = False
-    ss.comparado = False
+    ss.mcp_conectado = True
+    return meta
 
 
 def require_setup() -> bool:
-    """Mostra aviso se dataset nao carregado. Retorna True se ok."""
+    """Mostra aviso se ainda não conectou ao MCP. Retorna True se ok."""
     ensure_state()
-    if not st.session_state.dataset_carregado:
-        st.info("Carregue o dataset na sidebar para comecar.")
+    if not st.session_state.mcp_conectado:
+        st.info("Conecte ao servidor MCP na sidebar para começar "
+                 "(o servidor precisa estar rodando: `python server.py`).")
         return False
     return True
 
 
-# --- acoes que envolvem treino/aval (encapsuladas para reuso entre paginas)
+# --- ações que envolvem treino/avaliação (encapsuladas para reuso entre páginas)
 
 def treinar(n_episodios: int) -> dict:
     ss = st.session_state
-    ss.iql.n_episodios = n_episodios
-    ss.tracker.limpar("iql_treino")
-    sumario = ss.iql.treinar(ss.dias, ss.tarifa_24h, FazendaEnergyEnv,
-                              tracker=ss.tracker)
+    call_tool("configure_agents", n_episodios=n_episodios)
+    sumario = call_tool("train_agents", n_episodios=n_episodios)
     ss.treinado = True
     return sumario
 
 
 def avaliar(n_dias: int, propagar_soc: bool = True) -> dict:
     ss = st.session_state
-    ss.tracker.limpar("iql_eval")
-    res = ss.iql.avaliar(ss.dias, ss.tarifa_24h, FazendaEnergyEnv,
-                          n_dias=n_dias, tracker=ss.tracker,
-                          propagar_soc=propagar_soc)
+    res = call_tool("evaluate_agents", n_dias=n_dias, propagar_soc=propagar_soc)
     ss.avaliado = True
     return res
 
 
 def comparar(n_dias: int, propagar_soc: bool = True) -> dict:
     ss = st.session_state
-    for k in ("iql_eval", "iql_eval_cmp", "heuristico", "sem_agente"):
-        ss.tracker.limpar(k)
-
-    res_iql = ss.iql.avaliar(ss.dias, ss.tarifa_24h, FazendaEnergyEnv,
-                              n_dias=n_dias, tracker=ss.tracker,
-                              propagar_soc=propagar_soc)
-    ss.tracker.passos["iql_eval_cmp"] = ss.tracker.passos.pop("iql_eval", [])
-    ss.tracker.episodios["iql_eval_cmp"] = ss.tracker.episodios.pop("iql_eval", [])
-
-    res_heur = ss.heuristico.avaliar(ss.dias, ss.tarifa_24h, FazendaEnergyEnv,
-                                       n_dias=n_dias, tracker=ss.tracker,
-                                       tracker_key="heuristico",
-                                       propagar_soc=propagar_soc)
-    res_sem = ss.sem_agente.avaliar(ss.dias, ss.tarifa_24h, FazendaEnergyEnv,
-                                      n_dias=n_dias, tracker=ss.tracker,
-                                      tracker_key="sem_agente",
-                                      propagar_soc=propagar_soc)
+    res = call_tool("compare_strategies", n_dias=n_dias, propagar_soc=propagar_soc)
     ss.comparado = True
-    return {"IQL": res_iql, "Heuristico": res_heur, "SemAgente": res_sem}
+    return res
+
+
+# --- leitura de métricas/diagnóstico (todas via tool MCP) ------------------
+
+def health_report() -> dict:
+    return call_tool("health_report")
+
+
+def get_dataset_info() -> dict:
+    return call_tool("get_dataset_info")
+
+
+def get_qtables_info() -> dict:
+    return call_tool("get_qtables_info")
+
+
+def get_learning_curve(janela_media_movel: int = 20) -> dict:
+    return call_tool("get_learning_curve", janela_media_movel=janela_media_movel)
+
+
+def get_td_error_series(agente: str) -> dict:
+    return call_tool("get_td_error_series", agente=agente)
+
+
+def get_hourly_violations(agente: str = "iql_eval") -> dict:
+    return call_tool("get_hourly_violations", agente=agente)
+
+
+def run_episode(mode: str = "eval", dia_idx: int | None = None) -> dict:
+    return call_tool("run_episode", mode=mode, dia_idx=dia_idx)
+
+
+def select_day(dia_idx: int) -> dict:
+    return call_tool("select_day", dia_idx=dia_idx)
+
+
+def identify_scenarios() -> dict:
+    return call_tool("identify_scenarios")
+
+
+def describe_schema() -> dict:
+    return call_tool("describe_schema")

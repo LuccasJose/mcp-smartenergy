@@ -145,6 +145,7 @@ class MetricsTracker:
 
         rewards = [e["reward"] for e in eps]
         custos = [e["custo"] for e in eps]
+        epsilons = [e["epsilon"] for e in eps]
 
         def media_movel(serie, k):
             if len(serie) < k:
@@ -157,6 +158,7 @@ class MetricsTracker:
             "rewards_ma": media_movel(rewards, janela),
             "custos": custos,
             "custos_ma": media_movel(custos, janela),
+            "epsilons": epsilons,
         }
 
     # ------------------------------------------------------------------ #

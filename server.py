@@ -47,7 +47,14 @@ tracker = MetricsTracker()
 _dia_atual_idx = 0
 env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
 
-mcp = FastMCP("mcpsmartenergy")
+# Host/porta do transporte HTTP — usados quando o servidor roda como
+# processo central compartilhado por múltiplos clientes MCP (dashboard
+# Streamlit + LLM-juiz). Configuráveis via env var para deploy remoto.
+mcp = FastMCP(
+    "mcpsmartenergy",
+    host=os.getenv("MCP_HOST", "127.0.0.1"),
+    port=int(os.getenv("MCP_PORT", "8000")),
+)
 
 
 # Pesos do reward — alteráveis em runtime via configure_reward_weights.
@@ -360,6 +367,30 @@ def get_training_metrics() -> str:
 def get_qtables_info() -> str:
     """Estatísticas das Q-tables dos 3 agentes IQL."""
     return json.dumps({n: ag.get_info() for n, ag in iql.agentes.items()}, indent=2)
+
+
+@mcp.tool()
+def get_td_error_series(agente: str = "armazenamento") -> str:
+    """Série completa de TD-error (janela rolante de até 5000 updates) de 1 agente.
+
+    Usado pelo dashboard para plotar a curva de convergência por agente —
+    `get_qtables_info` só traz o resumo (`td_error_recente`), não a série.
+
+    agente: "armazenamento", "consumo" ou "gerente".
+    """
+    try:
+        if agente not in iql.agentes:
+            return json.dumps({
+                "erro": f"agente inválido: {agente}. Use um de {list(iql.agentes)}",
+            }, indent=2)
+        ag = iql.agentes[agente]
+        return json.dumps({
+            "agente": agente,
+            "n_pontos": len(ag.td_errors),
+            "td_errors": [round(float(v), 6) for v in ag.td_errors],
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
 
 
 @mcp.tool()
@@ -761,6 +792,15 @@ def describe_schema() -> str:
             },
             "n_total": N_ESTADOS_TOTAL,
         },
+        "parametros_fisicos": {
+            "soc_min_pct": CONFIG["soc_min_pct"],
+            "soc_max_pct": CONFIG["soc_max_pct"],
+            "soc_inicial_pct": CONFIG["soc_inicial_pct"],
+            "bateria_cap_kwh": CONFIG["bateria_cap_kwh"],
+            "pcc_max_kw": CONFIG["pcc_max_kw"],
+            "inversor_fv_max_kw": CONFIG["inversor_fv_max_kw"],
+            "eolico_nominal_kw": CONFIG["eolico_nominal_kw"],
+        },
         "restricoes_hard": {
             "R-PIVO":    "8h consecutivas + 1 ativação/dia (lock automático)",
             "R-BOMBA":   f"cronograma fixo nas horas {sorted(BOMBA_HORAS_ON)} — ação do agente é ignorada",
@@ -810,6 +850,24 @@ def describe_schema() -> str:
 # ------------------------------------------------------------------ #
 # Entrada                                                               #
 # ------------------------------------------------------------------ #
+#
+# Por padrão o servidor sobe em transporte HTTP (streamable-http), como
+# um processo único e de longa duração que centraliza todo o estado
+# (dataset, Q-tables, tracker). O dashboard Streamlit e qualquer cliente
+# MCP (Claude Desktop/Code) conectam nesse MESMO processo — não há mais
+# caminho que treine ou leia métricas sem passar pelas tools acima.
+#
+# Use `python server.py --stdio` para o modo clássico de subprocesso
+# stdio (um cliente por processo, sem estado compartilhado com o
+# dashboard) — mantido só para compatibilidade com clientes que ainda
+# não suportam servidores MCP remotos via HTTP.
 
 if __name__ == "__main__":
-    mcp.run()
+    usar_stdio = "--stdio" in sys.argv or os.getenv("MCP_TRANSPORT", "streamable-http") == "stdio"
+    if usar_stdio:
+        mcp.run(transport="stdio")
+    else:
+        print(f"Servidor MCP em http://{mcp.settings.host}:{mcp.settings.port}"
+              f"{mcp.settings.streamable_http_path} (transporte streamable-http)",
+              file=sys.stderr)
+        mcp.run(transport="streamable-http")

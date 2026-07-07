@@ -1,7 +1,8 @@
-"""Pagina Trace Diario — navega pelos 31 dias, mostra trace + violacoes por hora.
+"""Pagina Trace Diario — navega pelos dias, mostra trace + violacoes por hora.
 
-Permite rodar 1 dia em greedy ou exploracao, plotar geracao/consumo/SOC
-hora-a-hora e ver heatmap de violacoes agregadas.
+Roda 1 dia via `run_episode` (tool MCP) em vez de reimplementar o loop de
+simulacao no dashboard, e le violacoes agregadas via `get_hourly_violations`.
+Nao ha nenhum FazendaEnergyEnv/IQLSystem local aqui.
 """
 
 import sys
@@ -18,59 +19,69 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from dashboard.state import (
-    require_setup, FazendaEnergyEnv,
-    identificar_cenarios, classificar_dia, CONFIG,
+    require_setup, run_episode, select_day, identify_scenarios,
+    describe_schema, get_hourly_violations, MCPServerError,
 )
 
 st.title("Trace Diario")
-st.caption("Navegue pelos dias do dataset, veja decisoes hora-a-hora e violacoes.")
+st.caption("Navegue pelos dias do dataset, veja decisoes hora-a-hora e violacoes. Via MCP.")
 
 if not require_setup():
     st.stop()
 
-ss = st.session_state
+try:
+    dataset = st.session_state.meta
+    cen = identify_scenarios()
+    schema = describe_schema()
+except MCPServerError as e:
+    st.error(str(e))
+    st.stop()
+
+soc_min_pct = schema["parametros_fisicos"]["soc_min_pct"]
 
 # ── Seletor de dia ────────────────────────────────────────────────────────
-n_dias = len(ss.dias)
-cen = identificar_cenarios(ss.dias)
+n_dias = dataset["n_dias"]
 
 col_a, col_b, col_c = st.columns([3, 1, 1])
 dia_idx = col_a.slider("Dia (indice)", 0, n_dias - 1, 0)
-mode = col_b.selectbox("Modo", ["greedy", "exploracao"])
-col_c.metric("Cenario", classificar_dia(dia_idx, ss.dias))
+mode_label = col_b.selectbox("Modo", ["greedy", "exploracao"])
+mode = "eval" if mode_label == "greedy" else "train"
+
+try:
+    dia_sel = select_day(dia_idx)
+    col_c.metric("Cenario", dia_sel["categoria"])
+except MCPServerError as e:
+    col_c.error("erro")
 
 st.caption(
-    f"Dias extremos do dataset — nublado: idx={cen['nublado']}, "
-    f"ensolarado: idx={cen['ensolarado']}, alto_consumo: idx={cen['alto_consumo']}"
+    f"Dias extremos do dataset — "
+    f"nublado: idx={cen['nublado']['dia_idx']}, "
+    f"ensolarado: idx={cen['ensolarado']['dia_idx']}, "
+    f"alto_consumo: idx={cen['alto_consumo']['dia_idx']}"
 )
 
-if not ss.treinado:
+if not st.session_state.treinado:
     st.warning("Modelo nao treinado. O agente vai jogar quase aleatorio.")
 
-# ── Roda 1 episodio ───────────────────────────────────────────────────────
+# ── Roda 1 episodio (via tool run_episode) ─────────────────────────────────
 if st.button("Rodar dia", type="primary"):
-    env = FazendaEnergyEnv(ss.dias[dia_idx], ss.tarifa_24h, CONFIG)
-    est = env.reset(soc_inicial=ss.iql.soc_propagado)
-    s = env.discretizar(est)
-    explore = mode == "exploracao"
-
-    passos = []
-    reward_total = 0.0
-    custo_total = 0.0
-    for _ in range(24):
-        acoes = ss.iql.agir_todos(s, explorando=explore)
-        prox, reward, done, info = env.step(*acoes)
-        s = env.discretizar(prox)
-        passos.append(info)
-        reward_total += reward
-        custo_total += info["custo_r"]
-    ss.trace_dia = {"passos": passos, "reward_total": reward_total,
-                     "custo_total": custo_total, "soc_final": env.soc,
-                     "dia_idx": dia_idx, "mode": mode}
+    try:
+        with st.spinner("Executando episodio via MCP..."):
+            resultado = run_episode(mode=mode, dia_idx=dia_idx)
+        st.session_state.trace_dia = {
+            "passos": resultado["trace"],
+            "reward_total": resultado["reward_total"],
+            "custo_total": resultado["custo_total_rs"],
+            "soc_final": resultado["soc_final_pct"],
+            "dia_idx": dia_idx,
+            "mode": mode,
+        }
+    except MCPServerError as e:
+        st.error(str(e))
 
 # ── Mostra trace se existir ───────────────────────────────────────────────
-if "trace_dia" in ss and ss.trace_dia:
-    td = ss.trace_dia
+if "trace_dia" in st.session_state and st.session_state.trace_dia:
+    td = st.session_state.trace_dia
     if td["dia_idx"] != dia_idx or td["mode"] != mode:
         st.info("Trace mostrado eh de outra simulacao — clique em 'Rodar dia' para atualizar.")
 
@@ -90,7 +101,6 @@ if "trace_dia" in ss and ss.trace_dia:
                                             "SOC (%)",
                                             "Custo horario (R$)"))
 
-    # Geracao/consumo
     fig.add_trace(go.Scatter(x=df["hora"], y=df["geracao_kw"], mode="lines+markers",
                                name="Geracao", line=dict(color="rgb(255,127,14)")),
                     row=1, col=1)
@@ -102,15 +112,13 @@ if "trace_dia" in ss and ss.trace_dia:
     fig.add_trace(go.Bar(x=df["hora"], y=-df["bat_carga"], name="Bat. carga",
                           marker_color="rgba(214,39,40,0.7)"), row=1, col=1)
 
-    # SOC
     fig.add_trace(go.Scatter(x=df["hora"], y=df["soc"], mode="lines+markers",
                                name="SOC", line=dict(color="rgb(148,103,189)"),
                                fill="tozeroy", fillcolor="rgba(148,103,189,0.15)"),
                     row=2, col=1)
-    fig.add_hline(y=CONFIG["soc_min_pct"], line_dash="dash", line_color="red",
+    fig.add_hline(y=soc_min_pct, line_dash="dash", line_color="red",
                     annotation_text="SOC min", row=2, col=1)
 
-    # Custo (sombreia pico)
     fig.add_trace(go.Bar(x=df["hora"], y=df["custo_r"], name="Custo R$",
                           marker_color=["red" if p else "blue"
                                           for p in df["em_pico_tarifa"]]),
@@ -125,7 +133,6 @@ if "trace_dia" in ss and ss.trace_dia:
     fig.update_yaxes(title_text="R$", row=3, col=1)
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── Tabela de acoes ───────────────────────────────────────────────────
     with st.expander("Acoes hora-a-hora (a_arm, a_cons, a_ger)"):
         df_acoes = df[["hora", "a_arm", "a_cons", "a_ger", "tarifa",
                          "pivo_kw_consumido", "captacao_kw_consumido",
@@ -134,7 +141,7 @@ if "trace_dia" in ss and ss.trace_dia:
 
 st.divider()
 
-# ── Violacoes agregadas por hora (eval atual) ─────────────────────────────
+# ── Violacoes agregadas por hora (via tool MCP) ───────────────────────────
 st.subheader("Violacoes por hora do dia (avaliacao atual)")
 st.caption("Heatmap agregando todos os dias da ultima evaluate ou compare.")
 
@@ -148,14 +155,18 @@ agente_sel = st.selectbox("Origem dos dados",
                             options=list(opcoes_agente.keys()),
                             format_func=lambda k: opcoes_agente[k])
 
-hv = ss.tracker.get_hourly_violations(agente_sel)
+try:
+    hv = get_hourly_violations(agente_sel)
+except MCPServerError as e:
+    hv = {"aviso": str(e)}
+
 if "aviso" in hv:
     st.info(hv["aviso"])
 else:
     horas = sorted(int(h) for h in hv.keys())
     metricas = ["violacoes_soc", "violacoes_pcc", "teto_excedido", "kwh_cortado_total"]
     z = np.array([
-        [hv[h][m] for h in horas]
+        [hv[str(h)][m] if str(h) in hv else hv[h][m] for h in horas]
         for m in metricas
     ])
     fig_hm = go.Figure(go.Heatmap(
@@ -167,10 +178,13 @@ else:
     fig_hm.update_xaxes(title_text="Hora", dtick=1)
     st.plotly_chart(fig_hm, use_container_width=True)
 
+    def _get(h, m):
+        return hv[str(h)][m] if str(h) in hv else hv[h][m]
+
     c1, c2, c3 = st.columns(3)
-    tot_soc = sum(hv[h]["violacoes_soc"] for h in hv)
-    tot_pcc = sum(hv[h]["violacoes_pcc"] for h in hv)
-    tot_teto = sum(hv[h]["teto_excedido"] for h in hv)
+    tot_soc = sum(_get(h, "violacoes_soc") for h in horas)
+    tot_pcc = sum(_get(h, "violacoes_pcc") for h in horas)
+    tot_teto = sum(_get(h, "teto_excedido") for h in horas)
     c1.metric("Total viol. SOC", tot_soc)
     c2.metric("Total viol. PCC", tot_pcc)
     c3.metric("Total teto excedido", tot_teto)

@@ -3,16 +3,23 @@
 Rode com:
     streamlit run dashboard/app.py
 
-A sidebar contem os controles de setup/treino/avaliacao.
-Cada pagina (Overview, Curva de Aprendizado, Trace Diario) consome o
-estado compartilhado em st.session_state.
+Pré-requisito: o servidor MCP precisa estar rodando à parte:
+    python server.py
+
+O dashboard é um CLIENTE MCP puro — toda métrica, log ou ação de
+treino/avaliação passa por uma ferramenta do servidor (`dashboard/state.py`
++ `dashboard/mcp_client.py`). Nenhum dado é calculado localmente.
+Cada página (Overview, Curva de Aprendizado, Trace Diário) consome o
+estado compartilhado em st.session_state, que só guarda o último payload
+retornado pelo MCP.
 """
 
 import streamlit as st
 
 from dashboard.state import (
-    ensure_state, setup_dataset, treinar, avaliar, comparar,
+    MCPServerError, ensure_state, conectar_mcp, treinar, avaliar, comparar,
 )
+from dashboard.mcp_client import MCP_SERVER_URL
 
 st.set_page_config(
     page_title="SmartEnergy IQL — Dashboard",
@@ -22,21 +29,23 @@ st.set_page_config(
 
 ensure_state()
 
-# ── Sidebar: setup + controles ─────────────────────────────────────────────
+# ── Sidebar: conexão MCP + controles ────────────────────────────────────────
 
 st.sidebar.title("SmartEnergy IQL")
-st.sidebar.caption("Dashboard de inspecao do servidor MCP")
+st.sidebar.caption(f"Dashboard MCP-cliente — servidor em `{MCP_SERVER_URL}`")
 
 st.sidebar.divider()
 
-st.sidebar.subheader("Setup")
-if st.sidebar.button("Carregar dataset", use_container_width=True,
-                      type="primary" if not st.session_state.dataset_carregado else "secondary"):
-    setup_dataset()
-    st.sidebar.success(f"{st.session_state.meta['n_dias']} dias carregados "
-                        f"({st.session_state.meta['id_fazenda']})")
+st.sidebar.subheader("Servidor MCP")
+if st.sidebar.button("Conectar", use_container_width=True,
+                      type="primary" if not st.session_state.mcp_conectado else "secondary"):
+    try:
+        meta = conectar_mcp()
+        st.sidebar.success(f"{meta['n_dias']} dias carregados ({meta['id_fazenda']})")
+    except MCPServerError as e:
+        st.sidebar.error(str(e))
 
-if st.session_state.dataset_carregado:
+if st.session_state.mcp_conectado:
     m = st.session_state.meta
     st.sidebar.caption(f"Fazenda **{m['id_fazenda']}** — "
                         f"{m['n_dias']} dias ({m['data_inicio']} → {m['data_fim']})")
@@ -46,35 +55,44 @@ st.sidebar.divider()
 # Treino
 st.sidebar.subheader("Treino")
 n_eps = st.sidebar.slider("n_episodios", 50, 5000, 500, step=50,
-                           disabled=not st.session_state.dataset_carregado)
+                           disabled=not st.session_state.mcp_conectado)
 if st.sidebar.button("Treinar IQL", use_container_width=True,
-                      disabled=not st.session_state.dataset_carregado):
-    with st.spinner(f"Treinando {n_eps} episodios..."):
-        sumario = treinar(n_eps)
-    st.sidebar.success(
-        f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia, "
-        f"epsilon = {sumario['epsilon_final']:.3f}"
-    )
+                      disabled=not st.session_state.mcp_conectado):
+    try:
+        with st.spinner(f"Treinando {n_eps} episodios via MCP..."):
+            sumario = treinar(n_eps)
+        st.sidebar.success(
+            f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia, "
+            f"epsilon = {sumario['epsilon_final']:.3f}"
+        )
+    except MCPServerError as e:
+        st.sidebar.error(str(e))
 
 st.sidebar.divider()
 
 # Avaliacao
 st.sidebar.subheader("Avaliacao")
 n_dias_eval = st.sidebar.slider("n_dias", 1, 31, 10,
-                                  disabled=not st.session_state.dataset_carregado)
+                                  disabled=not st.session_state.mcp_conectado)
 propagar = st.sidebar.checkbox("Propagar SOC entre dias", value=True,
-                                 disabled=not st.session_state.dataset_carregado)
+                                 disabled=not st.session_state.mcp_conectado)
 col_a, col_b = st.sidebar.columns(2)
 if col_a.button("Avaliar", use_container_width=True,
                   disabled=not st.session_state.treinado):
-    with st.spinner("Avaliando..."):
-        res = avaliar(n_dias_eval, propagar)
-    st.sidebar.success(f"custo = R${res['custo_medio_dia_rs']:.2f}/dia")
+    try:
+        with st.spinner("Avaliando via MCP..."):
+            res = avaliar(n_dias_eval, propagar)
+        st.sidebar.success(f"custo = R${res['custo_medio_dia_rs']:.2f}/dia")
+    except MCPServerError as e:
+        st.sidebar.error(str(e))
 if col_b.button("Comparar", use_container_width=True,
                   disabled=not st.session_state.treinado):
-    with st.spinner("Comparando IQL vs Heuristico vs SemAgente..."):
-        comparar(n_dias_eval, propagar)
-    st.sidebar.success("Comparacao concluida")
+    try:
+        with st.spinner("Comparando IQL vs Heuristico vs SemAgente via MCP..."):
+            comparar(n_dias_eval, propagar)
+        st.sidebar.success("Comparacao concluida")
+    except MCPServerError as e:
+        st.sidebar.error(str(e))
 
 st.sidebar.divider()
 st.sidebar.caption(
@@ -88,16 +106,19 @@ st.sidebar.caption(
 
 st.title("SmartEnergy IQL — Dashboard")
 
-if not st.session_state.dataset_carregado:
-    st.info("Comece carregando o dataset na sidebar. O servidor MCP equivalente "
-             "esta em `server.py` e expoe as mesmas operacoes via ferramentas para "
-             "um LLM-juiz.")
+if not st.session_state.mcp_conectado:
+    st.info(
+        "Comece clicando em **Conectar** na sidebar. Se der erro, rode o "
+        "servidor MCP em outro terminal: `python server.py` — o dashboard "
+        "é um cliente MCP e não funciona sem ele."
+    )
     st.markdown("### Fluxo recomendado")
     st.markdown(
-        "1. **Carregar dataset** (download do Google Sheets, ~1s)\n"
-        "2. **Treinar IQL** (~500 episodios = ~10s)\n"
-        "3. **Avaliar** ou **Comparar com baselines**\n"
-        "4. Navegar pelas paginas para inspecionar resultados"
+        "1. **`python server.py`** em um terminal (fica rodando, expõe MCP via HTTP)\n"
+        "2. **Conectar** na sidebar deste dashboard\n"
+        "3. **Treinar IQL** (~500 episodios = ~10s)\n"
+        "4. **Avaliar** ou **Comparar com baselines**\n"
+        "5. Navegar pelas paginas para inspecionar resultados"
     )
 else:
     m = st.session_state.meta
