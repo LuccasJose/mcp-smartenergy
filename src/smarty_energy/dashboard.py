@@ -14,7 +14,7 @@ Abas interativas (criadas sob demanda):
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -23,6 +23,8 @@ from matplotlib.backends.backend_tkagg import (  # noqa: E402
     NavigationToolbar2Tk,
 )
 from matplotlib.figure import Figure  # noqa: E402
+
+from . import runs  # noqa: E402
 
 
 def _embutir_figura(
@@ -180,6 +182,22 @@ def _derivar_dados(dados_3: dict) -> tuple[dict, dict, dict]:
     return d_explorar, dados_3, dados_3
 
 
+def _fmt_meta(run_id: str, meta: dict) -> str:
+    """Resumo de uma linha com os metadados de um run (para a aba de gestão)."""
+    n = meta.get("n_episodios")
+    n_txt = f"{n:,}".replace(",", ".") if isinstance(n, int) else "—"
+    custo = meta.get("custo_final")
+    if not isinstance(custo, (int, float)):
+        custo = meta.get("best_custo_med")
+    custo_txt = f"R$ {custo:.2f}" if isinstance(custo, (int, float)) else "—"
+    dur = meta.get("duracao_s")
+    dur_txt = f"{dur/60:.1f} min" if isinstance(dur, (int, float)) else "—"
+    fav = "⭐ sim" if meta.get("favorito") else "não"
+    return (f"Run: {run_id}   |   Episódios: {n_txt}   |   Custo: {custo_txt}   "
+            f"|   Duração: {dur_txt}   |   Favorito: {fav}   "
+            f"|   Fonte: {meta.get('fonte_dados', '—')}")
+
+
 def abrir_dashboard(
     figuras: dict[str, Figure],
     titulo: str = "SmartEnergy MAS — Dashboard",
@@ -218,10 +236,13 @@ def abrir_dashboard(
         pass
     estilo.configure("TNotebook.Tab", padding=(14, 6), font=("Segoe UI", 10, "bold"))
 
-    usar_seletor = construtor is not None and runs_disp
+    usar_seletor = construtor is not None and bool(runs_disp)
+
+    status_var = tk.StringVar(value="")
+    labels: list[str] = []
+    ids: list[str] = []
 
     # ── Barra superior com seletor de run (opcional) ──────────────
-    status_var = tk.StringVar(value="")
     if usar_seletor:
         labels = [r["label"] for r in runs_disp]
         ids    = [r["run_id"] for r in runs_disp]
@@ -246,6 +267,125 @@ def abrir_dashboard(
 
     estado: dict = {"notebook": None}
 
+    # ── Helpers (definidos antes do 1º _popular) ──────────────────
+    def _refresh_runs_list(selecionar: str | None = None):
+        """Re-lê a lista de runs e atualiza o combobox do topo."""
+        nonlocal labels, ids
+        novos = runs.listar_runs()
+        labels = [r["label"] for r in novos]
+        ids    = [r["run_id"] for r in novos]
+        combo_run["values"] = labels
+        alvo = selecionar if selecionar in ids else (ids[0] if ids else None)
+        if alvo is not None:
+            combo_run.current(ids.index(alvo))
+            root.title(f"{titulo} — {labels[ids.index(alvo)]}")
+
+    def _rebuild_para_run(run_id: str):
+        """Recalcula os artefatos do run e repopula todas as abas."""
+        status_var.set(f"Recalculando run {run_id}…")
+        root.update_idletasks()
+        figs, dados_3 = construtor(run_id)
+        d_expl, d_fonte, d_maq = _derivar_dados(dados_3)
+        _popular(figs, d_expl, d_fonte, d_maq)
+        if run_id in ids:
+            root.title(f"{titulo} — {labels[ids.index(run_id)]}")
+        status_var.set("")
+
+    def _criar_aba_runs(notebook):
+        """Aba de comparação de runs (A vs B) + gestão do run atual (A)."""
+        from smarty_energy.visualization import plot_comparacao_runs
+
+        run_a = ids[combo_run.current()]
+        frame = ttk.Frame(notebook)
+        notebook.add(frame, text="Runs / Comparação")
+
+        # ── Gestão (fixa embaixo) ─────────────────────────────────
+        gest = ttk.LabelFrame(frame, text="Gestão do run atual (A)")
+        gest.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8)
+
+        lbl_info = ttk.Label(gest, text=_fmt_meta(run_a, runs.ler_meta(run_a)),
+                             font=("Segoe UI", 9))
+        lbl_info.grid(row=0, column=0, columnspan=4, sticky="w", padx=6, pady=(6, 8))
+
+        ttk.Label(gest, text="Rótulo:").grid(row=1, column=0, sticky="e", padx=(6, 4))
+        ent_label = ttk.Entry(gest, width=32)
+        ent_label.insert(0, runs.ler_meta(run_a).get("label") or "")
+        ent_label.grid(row=1, column=1, sticky="w")
+
+        status_g = tk.StringVar(value="")
+
+        def _sync_info(msg=""):
+            lbl_info.config(text=_fmt_meta(run_a, runs.ler_meta(run_a)))
+            status_g.set(msg)
+
+        def _salvar_label():
+            runs.definir_label(run_a, ent_label.get())
+            _refresh_runs_list(selecionar=run_a)
+            _sync_info("Rótulo salvo.")
+
+        def _fav():
+            m = runs.alternar_favorito(run_a)
+            _refresh_runs_list(selecionar=run_a)
+            _sync_info("Adicionado aos favoritos." if m.get("favorito")
+                       else "Removido dos favoritos.")
+
+        def _default():
+            runs.definir_latest(run_a)
+            status_g.set("Fixado como run padrão (latest).")
+
+        def _apagar():
+            if not messagebox.askyesno(
+                "Apagar run",
+                f"Apagar o run '{run_a}' definitivamente?\nEsta ação não pode ser desfeita."):
+                return
+            novo = runs.deletar_run(run_a)
+            if novo is None:
+                messagebox.showinfo("Runs", "Run apagado. Nenhum run restante.")
+                return
+            _refresh_runs_list(selecionar=novo)
+            _rebuild_para_run(novo)
+
+        ttk.Button(gest, text="Salvar rótulo", command=_salvar_label
+                   ).grid(row=1, column=2, padx=4)
+        ttk.Button(gest, text="⭐ Favoritar / desfavoritar", command=_fav
+                   ).grid(row=2, column=1, sticky="w", pady=(6, 0))
+        ttk.Button(gest, text="Fixar como padrão", command=_default
+                   ).grid(row=2, column=2, padx=4, pady=(6, 0))
+        ttk.Button(gest, text="Apagar run", command=_apagar
+                   ).grid(row=2, column=3, padx=4, pady=(6, 0))
+        ttk.Label(gest, textvariable=status_g, foreground="#1e8449",
+                  font=("Segoe UI", 9, "bold")).grid(
+                      row=3, column=0, columnspan=4, sticky="w", padx=6, pady=(8, 4))
+
+        # ── Comparação (topo + figura) ────────────────────────────
+        cmp_ctrl = ttk.Frame(frame)
+        cmp_ctrl.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(8, 2))
+        ttk.Label(cmp_ctrl, text="Comparar Run atual (A) com Run B:",
+                  font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(0, 8))
+        combo_b = ttk.Combobox(cmp_ctrl, values=["— nenhum —"] + labels,
+                               state="readonly", width=46, font=("Segoe UI", 10))
+        combo_b.current(0)
+        combo_b.pack(side=tk.LEFT)
+
+        fig_frame = ttk.Frame(frame)
+        fig_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        fig_cmp = Figure(figsize=(12, 4.5))
+        canvas_cmp = _embutir_figura(fig_frame, fig_cmp)
+
+        def _atualizar_cmp(_event=None):
+            hist_a = runs.ler_historico(run_a)
+            bi = combo_b.current()
+            if bi <= 0:
+                hist_b, label_b = None, None
+            else:
+                run_b = ids[bi - 1]
+                hist_b, label_b = runs.ler_historico(run_b), run_b
+            plot_comparacao_runs(fig_cmp, hist_a, hist_b, run_a, label_b)
+            canvas_cmp.draw_idle()
+
+        combo_b.bind("<<ComboboxSelected>>", _atualizar_cmp)
+        _atualizar_cmp()
+
     def _popular(figs, d_explorar, d_fonte, d_maquina):
         if estado["notebook"] is not None:
             estado["notebook"].destroy()
@@ -265,22 +405,16 @@ def abrir_dashboard(
         if d_maquina is not None:
             _criar_aba_visao_geral(notebook, d_maquina)
             _criar_aba_maquina_detalhada(notebook, d_maquina)
+        if usar_seletor:
+            _criar_aba_runs(notebook)
 
-    _popular(figuras, dados_explorar, dados_fonte, dados_maquina)
+    def _trocar_run(_event=None):
+        _rebuild_para_run(ids[combo_run.current()])
 
     if usar_seletor:
-        def _trocar_run(_event=None):
-            i = combo_run.current()
-            run_id = ids[i]
-            status_var.set(f"Recalculando run {run_id}…")
-            root.update_idletasks()
-            figs, dados_3 = construtor(run_id)
-            d_expl, d_fonte, d_maq = _derivar_dados(dados_3)
-            _popular(figs, d_expl, d_fonte, d_maq)
-            root.title(f"{titulo} — {labels[i]}")
-            status_var.set("")
-
         combo_run.bind("<<ComboboxSelected>>", _trocar_run)
+
+    _popular(figuras, dados_explorar, dados_fonte, dados_maquina)
 
     rodape = ttk.Label(
         root,

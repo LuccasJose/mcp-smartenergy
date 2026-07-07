@@ -42,14 +42,33 @@ def _semente_determinista():
 def _isola_outputs(tmp_path_factory):
     """Redireciona a escrita de artefatos do treino para um diretório temporário.
 
-    Sem isso, rodar a suíte sobrescreveria `outputs/models/training_history.pkl`
-    (e Q-tables) do treino real do usuário.
+    Sem isso, rodar a suíte sobrescreveria os artefatos reais do usuário.
+    Cobre as duas arquiteturas: `training.OUTPUT_DIR` (escrita direta, legado)
+    e `runs` (versionamento em `outputs/runs/`), redirecionando ambos para tmp.
     """
+    tmp = tmp_path_factory.mktemp("outputs_test")
+    patches = []
+
     import smarty_energy.training as training_mod
-    original = training_mod.OUTPUT_DIR
-    training_mod.OUTPUT_DIR = tmp_path_factory.mktemp("outputs_test")
+    if hasattr(training_mod, "OUTPUT_DIR"):
+        patches.append((training_mod, "OUTPUT_DIR", training_mod.OUTPUT_DIR))
+        training_mod.OUTPUT_DIR = tmp
+
+    try:
+        import smarty_energy.runs as runs_mod
+        for attr, val in (("RUNS_DIR", tmp / "runs"),
+                          ("_LATEST", tmp / "runs" / "latest.txt"),
+                          ("_MODELS_LEGADO", tmp / "models")):
+            if hasattr(runs_mod, attr):
+                patches.append((runs_mod, attr, getattr(runs_mod, attr)))
+                setattr(runs_mod, attr, val)
+    except ImportError:
+        pass
+
     yield
-    training_mod.OUTPUT_DIR = original
+
+    for mod, attr, original in patches:
+        setattr(mod, attr, original)
 
 
 # ── Dados reais ───────────────────────────────────────────────────────

@@ -930,11 +930,14 @@ def plot_maquina_detalhada(
     ax_diario.legend(fontsize=7); ax_diario.grid(axis="y", alpha=0.3)
 
     # ── Boxplot da distribuição diária ──────────────────────────
+    # `labels=` foi removido do boxplot no matplotlib 3.10; setar os rótulos
+    # via set_xticklabels funciona em qualquer versão.
     bp = ax_box.boxplot(
         [diario_s, diario_h, diario_r],
-        labels=["Sem Agente", "Heurístico", "RL"],
         patch_artist=True, widths=0.55,
     )
+    ax_box.set_xticks([1, 2, 3])
+    ax_box.set_xticklabels(["Sem Agente", "Heurístico", "RL"])
     for patch, c in zip(bp["boxes"], [_COR_S, _COR_H, _COR_R]):
         patch.set_facecolor(c); patch.set_alpha(0.6)
     ax_box.set_title("Distribuição de kWh diário")
@@ -1322,4 +1325,46 @@ def plot_visao_geral_operacional(
     ax_heat.set_yticks(range(0, len(dias), step))
     ax_heat.set_yticklabels(datas_labels[::step], fontsize=7)
 
+    fig.tight_layout()
+
+
+def plot_comparacao_runs(fig, hist_a, hist_b, label_a, label_b=None) -> None:
+    """Sobrepõe as curvas de aprendizado (custo/reward) de dois runs numa Figure.
+
+    `hist_a`/`hist_b` são os dicts de `runs.ler_historico`. `hist_b` pode ser
+    None (compara só o run A). Séries longas são reduzidas por média de blocos
+    para o plot ficar leve.
+    """
+    def _reduz(serie, alvo=1200):
+        n = len(serie)
+        if n == 0:
+            return [], []
+        if n <= alvo:
+            return list(range(1, n + 1)), list(serie)
+        bloco = n // alvo
+        arr = np.asarray(serie[: bloco * alvo], dtype=float).reshape(-1, bloco).mean(axis=1)
+        return [(i + 1) * bloco for i in range(len(arr))], arr.tolist()
+
+    fig.clf()
+    ax_c = fig.add_subplot(1, 2, 1)
+    ax_r = fig.add_subplot(1, 2, 2)
+
+    def _plot(hist, cor, nome):
+        if not hist:
+            return
+        xc, yc = _reduz(hist.get("custos") or [])
+        xr, yr = _reduz(hist.get("rewards") or [])
+        ax_c.plot(xc, yc, color=cor, label=nome, linewidth=1.3)
+        ax_r.plot(xr, yr, color=cor, label=nome, linewidth=1.3)
+
+    _plot(hist_a, "#2980b9", label_a)
+    if hist_b is not None:
+        _plot(hist_b, "#e67e22", label_b)
+
+    ax_c.set_title("Custo por episódio (R$)"); ax_c.set_xlabel("Episódio")
+    ax_c.grid(alpha=0.3); ax_c.legend(fontsize=8)
+    ax_r.set_title("Reward por episódio"); ax_r.set_xlabel("Episódio")
+    ax_r.grid(alpha=0.3); ax_r.legend(fontsize=8)
+    fig.suptitle("Curvas de aprendizado — Run A (azul) vs Run B (laranja)",
+                 fontsize=12, fontweight="bold")
     fig.tight_layout()
