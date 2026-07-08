@@ -35,6 +35,7 @@ from .config import CONFIG, OUTPUT_DIR
 from .evaluation import (
     rodar_sem_agente, rodar_heuristico, rodar_rl, rodar_llm, resumo_mes,
 )
+from .metrics import serie_por_dia
 
 BENCH_DIR = OUTPUT_DIR / "benchmarks"
 
@@ -103,6 +104,37 @@ def wilcoxon_pareado(a: list[float], b: list[float]) -> dict:
 def _phi(x: float) -> float:
     """CDF da normal padrão via erf (stdlib)."""
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def comparar_metrica_pareada(
+    hist_a: list[list[dict]],
+    hist_b: list[list[dict]],
+    metrica: str = "custo_total_r",
+    cfg: dict = CONFIG,
+) -> dict:
+    """Compara UMA métrica entre dois braços, pareada por dia (bloco T3).
+
+    Aplica o Wilcoxon pareado sobre a série diária da métrica (ex.: RL vs C0 em
+    ``custo_total_r``) e agrega médias e delta para reportar tamanho de efeito
+    além do p-valor — como pede o plano ("não apenas p-valor").
+
+    Args:
+        hist_a, hist_b : históricos diários dos dois braços (mesmos dias, ordem).
+        metrica        : chave de ``metrics.metricas_dia`` a comparar.
+
+    Returns:
+        dict com as chaves do Wilcoxon (W, z, p_valor, r, n_efetivo) mais
+        ``media_a``, ``media_b`` e ``delta_medio`` (a − b). Delta < 0 significa
+        que o braço A tem a métrica menor (melhor, para custo/rede).
+    """
+    a = serie_por_dia(hist_a, metrica, cfg)
+    b = serie_por_dia(hist_b, metrica, cfg)
+    res = wilcoxon_pareado(a, b)
+    res["metrica"] = metrica
+    res["media_a"] = sum(a) / len(a) if a else 0.0
+    res["media_b"] = sum(b) / len(b) if b else 0.0
+    res["delta_medio"] = res["media_a"] - res["media_b"]
+    return res
 
 
 # ──────────────────────────────────────────────────────────────

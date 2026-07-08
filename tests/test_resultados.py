@@ -29,6 +29,7 @@ from smarty_energy.evaluation import (
     rodar_rl,
     resumo_mes,
 )
+from smarty_energy.benchmark import comparar_metrica_pareada
 
 
 def _min_economia_pct() -> float:
@@ -101,6 +102,63 @@ def test_rl_reduz_dependencia_da_rede(avaliacao):
 def test_custo_rl_finito_e_positivo(avaliacao):
     cr = avaliacao["rl"]["custo"]
     assert np.isfinite(cr) and cr >= 0.0
+
+
+# ── T3.2 — Comparação estatística pareada (RL × baselines) ─────────────
+
+@pytest.fixture(scope="session")
+def historicos_por_config(dados_reais, agentes_treinados):
+    """Históricos diários (31 dias) de cada configuração — insumo do pareado."""
+    dias, tarifa = dados_reais
+    return {
+        "sem": [rodar_sem_agente(d, tarifa) for d in dias],
+        "heur": [rodar_heuristico(d, tarifa) for d in dias],
+        "rl":  [rodar_rl(d, tarifa, agentes_treinados) for d in dias],
+    }
+
+
+def _reportar(nome: str, w: dict) -> None:
+    print(f"\n  [{nome}] métrica={w['metrica']}  "
+          f"média_RL={w['media_a']:.2f}  média_base={w['media_b']:.2f}  "
+          f"Δ={w['delta_medio']:+.2f}  z={w['z']:.2f}  p={w['p_valor']:.4f}  "
+          f"r={w['r']:.3f}  (n={w['n_efetivo']})")
+
+
+def test_pareado_rl_vs_sem_agente_custo(historicos_por_config):
+    """T3: RL não deve custar mais que C0 (sem agente), pareado por dia.
+
+    Reporta p-valor e tamanho de efeito (r). A significância forte é esperada
+    no treino completo (100k ep); aqui garantimos a direção e a boa-formação
+    da estatística.
+    """
+    w = comparar_metrica_pareada(
+        historicos_por_config["rl"], historicos_por_config["sem"], "custo_total_r")
+    _reportar("RL vs C0", w)
+    assert w["delta_medio"] <= 1e-6, "RL custou mais que 'sem agente' na média"
+    assert 0.0 <= w["p_valor"] <= 1.0 and w["r"] >= 0.0
+
+
+def test_pareado_rl_vs_heuristico_bem_formado(historicos_por_config):
+    """T3: a comparação RL × C1 (heurístico) produz estatística válida.
+
+    Sem asserção de significância (depende da duração do treino) — o valor é
+    reportado para o Capítulo 5; aqui validamos a máquina de comparação.
+    """
+    w = comparar_metrica_pareada(
+        historicos_por_config["rl"], historicos_por_config["heur"], "custo_total_r")
+    _reportar("RL vs C1", w)
+    assert w["n_efetivo"] >= 0
+    assert 0.0 <= w["p_valor"] <= 1.0
+    assert w["metrica"] == "custo_total_r"
+
+
+def test_pareado_funciona_para_autossuficiencia(historicos_por_config):
+    """A comparação pareada vale para qualquer métrica 4.1, não só custo."""
+    w = comparar_metrica_pareada(
+        historicos_por_config["rl"], historicos_por_config["sem"], "autossuficiencia")
+    _reportar("RL vs C0", w)
+    assert w["metrica"] == "autossuficiencia"
+    assert 0.0 <= w["p_valor"] <= 1.0
 
 
 @pytest.mark.slow
