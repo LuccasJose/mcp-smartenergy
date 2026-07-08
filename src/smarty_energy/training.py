@@ -11,6 +11,48 @@ from .config import CONFIG
 from .environment import FazendaEnergyEnv
 
 
+def metricas_convergencia(serie: list[float], janela: int | None = None,
+                          tol: float = 0.05) -> dict:
+    """Mede a estabilização de uma série de treino (bloco T2 — convergência).
+
+    Compara a média das duas últimas janelas não-sobrepostas da série (custo ou
+    reward por episódio). Se a variação relativa entre elas for menor que ``tol``,
+    considera-se estabilizada — critério objetivo para a "curva que estabiliza"
+    pedida no plano, no lugar de inspeção visual.
+
+    Args:
+        serie  : lista de valores por episódio (ex.: ``historico['custos']``).
+        janela : tamanho de cada janela; padrão = 1/5 da série (mín. 1).
+        tol    : limiar de variação relativa para declarar estabilidade.
+
+    Returns:
+        dict com ``media_final``, ``media_anterior``, ``variacao_relativa``,
+        ``cv_final`` (coef. de variação da última janela) e ``estavel`` (bool).
+        Retorna ``{'estavel': False, 'motivo': 'serie_curta'}`` se não houver
+        duas janelas completas.
+    """
+    n = len(serie)
+    if janela is None:
+        janela = max(1, n // 5)
+    if n < 2 * janela or janela == 0:
+        return {"estavel": False, "motivo": "serie_curta", "n": n}
+
+    ult = serie[-janela:]
+    pen = serie[-2 * janela:-janela]
+    media_ult = float(np.mean(ult))
+    media_pen = float(np.mean(pen))
+    var_rel = abs(media_ult - media_pen) / abs(media_pen) if media_pen else 0.0
+    cv = float(np.std(ult) / abs(media_ult)) if media_ult else 0.0
+    return {
+        "media_final": media_ult,
+        "media_anterior": media_pen,
+        "variacao_relativa": var_rel,
+        "cv_final": cv,
+        "estavel": var_rel < tol,
+        "janela": janela,
+    }
+
+
 def treinar(
     dias: list[pd.DataFrame],
     tarifa_24h: np.ndarray,

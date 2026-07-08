@@ -4,10 +4,32 @@ import numpy as np
 import pandas as pd
 
 from .config import CONFIG
-from .environment import FazendaEnergyEnv
+from .environment import FazendaEnergyEnv, ESPACO_ESTADOS_TOTAL
 from .agents import AgentesHeuristicos
 
 _heuristica = AgentesHeuristicos()
+
+
+def cobertura_estados(agentes: dict, total: int = ESPACO_ESTADOS_TOTAL) -> dict:
+    """Fração do espaço de estados discretos visitada no treino (bloco T2).
+
+    Estados nunca visitados são a motivação da camada de julgamento: ali o RL
+    não tem política aprendida. Reporta a fração sobre o total combinatório
+    (``ESPACO_ESTADOS_TOTAL``), que é um teto — a cobertura real sobre estados
+    *alcançáveis* é maior, pois parte das combinações é impossível.
+
+    Args:
+        agentes : dict de ``AgenteQL`` treinados (usa as chaves das Q-tables).
+
+    Returns:
+        dict com ``visitados`` (int), ``total`` (int) e ``fracao`` (0-1).
+    """
+    visitados: set = set()
+    for ag in agentes.values():
+        visitados |= set(ag.q_table.keys())
+    n = len(visitados)
+    return {"visitados": n, "total": total,
+            "fracao": n / total if total else 0.0}
 
 
 def rodar_sem_agente(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[dict]:

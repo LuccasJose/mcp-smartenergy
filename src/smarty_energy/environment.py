@@ -29,6 +29,14 @@ import numpy as np
 from .config import CONFIG, TETOS_KW, BOMBA_HORAS_ON
 from .agents import AgenteFinanceiro
 
+# Dimensões da discretização do estado — FONTE ÚNICA (ver docstring do módulo).
+# (bucket_hora, bucket_soc, bucket_solar, bucket_stress, meta_sec, bucket_bomba)
+BUCKETS_ESTADO = (4, 10, 3, 3, 2, 3)
+# Total combinatório de estados discretos possíveis. É um teto: parte das
+# combinações é fisicamente inalcançável (ex.: hora e progresso da bomba são
+# correlacionados), então a cobertura medida contra este total é conservadora.
+ESPACO_ESTADOS_TOTAL = int(np.prod(BUCKETS_ESTADO))  # 4·10·3·3·2·3 = 2160
+
 
 class FazendaEnergyEnv:
 
