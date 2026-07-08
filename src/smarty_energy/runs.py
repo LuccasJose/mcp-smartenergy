@@ -80,6 +80,7 @@ def salvar_run(
         "reward_final"  : hist.get("reward_final"),
         "duracao_s"     : hist.get("duracao_s"),
         "hiperparametros": hist.get("hiperparametros", {}),
+        "config_completo": hist.get("config_completo", {}),
         "fonte_dados"   : fonte_dados,
         "label"         : "",       # rótulo manual (editável pelo dashboard)
         "favorito"      : False,
@@ -220,6 +221,7 @@ def migrar_legado() -> str | None:
         "reward_final"  : hist.get("reward_final"),
         "duracao_s"     : hist.get("duracao_s"),
         "hiperparametros": hist.get("hiperparametros", {}),
+        "config_completo": hist.get("config_completo", {}),
         "fonte_dados"   : "outputs/models (legado)",
         "label"         : "legado",
         "favorito"      : False,

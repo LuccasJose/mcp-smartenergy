@@ -189,6 +189,11 @@ def treinar(
         ) if k in cfg
     }
 
+    # Snapshot COMPLETO do cfg efetivamente usado no treino \u2014 garante
+    # reprodutibilidade (P2 do plano): pesos do reward, penalidades, efici\u00eancias,
+    # limites etc. ficam registrados, n\u00e3o s\u00f3 os 6 hiperpar\u00e2metros de destaque.
+    config_completo = dict(cfg)
+
     # Hist\u00f3rico de treino \u2014 a persist\u00eancia (versionada por run) fica a cargo
     # do chamador (ver smarty_energy.runs.salvar_run).
     return {
@@ -202,4 +207,5 @@ def treinar(
         "reward_final": reward_final,
         "duracao_s": duracao_s,
         "hiperparametros": hiperparametros,
+        "config_completo": config_completo,
     }
