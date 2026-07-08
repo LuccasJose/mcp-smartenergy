@@ -114,6 +114,50 @@ def test_fontes_somam_o_consumo(execucoes):
                 f"Fontes não fecham com o consumo em {nome} dia {i} hora {h['hora']}"
 
 
+def test_balanco_energetico_completo(execucoes):
+    """R-BALANCO (T1.1): a identidade energética horária fecha em TODOS os termos.
+
+        geração + importação + descarga·η_d = consumo + carga/η_c + exportação
+
+    Onde `descarga·η_d` é a energia útil entregue pela bateria (lado AC) e
+    `carga/η_c` é a energia retirada da geração para armazenar (lado AC). Passos
+    em que o PCC satura (`pcc_violado`) são pulados: ali importação/exportação
+    são clipadas ao limite e a identidade não se aplica por projeto.
+    """
+    eta_c = CONFIG["eficiencia_carga"]
+    eta_d = CONFIG["eficiencia_descarga"]
+    for nome, i, _, hist in execucoes:
+        for h in hist:
+            if h["pcc_violado"]:
+                continue
+            entra = h["geracao_kw"] + h["importacao"] + h["bat_descarga"] * eta_d
+            sai   = h["consumo_kw"] + h["bat_carga"] / eta_c + h["exportacao"]
+            assert entra == pytest.approx(sai, abs=1e-6), \
+                (f"Balanço não fecha em {nome} dia {i} hora {h['hora']}: "
+                 f"entra={entra:.6f} sai={sai:.6f}")
+
+
+def test_transicao_soc_conserva_energia(execucoes):
+    """R-SOC dinâmica (T1.2): SoC evolui exatamente pelo fluxo líquido da bateria.
+
+        SoC[t] = clamp( SoC[t-1] + (carga − descarga)/capacidade · 100 , 0, 100 )
+
+    `carga`/`descarga` são kWh no lado DC (o que efetivamente entra/sai da
+    bateria). Prova que a bateria não cria nem destrói energia entre passos.
+    Todo episódio começa em `soc_inicial_pct` (default do reset).
+    """
+    cap = CONFIG["bateria_cap_kwh"]
+    for nome, i, _, hist in execucoes:
+        prev = CONFIG["soc_inicial_pct"]
+        for h in hist:
+            esperado = prev + (h["bat_carga"] - h["bat_descarga"]) / cap * 100.0
+            esperado = max(0.0, min(100.0, esperado))
+            assert h["soc"] == pytest.approx(esperado, abs=1e-6), \
+                (f"SoC não conserva em {nome} dia {i} hora {h['hora']}: "
+                 f"soc={h['soc']:.6f} esperado={esperado:.6f}")
+            prev = h["soc"]
+
+
 # ── R-TETO ────────────────────────────────────────────────────────────
 
 def test_consumo_respeita_teto(execucoes):
