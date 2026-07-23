@@ -17,6 +17,14 @@ Todos os parâmetros vivem em `src/smarty_energy/config.py`.
 | `gamma` | Fator de desconto futuro |
 | `epsilon_inicial` → `epsilon_final` | Exploração ε-greedy (com decaimento) |
 | `epsilon_decay` | Decaimento de ε por episódio |
+| `beta` | Taxa de aprendizado pessimista (Hysteretic) |
+
+!!!info Treinos curtos
+`epsilon_decay` é calibrado para os 100.000 episódios do pipeline. Para
+horizontes menores use `config.ajustar_decay(cfg, n_episodios)`, que recalcula
+o decaimento para que ε chegue perto de `epsilon_final` no fim do treino —
+é o que o servidor MCP faz automaticamente em `train_agents`.
+!!!
 
 ## Bateria
 
@@ -43,6 +51,10 @@ agentes manipulem o SOC da bateria em detrimento da economia real.
 | `bonus_excedente` | 0.5 | Incentivo à exportação de excedente |
 | `bonus_soc_ok` | 1.0 | SOC em faixa saudável |
 
+Os 15 pesos podem ser alterados em runtime pela tool
+`configure_reward_weights` do [servidor MCP](mcp.md) — as restrições físicas
+(PCC, SOC, capacidade da bateria) permanecem imutáveis.
+
 ## Limites operacionais
 
 | Parâmetro | Valor | Descrição |
@@ -50,6 +62,11 @@ agentes manipulem o SOC da bateria em detrimento da economia real.
 | `pcc_max_kw` | 65.8 | Limite do ponto de conexão (import/export) |
 | `inversor_fv_max_kw` | 50.0 | Teto do inversor fotovoltaico |
 | `eolico_nominal_kw` | 10.0 | Potência nominal do aerogerador |
+| `bat_throughput_max_kwh` | 48.0 | Ciclo máximo diário da bateria |
+| `pivo_nominal_kw` | 8.0 | Potência do pivô durante o lock de 8h |
+| `bomba_cap_nominal_kw` | 17.6 | Potência da bomba na hora agendada |
+| `secador_max_kw` | 2.4 | Teto físico do secador (usado no rescue) |
+| `secador_meta_kwh` | 20.0 | Meta diária de energia do secador |
 
 ## Tetos do Gerente de Carga
 

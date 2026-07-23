@@ -3,78 +3,148 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
-Sistema Multi-Agentes (MAS) com Q-Learning Cooperativo (Hysteretic) focado na minimização de custos energéticos em uma fazenda de grãos. 
+Sistema Multi-Agentes (MAS) com Q-Learning Cooperativo (Hysteretic IQL) focado na minimização de custos energéticos em uma fazenda de grãos.
 
 > Contexto: Trabalho de Conclusão de Curso (TCC) desenvolvido com dados reais da Fazenda Buritis (Luziânia, GO) referentes a Janeiro de 2025.
 
+Este repositório é a junção de dois projetos que evoluíram em paralelo:
+o **motor de RL** (`Smart_Energy`) e a **camada MCP** (`mcp-smartenergy`).
+Os dois históricos Git estão preservados aqui. Hoje há **uma só fonte da
+verdade** para física, config e dados — a camada MCP consome o pacote em vez
+de manter um fork.
+
 ---
 
-## Resultados Finais
+## Dois modos de uso
+
+| | Pipeline offline | Servidor MCP |
+|---|---|---|
+| Comando | `python main.py` | `python server.py` |
+| Para quê | Treinar, avaliar e analisar (TCC, gráficos, relatórios) | Expor o sistema como ~25 ferramentas para um LLM-juiz |
+| Interface | Dashboard Tkinter (default) ou Dash/Plotly (`--web`) | Dashboard Streamlit (cliente MCP) |
+| Estado | `outputs/runs/<run_id>/` versionado | Processo único que detém dataset, Q-tables e tracker |
+
+Os dois compartilham `outputs/runs/`: um run treinado pelo `main.py` é
+carregável pelo servidor (`load_qtables`) e vice-versa (`save_qtables`).
+
+---
+
+## Como executar
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Linux/Mac: source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Crie um `.env` na raiz com a planilha da base (ou deixe vazio para usar o
+Excel local em `dados/`):
+
+```
+SHEET_ID=<id da planilha do Google Sheets>
+```
+
+### Pipeline offline
+
+```bash
+python main.py                 # treina um novo run e abre o dashboard
+python main.py --replot        # reabre o run mais recente sem treinar
+python main.py --run <run_id>  # reabre um run específico
+python main.py --web           # dashboard web (Dash) em localhost:8050
+```
+
+### Servidor MCP + dashboard Streamlit
+
+```bash
+# terminal 1 — servidor (fica rodando; detém dataset, Q-tables e tracker)
+python server.py
+
+# terminal 2 — dashboard cliente
+python -m streamlit run src/smarty_energy/mcp/dashboard/app.py
+```
+
+O catálogo de ferramentas e o loop LLM-as-a-judge estão em
+[docs/mcp.md](docs/mcp.md); o passo a passo de instalação e inicialização do
+servidor, em [docs/execucao-mcp.md](docs/execucao-mcp.md).
+
+---
+
+## Resultados
+
 Após as otimizações de Hysteretic Q-Learning e rebalanceamento de rewards, o sistema atingiu:
 *   57.2% de economia no custo diário médio.
 *   64.0% de redução na dependência da rede elétrica.
 *   Zero violações de segurança operacional (SOC e PCC).
 
----
+### Otimizações aplicadas
 
-## Otimizações Aplicadas
+**1. Hysteretic Q-Learning** — para a não-estacionariedade de sistemas multi-agente:
+a taxa otimista (`alpha=0.1`) aprende rápido quando o resultado supera o esperado;
+a pessimista (`beta=0.01`) esquece devagar bons resultados diante de erros de coordenação.
 
-### 1. Hysteretic Q-Learning
-Para resolver o problema de não-estacionariedade em sistemas multi-agente, implementamos o algoritmo Hysteretic Q-Learning.
-*   Taxa Otimista (alpha=0.1): Aprende rápido quando o resultado é melhor que o esperado.
-*   Taxa Pessimista (beta=0.01): Esquece devagar bons resultados quando ocorrem erros de coordenação.
+**2. Rebalanceamento do reward** — o custo financeiro passou a ser o sinal dominante,
+evitando que os agentes manipulem o SOC da bateria em detrimento da economia real.
 
-### 2. Rebalanceamento do Reward
-Ajustamos os pesos para que o custo financeiro fosse o sinal dominante da função de recompensa, evitando que os agentes manipulem o SOC da bateria em detrimento da economia real.
-
-| Componente | Peso Novo | Impacto |
+| Componente | Peso | Impacto |
 | :--- | :--- | :--- |
-| Custo Diário | 8.0 | Sinal dominante |
-| Bateria (SOC) | 15.0 | Barreira de segurança |
-| Excedente Solar | 0.5 | Incentivo à exportação |
+| Custo diário | 8.0 | Sinal dominante |
+| Bateria (SOC) | 12.0 | Barreira de segurança |
+| Excedente solar | 0.5 | Incentivo à exportação |
 
 ---
 
-## Estrutura do Projeto
+## Estrutura do projeto
 
 ```text
-smarty_energy_RL/
-├── main.py                # Ponto de entrada (executa pipeline + dashboard)
-├── requirements.txt       # Dependências
-├── src/
-│   └── smarty_energy/
-│       ├── environment.py # Simulador da Fazenda
-│       ├── agents.py      # Agentes Q-Learning (Hysteretic)
-│       ├── config.py      # Hiperparâmetros e Pesos
-│       ├── dashboard.py   # Interface visual Tkinter
-│       └── visualization.py # Lógica de geração de gráficos
-└── outputs/               # Gráficos e modelos treinados
+tcc-darvinposselt/
+├── main.py                 # pipeline: dados → treino → avaliação → dashboard
+├── server.py               # entry do servidor MCP
+├── src/smarty_energy/
+│   ├── config.py           # hiperparâmetros, pesos do reward, limites físicos
+│   ├── data_loader.py      # base v8 (Sheets ou Excel local) → DataFrames diários
+│   ├── environment.py      # FazendaEnergyEnv — simulador e restrições HARD
+│   ├── agents.py           # AgenteQL, IQLSystem, heurístico, sem-agente, financeiro
+│   ├── training.py         # loop IQL com early stopping (save-best)
+│   ├── evaluation.py       # execução por dia, métricas mensais, cenários
+│   ├── metrics.py          # métricas primárias do plano de testes (4.1/4.2)
+│   ├── runs.py             # versionamento de treinos em outputs/runs/
+│   ├── benchmark.py        # RL × LLM: qualidade da decisão vs custo operacional
+│   ├── llm_policy.py       # política de controle por LLM (tool-use)
+│   ├── visualization.py    # figuras do pipeline
+│   ├── dashboard.py        # dashboard Tkinter
+│   ├── dashboard_web.py    # dashboard web (Dash/Plotly)
+│   └── mcp/
+│       ├── server.py       # ~25 ferramentas MCP (LLM-as-a-judge)
+│       ├── tracker.py      # métricas por passo/episódio do servidor
+│       └── dashboard/      # cliente Streamlit (Overview, Aprendizado, Trace)
+├── tests/                  # suíte do pacote (+ tests/mcp/ para a camada MCP)
+├── docs/                   # documentação Retype
+├── relatos/                # relatórios de validação e walkthrough
+├── notebooks/              # PoC exploratória
+├── outputs/                # runs, modelos e gráficos gerados
+└── documentos/             # documentos do TCC (.docx)
 ```
 
 ---
 
-## Como Executar
+## Testes
 
-1. Instale as dependências:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Execute o sistema completo:
-   ```bash
-   python main.py
-   ```
-3. O sistema irá treinar por 20.000 episódios e abrirá o dashboard automaticamente ao final.
+```bash
+python -m pytest tests -q            # tudo (104 testes)
+python -m pytest tests/mcp -q        # só a camada MCP (47 testes, offline)
+```
+
+A suíte do pacote cobre balanço energético, restrições HARD, convergência e
+comparação estatística pareada (T1–T3 do plano de testes); a da camada MCP
+cobre as ferramentas do servidor e o tracker, com fixtures sintéticas.
 
 ---
 
 ## Documentação
 
-A documentação do projeto fica em `docs/` e é construída com o
-[**Retype**](https://retype.com), um framework que transforma arquivos Markdown
-em um site de documentação estático, com busca, navegação lateral e tema
-claro/escuro — sem necessidade de escrever HTML.
-
-### O que está documentado
+A documentação fica em `docs/` e é construída com o
+[**Retype**](https://retype.com), que transforma Markdown em um site estático
+com busca, navegação lateral e tema claro/escuro.
 
 | Página | Conteúdo |
 | :--- | :--- |
@@ -85,38 +155,15 @@ claro/escuro — sem necessidade de escrever HTML.
 | **Componentes** | Papel de cada módulo de `src/smarty_energy/` |
 | **Dados de entrada** | Base Excel, abas e mapeamento de cargas/geração |
 | **Configuração** | Hiperparâmetros e pesos do reward |
-
-### Estrutura
-
-```text
-docs/
-├── retype.json        # Configuração do site (branding, navegação, saída)
-├── package.json       # Declara o retypeapp e os scripts npm
-├── index.md           # Página inicial
-├── instalacao.md
-├── execucao.md
-├── arquitetura.md
-├── componentes.md
-├── dados.md
-└── configuracao.md
-```
-
-### Servidor de desenvolvimento
+| **Servidor MCP** | Catálogo das ferramentas e loop LLM-as-a-judge |
+| **Execução do MCP** | Instalação e inicialização do servidor + dashboard |
 
 ```bash
 cd docs
 npm install            # instala o retypeapp (dev dependency)
-npm run docs:dev       # retype start — abre o site e recarrega ao editar
+npm run docs:dev       # abre o site e recarrega ao editar
+npm run docs:build     # gera o site estático em docs/site/
 ```
-
-### Gerar o site estático
-
-```bash
-cd docs
-npm run docs:build     # retype build — gera o site em docs/site/
-```
-
-O site é publicado em `docs/site/` (pasta ignorada pelo Git).
 
 > Antes de publicar, ajuste o campo `url` em `docs/retype.json` para o domínio
 > real (ex.: GitHub Pages) — o `retype build` exige esse campo.

@@ -48,5 +48,11 @@ sensato — defina apenas se quiser sobrescrever:
 | `ID_FAZENDA` | `FAZ-002` | Fazenda usada no modelo (`FAZ-001` ou `FAZ-002`) |
 | `SHEET_ID` | *(vazio)* | ID de um Google Sheets com o mesmo esquema (alternativa à base local) |
 | `OUTPUT_DIR` | `outputs` | Pasta de saída de gráficos e modelos |
+| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8000` | Endereço do servidor MCP |
+| `MCP_N_EPISODIOS` | `1000` | Episódios por chamada de `train_agents` |
 
-Com tudo instalado, siga para a [Execução](execucao.md).
+O mesmo `requirements.txt` cobre os dois modos de uso — não é preciso um
+ambiente separado para o servidor MCP.
+
+Com tudo instalado, siga para a [Execução](execucao.md) ou, se for usar o
+LLM-juiz, para a [Execução do MCP](execucao-mcp.md).

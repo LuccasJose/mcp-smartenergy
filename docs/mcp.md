@@ -1,171 +1,100 @@
-# SmartEnergy MCP Server (IQL)
+---
+label: Servidor MCP
+icon: server
+order: 30
+---
 
-Servidor MCP (Model Context Protocol) que espelha o projeto **Smart_Energy** —
-sistema multi-agente com Q-Learning cooperativo para gestão energética de
-fazenda de grãos. Expõe ~25 ferramentas para um LLM-juiz treinar, avaliar
-e auditar a política aprendida.
+# Servidor MCP (IQL)
 
-O MCP é o **intermediador obrigatório** de todo o sistema: `server.py` é o
-único processo que detém o dataset, as Q-tables e o tracker de métricas.
-O dashboard Streamlit (`dashboard/`) **não** importa mais `agents/`,
-`environment/` ou `metrics/` diretamente — ele é um cliente MCP que se
-conecta ao servidor via HTTP e só renderiza payloads retornados pelas
-tools. Não há caminho de treino, avaliação ou leitura de métrica que
-não passe pelo MCP. Veja o [MANUAL.md](MANUAL.md) para o passo a passo
-de instalação e inicialização.
+Servidor MCP (Model Context Protocol) que expõe o sistema multi-agente como
+~25 ferramentas para um LLM-juiz treinar, avaliar e auditar a política aprendida.
+
+O MCP é o **intermediador obrigatório** desse modo de uso: o processo do
+servidor é o único que detém o dataset, as Q-tables e o tracker de métricas.
+O dashboard Streamlit (`src/smarty_energy/mcp/dashboard/`) é um cliente MCP
+que se conecta via HTTP e só renderiza payloads retornados pelas tools —
+nenhuma métrica é calculada nele.
+
+!!!info Uma física só
+Desde a junção dos repositórios, o servidor **importa** o motor do pacote
+(`smarty_energy.environment`, `smarty_energy.agents`, `smarty_energy.config`,
+`smarty_energy.data_loader`) em vez de manter uma cópia. Qualquer mudança de
+física, reward ou dados vale para o pipeline offline e para o MCP ao mesmo
+tempo — e os dois produzem exatamente os mesmos números.
+!!!
+
+Veja [Execução do MCP](execucao-mcp.md) para o passo a passo de instalação e
+inicialização.
 
 ---
 
 ## Visão geral
 
-O sistema reproduz a operação horária de uma fazenda real (FAZ-002), com
-dados baixados de planilha pública no Google Sheets:
+O sistema reproduz a operação horária da fazenda real (FAZ-002):
 
 - **Geração**: solar + eólica (inversor FV ≤ 50 kW, eólico ≤ 10 kW nominal)
 - **Bateria**: 24 kWh, η carga 0.92 / descarga 0.95, throughput máximo 48 kWh/dia
-- **Cargas controláveis**: pivô (lock de 8h/dia), bomba (cronograma fixo 8h/dia), secador (meta 20 kWh/dia)
+- **Cargas controláveis**: pivô (lock de 8h/dia, 8 kW), bomba (cronograma fixo 8h/dia, 17,6 kW), secador (meta 20 kWh/dia, teto 2,4 kW)
 - **Cargas fixas**: sede (clamp ±20%), silo
-- **Conexão à rede**: PCC ≤ 65.8 kW
-- **Tarifa TOU**: ~R$0.68 fora-pico / R$1.10 pico (18-20h)
+- **Conexão à rede**: PCC ≤ 65,8 kW
+- **Tarifa TOU**: ~R$0,68 fora-pico / R$1,10 pico (18-20h)
 
 A arquitetura é **IQL (Independent Q-Learning)** com **3 agentes** —
 armazenamento, consumo, gerente — todos recebendo o **mesmo reward
-cooperativo** do ambiente. SOC propaga entre episódios.
+cooperativo** do ambiente. O SOC propaga entre episódios.
+
+Detalhes de estado, ações, restrições HARD e reward estão em
+[Arquitetura](arquitetura.md) — a fonte é a mesma para os dois modos de uso.
 
 ---
 
-## Arquitetura
+## Arquitetura da camada
 
-```
-MCP_SmartEnergy/
-├── server.py                  # Servidor MCP (FastMCP) — ~24 tools
-├── config.py                  # CONFIG, TETOS_KW, BOMBA_HORAS_ON
-├── requirements.txt
-│
-├── environment/
-│   ├── data_loader.py         # Baixa Sheets via urllib (1 vez no startup)
-│   ├── energy_env.py          # FazendaEnergyEnv (porte do Smart_Energy)
-│   └── scenarios.py           # Cenários ex-post (nublado/ensolarado/alto_consumo)
-│
-├── agents/
-│   ├── qlearning_agent.py     # AgenteQL + IQLSystem (orquestra os 3)
-│   ├── baselines.py           # AgentesHeuristicos, SemAgente
-│   └── financeiro.py          # AgenteFinanceiro (estresse + créditos)
-│
-├── metrics/
-│   └── tracker.py             # Tracker com violações por hora
-│
-├── dashboard/                  # UI Streamlit — CLIENTE MCP (não é opcional)
-│   ├── app.py                  # Entry — sidebar conecta ao servidor MCP
-│   ├── mcp_client.py           # Cliente MCP síncrono (streamable-http)
-│   ├── state.py                 # Wrappers de tool call para uso nas páginas
-│   └── pages/
-│       ├── 1_Overview.py              # health_report() em cards
-│       ├── 2_Curva_de_Aprendizado.py  # get_learning_curve + get_td_error_series
-│       └── 3_Trace_Diario.py          # run_episode + get_hourly_violations
-│
-└── tests/                     # 47 testes pytest (sem rede)
-    ├── conftest.py            # Fixtures sintéticas (dia + tarifa)
-    ├── test_env.py            # PCC, SOC, throughput, schedules, reward
-    ├── test_agent.py          # Hysteretic, save/load, IQL
-    ├── test_baselines.py      # Heurístico + SemAgente
-    ├── test_tracker.py        # Hourly, peak/offpeak, eval
-    └── test_tools.py          # configure_*, compare, health_report
+```text
+src/smarty_energy/mcp/
+├── server.py          # ~25 tools (FastMCP) — importa o motor do pacote
+├── tracker.py         # MetricsTracker: passos/episódios, violações por hora
+└── dashboard/         # UI Streamlit — CLIENTE MCP
+    ├── app.py         # entry — sidebar conecta ao servidor
+    ├── mcp_client.py  # cliente MCP síncrono (streamable-http)
+    ├── state.py       # wrappers de tool call usados pelas páginas
+    └── pages/
+        ├── 1_Overview.py             # health_report em cards
+        ├── 2_Curva_de_Aprendizado.py # get_learning_curve + get_td_error_series
+        └── 3_Trace_Diario.py         # run_episode + get_hourly_violations
+
+server.py (raiz)       # entry: python server.py [--stdio]
+tests/mcp/             # 47 testes (sem rede)
 ```
 
 ---
 
-## Ambiente (`FazendaEnergyEnv`)
-
-### Estado discreto (2.160 estados)
-
-| Variável | Buckets |
-|---|---|
-| hora    | 4 (0-5h / 6-11h / 12-17h / 18-23h) |
-| soc     | 10 (a cada 10%) |
-| solar   | 3 (<5 kW / 5-15 / >15) |
-| stress  | 3 (<30 / 30-70 / >70 — calculado pelo AgenteFinanceiro) |
-| meta_sec | 2 (secador atingiu 20 kWh diários?) |
-| bomba   | 3 (<3h / 3-5h / ≥6h operadas) |
-
-### Espaço de ações
-
-Os 3 agentes IQL têm espaços independentes:
-
-| Agente | Ações | Descrição |
-|---|---|---|
-| armazenamento | 3 | 0=carregar, 1=manter, 2=descarregar |
-| consumo       | 8 | bitmask 3 bits — bit0=cortar pivô, bit1=cortar bomba, bit2=cortar secador |
-| gerente       | 3 | 0=conservador (20 kW), 1=moderado (30 kW), 2=liberal (40 kW) |
-
-### Restrições HARD implementadas
-
-- **R-PIVO**: 8h consecutivas + apenas 1 ativação/dia (lock automático override a ação do agente quando ativo)
-- **R-BOMBA**: cronograma fixo nas horas `{0,1,6,7,12,13,21,22}` — ação do agente é **ignorada**
-- **R-SECADOR**: meta diária 20 kWh; rescue tardio força ON em 2.2 kW se faltar energia
-- **R-SEDE**: clamp em ±20% do ideal; eco-mode (−20%) em stress > 80
-- **R-PCC**: importação/exportação ≤ 65.8 kW
-- **R-BAT**: throughput diário ≤ 48 kWh
-
-### Reward cooperativo
-
-```
-reward = - 8.0 * custo_r                           # economia tarifária (sinal dominante)
-         - 0.5 * (stress / 10)                     # estresse financeiro
-         - 12.0 * soc_critico
-         - 8.0  * teto_excedido
-         - 10.0 * pcc_violado
-         - 5.0  * kwh_cortado                      # produção perdida
-         - pen_secador_meta (20.0 se não atingiu)
-         - pen_pivo_pico (18.0 se pivô em pico)
-         - pen_secador_pico (8.0 se secador em pico)
-         + bonus_pivo_solar (3.0 com sol ≥ 15kW)
-         + bonus_sec_excedente (2.0 com excedente ≥ 5kW)
-         + 1.2 * bat_carga (se carregando com excedente)
-         + 0.5 * excedente * tarifa
-         + 1.0 * (30 < soc < 80)
-```
-
----
-
-## Dataset
-
-Baixado uma vez no startup do servidor via `urllib.request.urlopen`:
-
-- **Planilha**: `SHEET_ID=1sjs2XLNEZp2oPxm_YLwsX9DxPxIfks32` (sobrescrevível via env var)
-- **Fazenda**: `ID_FAZENDA=FAZ-002` (também sobrescrevível)
-- **Período**: 31 dias de janeiro/2025
-- **Abas usadas**: `Geracao`, `Cargas`, `Tarifa`
-- **Mapeamento** (base nova → modelo):
-  - `pivo_kw` ← `Pivô`
-  - `captacao_kw` ← `Bomba_Aux`
-  - `sede_kw` ← cargas `Tipo="Sede"` (Escritório + Cozinha + Quarto)
-  - `silo_kw` ← `Secadora + Quadro_Auto`
-
----
-
-## Ferramentas MCP
+## Ferramentas
 
 ### Configuração
 | Tool | Parâmetros | Descrição |
 |---|---|---|
-| `configure_agents` | hiperparâmetros opcionais | Atualiza α/β/γ/ε dos 3 agentes (sem destruir Q-tables) |
+| `configure_agents` | hiperparâmetros opcionais | Atualiza α/β/γ/ε e o nº de episódios dos 3 agentes (sem destruir Q-tables) |
 | `configure_reward_weights` | 15 pesos opcionais (`w_*`, `pen_*`, `bonus_*`) | Ajusta a função de reward em runtime. Pesos omitidos preservam o valor atual. Restrições físicas (PCC, SOC, capacidade de bateria) permanecem imutáveis. **Após mudar pesos, retreine** — Q-tables existentes ficam parcialmente obsoletas. |
 
 ### Treino e avaliação
 | Tool | Parâmetros | Descrição |
 |---|---|---|
-| `train_agents` | n_episodios=0 | Loop IQL com SOC propagando entre dias |
+| `train_agents` | n_episodios=0 | Loop IQL com SOC propagando entre dias (mesmo laço do pipeline, com early stopping) |
 | `evaluate_agents` | n_dias=30, propagar_soc=True | Greedy sobre o dataset |
 | `compare_strategies` | n_dias=30, propagar_soc=True | IQL vs Heurístico vs SemAgente |
 | `run_episode` | mode="eval", dia_idx=None | Trace hora-a-hora de 1 dia |
+
+O decaimento de ε é reescalado automaticamente para o horizonte pedido
+(`config.ajustar_decay`): sem isso, um treino de 1.000 episódios herdaria o
+decay calibrado para 100.000 e os agentes ficariam quase aleatórios.
 
 ### Métricas
 | Tool | Parâmetros | Descrição |
 |---|---|---|
 | `get_training_metrics` | — | Sumário do treino + info dos 3 agentes |
 | `get_qtables_info` | — | Estatísticas detalhadas das 3 Q-tables |
-| `get_td_error_series` | agente="armazenamento" | Série completa de TD-error (até 5000 pontos) de 1 agente — usado pelo dashboard para plotar convergência |
+| `get_td_error_series` | agente="armazenamento" | Série de TD-error (até 5000 pontos) de 1 agente |
 | `get_learning_curve` | janela_media_movel=20 | Reward, custo e epsilon por episódio |
 | `get_eval_metrics` | agente="iql_eval" | Métricas da última avaliação |
 | `get_peak_offpeak_stats` | agente="iql_eval" | kWh e R$ pico vs fora-pico |
@@ -191,14 +120,21 @@ Baixado uma vez no startup do servidor via `urllib.request.urlopen`:
 | `get_observation` | — | Obs + estado discretizado |
 | `step_environment` | a_arm, a_cons, a_ger | 1 passo no env (obs, reward, done, info) |
 | `get_actions` | explore=False | Ações dos 3 agentes IQL + Q-values top-3 |
-| `save_qtables` | dir_path="qtables" | Salva as 3 Q-tables em pickle |
-| `load_qtables` | dir_path="qtables" | Carrega Q-tables salvas |
+| `save_qtables` | dir_path="", label="" | Salva um **run versionado** em `outputs/runs/` (ou 3 pickles soltos se `dir_path`) |
+| `load_qtables` | dir_path="", run_id="" | Carrega o run mais recente, um run específico, ou pickles soltos |
 | `get_financeiro_state` | — | Saldo de créditos + estresse + tarifa atual |
+
+!!!success Runs compartilhados
+`save_qtables` / `load_qtables` usam o mesmo `outputs/runs/` do pipeline
+offline. Um treino longo feito com `python main.py` pode ser carregado pelo
+servidor, e um treino disparado pelo LLM aparece em `main.py --replot` e nos
+dashboards.
+!!!
 
 ### Diagnóstico para LLM-as-a-judge
 | Tool | Descrição |
 |---|---|
-| `health_report` | Payload consolidado: cobertura/TD-error dos 3 agentes, sumário treino, comparação com baselines, `pesos_reward_modificados` (quando aplicável) e alertas heurísticos |
+| `health_report` | Payload consolidado: cobertura/TD-error dos 3 agentes, sumário do treino, comparação com baselines, `pesos_reward_modificados` e alertas heurísticos |
 | `describe_schema` | Esquema completo: estado, ações, restrições HARD, reward, tarifa |
 
 ---
@@ -215,13 +151,13 @@ Baixado uma vez no startup do servidor via `urllib.request.urlopen`:
 7. health_report()                    ← veredito consolidado
 8. get_hourly_violations(...)         ← se houver violações
 9. identify_scenarios()               ← análise por dia extremo
-10. run_episode(dia_idx=...)           ← trace detalhado
+10. run_episode(dia_idx=...)          ← trace detalhado
 ```
 
 ## Loop LLM-as-a-judge (autônomo)
 
-Com `configure_reward_weights`, o cliente LLM pode rodar um ciclo
-fechado de auto-ajuste — diagnosticar → decidir → agir → reavaliar:
+Com `configure_reward_weights`, o cliente LLM pode rodar um ciclo fechado de
+auto-ajuste — diagnosticar → decidir → agir → reavaliar:
 
 ```
 health_report()                       ← lê veredito atual
@@ -242,80 +178,48 @@ evaluate_agents() + health_report()   ← reavaliação
 
 ## Dashboard Streamlit (cliente MCP)
 
-UI interativa que se conecta ao servidor MCP via HTTP (`dashboard/mcp_client.py`)
-— **não** importa `agents/`, `environment/` ou `metrics/` diretamente.
-Toda métrica exibida vem de uma tool call. Requer o servidor rodando à parte.
-
-> **Antes de colar os comandos abaixo**: eles assumem que você já está
-> dentro da pasta `mcp-smartenergy/` (a raiz do projeto, onde ficam
-> `server.py` e `dashboard/`) e que já instalou as dependências num
-> ambiente virtual — veja [MANUAL.md](MANUAL.md). Rodar
-> `pip install` ou `streamlit run` fora dessa pasta, ou no Python global
-> em vez do venv, é a causa mais comum de erro aqui.
+Requer o servidor rodando à parte:
 
 ```powershell
 # terminal 1 — servidor MCP (fica rodando)
-cd caminho\para\mcp-smartenergy
-.venv\Scripts\python.exe server.py
-
-# terminal 2 — dashboard (conecta no servidor acima)
-cd caminho\para\mcp-smartenergy
-.venv\Scripts\python.exe -m streamlit run dashboard\app.py
-```
-
-```bash
-# Linux/Mac — mesma ideia, com o venv ativado
-cd caminho/para/mcp-smartenergy && source .venv/bin/activate
-
-# terminal 1
 python server.py
 
-# terminal 2
-python -m streamlit run dashboard/app.py
+# terminal 2 — dashboard
+python -m streamlit run src/smarty_energy/mcp/dashboard/app.py
 ```
-
-3 páginas, todas construídas a partir de tool calls:
 
 | Página | Tools usadas | O que mostra |
 |---|---|---|
-| **Overview** | `health_report`, `get_dataset_info` | Veredito consolidado: cobertura/TD-error dos 3 agentes, comparação com baselines, alertas heurísticos |
-| **Curva de Aprendizado** | `get_learning_curve`, `get_td_error_series` | Reward/custo/epsilon por episódio com média móvel + TD-error rolante dos 3 agentes |
-| **Trace Diário** | `run_episode`, `select_day`, `identify_scenarios`, `get_hourly_violations`, `describe_schema` | Roda 1 dia (greedy/exploração), geração/consumo/SOC/custo hora-a-hora + heatmap de violações |
+| **Overview** | `health_report`, `get_dataset_info` | Veredito consolidado: cobertura/TD-error dos 3 agentes, comparação com baselines, alertas |
+| **Curva de Aprendizado** | `get_learning_curve`, `get_td_error_series` | Reward/custo/epsilon por episódio com média móvel + TD-error rolante |
+| **Trace Diário** | `run_episode`, `select_day`, `identify_scenarios`, `get_hourly_violations`, `describe_schema` | Um dia hora-a-hora (geração/consumo/SOC/custo) + heatmap de violações |
 
-A sidebar concentra conexão ao MCP, treino (slider de episódios,
-`configure_agents` + `train_agents`) e avaliação (`evaluate_agents` /
-`compare_strategies`, com toggle de propagação de SOC).
+A sidebar concentra conexão ao MCP, treino (slider de episódios) e avaliação
+(`evaluate_agents` / `compare_strategies`, com toggle de propagação de SOC).
 
 ---
 
 ## Testes
 
-Dentro da pasta `mcp-smartenergy/`, com o venv ativado (`pytest` já está
-em `requirements.txt`):
-
 ```bash
-python -m pytest tests/ -v
+python -m pytest tests/mcp -v
 ```
 
 47 testes cobrindo invariantes físicos do env (PCC, SOC, throughput,
 schedules HARD), hysteretic Q-learning, baselines, tracker e tools do
-servidor. Testes usam fixtures sintéticas, **sem download** do Sheets.
+servidor. Usam fixtures sintéticas, **sem download** da base.
 
 ---
 
-## Dependências
+## Transporte
 
-```
-mcp >= 1.9.0        # server.py e dashboard/mcp_client.py (streamable-http)
-numpy >= 1.24.0
-pandas >= 2.0
-openpyxl >= 3.1
+Por padrão o servidor sobe em **streamable-http** (`127.0.0.1:8000`,
+configurável por `MCP_HOST`/`MCP_PORT`), como processo único e de longa
+duração compartilhado pelo dashboard e por clientes MCP.
 
-streamlit >= 1.30   # dashboard (cliente MCP, não é mais opcional se for usá-lo)
-plotly >= 5.18      # dashboard
-pytest >= 8.0       # opcional (testes)
+```bash
+python server.py --stdio      # modo clássico de subprocesso stdio
 ```
 
-Python 3.10+ requerido (sintaxe `int | None`). Conexão à internet requerida no
-startup do **servidor** para baixar a planilha (~1 MB) — o dashboard não
-baixa nada, só conversa com o servidor.
+Variáveis de ambiente úteis: `MCP_N_EPISODIOS` (episódios por chamada de
+`train_agents`, default 1000), `SHEET_ID` e `ID_FAZENDA` (fonte de dados).

@@ -31,22 +31,33 @@ A base traz ainda abas de cadastro e apoio (`Cadastro_Fazenda`,
 
 ## Mapeamento de cargas (base → modelo)
 
-A base traz 7 cargas por fazenda; o modelo opera com 4:
+A base traz 7 cargas por fazenda; o modelo opera com 5:
 
 | Coluna do modelo | Carga(s) da base |
 |---|---|
 | `pivo_kw` | `Pivô` |
 | `captacao_kw` | `Bomba_Aux` |
 | `sede_kw` | `Escritório` + `Cozinha` + `Quarto` (Tipo = `Sede`) |
-| `silo_kw` | `Secadora` + `Quadro_Auto` (demais cargas agrícolas) |
+| `secador_kw` | `Secadora` (carga agrícola controlada pelo agente) |
+| `silo_kw` | `Quadro_Auto` (fundo fixo, sempre on) |
+
+!!!warning O secador é uma carga própria
+`Secadora` **não** entra em `silo_kw`: ela é controlada pelo agente de consumo
+(bit 2) e tem meta diária de 20 kWh. Q-tables treinadas antes dessa separação
+não são comparáveis com as atuais.
+!!!
 
 ## Saída do `data_loader`
 
 `carregar_dados()` devolve:
 
 - **`dias`** — lista de DataFrames (um por dia) com as colunas
-  `hora, solar_kw, eolico_kw, pivo_kw, captacao_kw, sede_kw, silo_kw, data`.
+  `hora, solar_kw, eolico_kw, pivo_kw, captacao_kw, sede_kw, secador_kw, silo_kw, data`.
 - **`tarifa_24`** — vetor `(24,)` com a tarifa em R$/kWh por hora.
+
+`descrever_base(dias, tarifa_24)` complementa com os metadados descritivos
+(nº de dias, range de datas, tarifa mín/máx, horas de pico) usados pela tool
+`get_dataset_info` do [servidor MCP](mcp.md).
 
 !!!success Conservação de energia
 A geração mensal somada da `FAZ-002` (solar 6680,0 + eólica 2072,8 =
