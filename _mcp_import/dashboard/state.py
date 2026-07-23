@@ -1,0 +1,123 @@
+"""Helpers para manter o estado do dashboard em st.session_state.
+
+Toda operação aqui é uma chamada de ferramenta MCP contra o servidor
+`server.py` (via `dashboard.mcp_client`) — nenhuma métrica é calculada
+localmente. O servidor MCP é quem detém o dataset, as Q-tables e o
+tracker; o dashboard só armazena em cache o último payload JSON
+retornado por cada tool, para renderização.
+"""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from dashboard.mcp_client import MCPServerError, call_tool
+
+__all__ = [
+    "ensure_state", "require_setup", "conectar_mcp",
+    "treinar", "avaliar", "comparar",
+    "health_report", "get_dataset_info", "get_qtables_info",
+    "get_learning_curve", "get_td_error_series", "get_hourly_violations",
+    "run_episode", "select_day", "identify_scenarios", "describe_schema",
+    "MCPServerError",
+]
+
+
+def ensure_state() -> None:
+    """Inicializa chaves esperadas no session_state, sem chamar o MCP."""
+    ss = st.session_state
+    ss.setdefault("mcp_conectado", False)
+    ss.setdefault("meta", None)
+    ss.setdefault("treinado", False)
+    ss.setdefault("avaliado", False)
+    ss.setdefault("comparado", False)
+
+
+def conectar_mcp() -> dict:
+    """Verifica conectividade com o servidor MCP e busca metadados do dataset.
+
+    O dataset já foi baixado e carregado dentro do processo do servidor
+    no startup dele (`python server.py`) — aqui só confirmamos que o
+    servidor está de pé e sincronizamos o dashboard com o que ele expõe.
+    """
+    ss = st.session_state
+    meta = call_tool("get_dataset_info")
+    ss.meta = meta
+    ss.mcp_conectado = True
+    return meta
+
+
+def require_setup() -> bool:
+    """Mostra aviso se ainda não conectou ao MCP. Retorna True se ok."""
+    ensure_state()
+    if not st.session_state.mcp_conectado:
+        st.info("Conecte ao servidor MCP na sidebar para começar "
+                 "(o servidor precisa estar rodando: `python server.py`).")
+        return False
+    return True
+
+
+# --- ações que envolvem treino/avaliação (encapsuladas para reuso entre páginas)
+
+def treinar(n_episodios: int) -> dict:
+    ss = st.session_state
+    call_tool("configure_agents", n_episodios=n_episodios)
+    sumario = call_tool("train_agents", n_episodios=n_episodios)
+    ss.treinado = True
+    return sumario
+
+
+def avaliar(n_dias: int, propagar_soc: bool = True) -> dict:
+    ss = st.session_state
+    res = call_tool("evaluate_agents", n_dias=n_dias, propagar_soc=propagar_soc)
+    ss.avaliado = True
+    return res
+
+
+def comparar(n_dias: int, propagar_soc: bool = True) -> dict:
+    ss = st.session_state
+    res = call_tool("compare_strategies", n_dias=n_dias, propagar_soc=propagar_soc)
+    ss.comparado = True
+    return res
+
+
+# --- leitura de métricas/diagnóstico (todas via tool MCP) ------------------
+
+def health_report() -> dict:
+    return call_tool("health_report")
+
+
+def get_dataset_info() -> dict:
+    return call_tool("get_dataset_info")
+
+
+def get_qtables_info() -> dict:
+    return call_tool("get_qtables_info")
+
+
+def get_learning_curve(janela_media_movel: int = 20) -> dict:
+    return call_tool("get_learning_curve", janela_media_movel=janela_media_movel)
+
+
+def get_td_error_series(agente: str) -> dict:
+    return call_tool("get_td_error_series", agente=agente)
+
+
+def get_hourly_violations(agente: str = "iql_eval") -> dict:
+    return call_tool("get_hourly_violations", agente=agente)
+
+
+def run_episode(mode: str = "eval", dia_idx: int | None = None) -> dict:
+    return call_tool("run_episode", mode=mode, dia_idx=dia_idx)
+
+
+def select_day(dia_idx: int) -> dict:
+    return call_tool("select_day", dia_idx=dia_idx)
+
+
+def identify_scenarios() -> dict:
+    return call_tool("identify_scenarios")
+
+
+def describe_schema() -> dict:
+    return call_tool("describe_schema")
