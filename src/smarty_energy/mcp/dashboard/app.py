@@ -1,25 +1,34 @@
 """Dashboard Streamlit — SmartEnergy IQL.
 
 Rode com:
-    streamlit run dashboard/app.py
+    streamlit run src/smarty_energy/mcp/dashboard/app.py
 
 Pré-requisito: o servidor MCP precisa estar rodando à parte:
     python server.py
 
 O dashboard é um CLIENTE MCP puro — toda métrica, log ou ação de
-treino/avaliação passa por uma ferramenta do servidor (`dashboard/state.py`
-+ `dashboard/mcp_client.py`). Nenhum dado é calculado localmente.
+treino/avaliação passa por uma ferramenta do servidor (`state.py` +
+`mcp_client.py`). Nenhum dado é calculado localmente.
 Cada página (Overview, Curva de Aprendizado, Trace Diário) consome o
 estado compartilhado em st.session_state, que só guarda o último payload
 retornado pelo MCP.
 """
 
+import sys
+from pathlib import Path
+
 import streamlit as st
 
-from dashboard.state import (
+# Streamlit executa este arquivo como script, não como módulo do pacote —
+# por isso o caminho de `src/` entra no sys.path na mão.
+_SRC = Path(__file__).resolve().parents[3]
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from smarty_energy.mcp.dashboard.state import (
     MCPServerError, ensure_state, conectar_mcp, treinar, avaliar, comparar,
 )
-from dashboard.mcp_client import MCP_SERVER_URL
+from smarty_energy.mcp.dashboard.mcp_client import MCP_SERVER_URL
 
 st.set_page_config(
     page_title="SmartEnergy IQL — Dashboard",

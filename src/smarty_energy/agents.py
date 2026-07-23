@@ -1,8 +1,11 @@
 """
 Agentes do sistema SmartEnergy MAS.
 
-AgenteQL          — Q-Learning independente (IQL) com política epsilon-greedy.
+AgenteQL           — Q-Learning independente (IQL) com política epsilon-greedy.
+IQLSystem          — Orquestra os 3 agentes (treino/avaliação com SOC propagado).
+AgenteFinanceiro   — Índice de estresse financeiro + saldo de créditos.
 AgentesHeuristicos — Baseline baseado em regras (sem aprendizado).
+SemAgente          — Baseline "fazenda como está hoje" (sem gestão nenhuma).
 """
 
 import pickle
@@ -11,7 +14,9 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import CONFIG
+from .config import (
+    CONFIG, N_ACOES_ARMAZENAMENTO, N_ACOES_CONSUMO, N_ACOES_GERENTE,
+)
 
 
 class AgenteQL:
@@ -21,9 +26,10 @@ class AgenteQL:
     alinhando o aprendizado individual ao objetivo global.
     """
 
-    def __init__(self, n_acoes: int, nome: str, cfg: dict = CONFIG):
+    def __init__(self, n_acoes: int, nome: str = "ql", cfg: dict = CONFIG):
         self.n_acoes   = n_acoes
         self.nome      = nome
+        self.cfg       = cfg
         self.epsilon   = cfg["epsilon_inicial"]
         self.alpha     = cfg["alpha"]
         self.beta      = cfg.get("beta", 0.01)  # taxa de aprendizado pessimista (Hysteretic)
@@ -32,9 +38,17 @@ class AgenteQL:
         self.eps_decay = cfg["epsilon_decay"]
         self.q_table   = defaultdict(lambda: np.zeros(n_acoes))
         self.n_updates = 0
+        # Janela rolante de TD-errors para diagnóstico de convergência
+        # (lida por `td_error_recente` e pela tool MCP get_td_error_series).
+        self.td_errors: list[float] = []
+        self.td_errors_max_len = 5000
 
     def agir(self, estado_disc: tuple, explorando: bool = True) -> int:
-        """Seleciona uma ação via política epsilon-greedy."""
+        """Seleciona uma ação via política epsilon-greedy.
+
+        Usa o RNG global do NumPy de propósito: a suíte de testes fixa
+        `np.random.seed` para tornar treinos curtos reprodutíveis.
+        """
         if explorando and np.random.random() < self.epsilon:
             return np.random.randint(self.n_acoes)
         return int(np.argmax(self.q_table[estado_disc]))
@@ -47,6 +61,9 @@ class AgenteQL:
         lr = self.alpha if td_error >= 0 else self.beta  # Hysteretic: otimista sobe rápido, pessimista desce devagar
         self.q_table[s][a] += lr * td_error
         self.n_updates += 1
+        self.td_errors.append(float(td_error))
+        if len(self.td_errors) > self.td_errors_max_len:
+            del self.td_errors[:-self.td_errors_max_len]
 
     def decair_epsilon(self) -> None:
         """Reduz epsilon multiplicativamente (decaimento exponencial)."""
@@ -57,33 +74,63 @@ class AgenteQL:
         """Número de estados distintos visitados."""
         return len(self.q_table)
 
+    def td_error_recente(self, janela: int = 500) -> dict:
+        """Média e desvio do |TD-error| na janela final — proxy de convergência."""
+        if not self.td_errors:
+            return {"janela": 0, "td_abs_medio": 0.0, "td_std": 0.0}
+        amostra = self.td_errors[-janela:]
+        return {
+            "janela": len(amostra),
+            "td_abs_medio": float(np.mean(np.abs(amostra))),
+            "td_std": float(np.std(amostra)),
+        }
+
+    def get_info(self) -> dict:
+        """Resumo do agente para diagnóstico (tools MCP e health_report)."""
+        return {
+            "nome": self.nome,
+            "n_acoes": self.n_acoes,
+            "n_estados_visitados": self.n_estados,
+            "n_updates": self.n_updates,
+            "epsilon": float(self.epsilon),
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "gamma": self.gamma,
+            "td_error_recente": self.td_error_recente(),
+        }
+
     def save(self, path: str | Path) -> None:
         """Persiste a Q-table em disco via pickle."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "wb") as f:
             pickle.dump({"q_table": dict(self.q_table), "epsilon": self.epsilon,
-                         "n_updates": self.n_updates, "nome": self.nome}, f)
+                         "n_updates": self.n_updates, "nome": self.nome,
+                         "n_acoes": self.n_acoes}, f)
 
     def load(self, path: str | Path) -> None:
         """Carrega uma Q-table salva anteriormente."""
         with open(path, "rb") as f:
             data = pickle.load(f)
+        self.n_acoes   = data.get("n_acoes", self.n_acoes)
         self.q_table   = defaultdict(lambda: np.zeros(self.n_acoes), data["q_table"])
-        self.epsilon   = data["epsilon"]
-        self.n_updates = data["n_updates"]
+        self.epsilon   = data.get("epsilon", self.epsilon)
+        self.n_updates = data.get("n_updates", 0)
 
 
 def construir_agentes(cfg: dict = CONFIG) -> dict:
     """Instancia os três agentes Q-Learning com os tamanhos de ação padrão.
 
-    Fonte única da topologia dos agentes — usada tanto no treino quanto ao
-    recarregar um run salvo para revisualização.
+    Fonte única da topologia dos agentes — usada pelo treino do pipeline, pelo
+    IQLSystem do servidor MCP e ao recarregar um run salvo para revisualização.
+    Os nomes em minúsculas casam com o padrão de arquivo `qtable_<nome>.pkl`
+    usado por `runs.salvar_run`, tornando as Q-tables intercambiáveis entre os
+    dois caminhos de treino.
     """
     return {
-        "armazenamento": AgenteQL(3, "Armazenamento", cfg),
-        "consumo"      : AgenteQL(8, "Consumo",       cfg),
-        "gerente"      : AgenteQL(3, "Gerente",       cfg),
+        "armazenamento": AgenteQL(N_ACOES_ARMAZENAMENTO, "armazenamento", cfg),
+        "consumo"      : AgenteQL(N_ACOES_CONSUMO,       "consumo",       cfg),
+        "gerente"      : AgenteQL(N_ACOES_GERENTE,       "gerente",       cfg),
     }
 
 
@@ -126,6 +173,9 @@ class AgentesHeuristicos:
     derivadas do documento SmartEnergy MAS v1.1.
     """
 
+    def __init__(self, cfg: dict = CONFIG):
+        self.cfg = cfg
+
     def stress_financeiro(self, est: dict) -> float:
         """Índice de estresse financeiro (0–100)."""
         t_min = 0.681282
@@ -139,9 +189,9 @@ class AgentesHeuristicos:
         soc    = est["soc"]
         solar  = est["solar_kw"]
         tarifa = est["tarifa"]
-        if soc > CONFIG["soc_max_pct"]:
+        if soc > self.cfg["soc_max_pct"]:
             return 1                      # cheio → manter
-        if soc < CONFIG["soc_min_pct"] + 2:
+        if soc < self.cfg["soc_min_pct"] + 2:
             return 1                      # crítico → não forçar descarga
         if tarifa > 0.9:
             return 2                      # pico tarifário → descarregar
@@ -174,3 +224,259 @@ class AgentesHeuristicos:
         if stress > 35:
             return 1                      # moderado    (30 kW)
         return 2                          # liberal     (40 kW)
+
+    def agir(self, est: dict) -> tuple[int, int, int]:
+        """As três ações da hora, a partir do estresse financeiro do estado."""
+        stress = self.stress_financeiro(est)
+        return self.armazenamento(est), self.consumo(est, stress), self.gerente(est, stress)
+
+    def avaliar(self, dias, tarifa_24h, env_cls=None, *, n_dias: int = 30,
+                tracker=None, tracker_key: str = "heuristico",
+                propagar_soc: bool = True) -> dict:
+        """Roda o baseline heurístico em `n_dias` (ver `avaliar_politica`)."""
+        return avaliar_politica(
+            lambda env, est: self.agir(est), dias, tarifa_24h, cfg=self.cfg,
+            env_cls=env_cls, n_dias=n_dias, tracker=tracker,
+            tracker_key=tracker_key, propagar_soc=propagar_soc,
+        )
+
+
+class SemAgente:
+    """Cenário sem gestão nenhuma — a fazenda 'como está hoje'.
+
+    Bateria em manter, nenhuma carga cortada, gerente liberal. É a referência
+    C0 do plano de testes; a versão de dia único é `evaluation.rodar_sem_agente`.
+    """
+
+    ACOES_FIXAS = (1, 0, 2)
+
+    def __init__(self, cfg: dict = CONFIG):
+        self.cfg = cfg
+
+    def agir(self, est: dict) -> tuple[int, int, int]:
+        return self.ACOES_FIXAS
+
+    def avaliar(self, dias, tarifa_24h, env_cls=None, *, n_dias: int = 30,
+                tracker=None, tracker_key: str = "sem_agente",
+                propagar_soc: bool = True) -> dict:
+        """Roda o baseline sem gestão em `n_dias` (ver `avaliar_politica`)."""
+        return avaliar_politica(
+            lambda env, est: self.ACOES_FIXAS, dias, tarifa_24h, cfg=self.cfg,
+            env_cls=env_cls, n_dias=n_dias, tracker=tracker,
+            tracker_key=tracker_key, propagar_soc=propagar_soc,
+        )
+
+
+# ──────────────────────────────────────────────────────────────
+# Harness de avaliação compartilhado
+# ──────────────────────────────────────────────────────────────
+
+def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
+                     env_cls=None, n_dias: int = 30, tracker=None,
+                     tracker_key: str = "politica",
+                     propagar_soc: bool = True) -> dict:
+    """Roda uma política por `n_dias` e devolve as métricas médias diárias.
+
+    Fonte única do laço de avaliação — IQL, heurístico e sem-agente usam este
+    mesmo caminho, garantindo que as métricas sejam comparáveis (mesmo env,
+    mesmos dias, mesma propagação de SOC).
+
+    Args:
+        escolher     : callable ``(env, est) -> (a_arm, a_cons, a_ger)``.
+        env_cls      : classe do ambiente; None usa `FazendaEnergyEnv`
+                       (import tardio para evitar ciclo com environment.py).
+        propagar_soc : se True, o SOC final de um dia inicia o dia seguinte.
+        tracker      : `mcp.tracker.MetricsTracker` opcional, alimentado passo
+                       a passo e por episódio.
+    """
+    if env_cls is None:
+        from .environment import FazendaEnergyEnv
+        env_cls = FazendaEnergyEnv
+
+    custos, redes, viols_soc, rewards = [], [], [], []
+    soc_proximo = cfg["soc_inicial_pct"]
+
+    for ep in range(n_dias):
+        env = env_cls(dias[ep % len(dias)], tarifa_24h, cfg)
+        est = env.reset(soc_inicial=soc_proximo)
+
+        custo_dia = rede_dia = reward_dia = 0.0
+        viols = 0
+        for _ in range(24):
+            a_arm, a_cons, a_ger = escolher(env, est)
+            est, reward, done, info = env.step(a_arm, a_cons, a_ger)
+            custo_dia  += info["custo_r"]
+            rede_dia   += info["rede_kwh"]
+            reward_dia += info["reward"]
+            if info["soc"] < cfg["soc_min_pct"]:
+                viols += 1
+            if tracker:
+                tracker.registrar_passo(info, agente=tracker_key)
+            if done:
+                break
+
+        if propagar_soc:
+            soc_proximo = env.soc
+
+        custos.append(custo_dia)
+        redes.append(rede_dia)
+        viols_soc.append(viols)
+        rewards.append(reward_dia)
+
+        if tracker:
+            tracker.fechar_episodio(
+                agente=tracker_key, reward_total=reward_dia,
+                custo_total=custo_dia, epsilon=0.0, cenario="REAL",
+            )
+
+    return {
+        "n_dias": n_dias,
+        "custo_medio_dia_rs": float(np.mean(custos)),
+        "custo_std": float(np.std(custos)),
+        "rede_media_dia_kwh": float(np.mean(redes)),
+        "violacoes_soc_media_h_dia": float(np.mean(viols_soc)),
+        "reward_medio_dia": float(np.mean(rewards)),
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# Orquestração IQL (usada pelo servidor MCP)
+# ──────────────────────────────────────────────────────────────
+
+class IQLSystem:
+    """Orquestra os 3 agentes independentes (armazenamento, consumo, gerente).
+
+    É a API de alto nível consumida pelo servidor MCP: agir/aprender em bloco,
+    reconfigurar hiperparâmetros em runtime, treinar e avaliar. O treino delega
+    a `training.treinar` — mesmo laço, mesmo early stopping do pipeline offline.
+    """
+
+    def __init__(self, cfg: dict = CONFIG):
+        self.cfg = cfg
+        self.agentes = construir_agentes(cfg)
+        self.n_episodios = cfg["n_episodios"]
+        self.soc_propagado = cfg["soc_inicial_pct"]   # SOC inicial do próximo episódio
+        # True quando alguém fixou epsilon_decay explicitamente — nesse caso
+        # `treinar` respeita o valor em vez de reescalá-lo pelo horizonte.
+        self.decay_manual = False
+        # Histórico completo do último treino (formato de `training.treinar`),
+        # usado para versionar o treino via `runs.salvar_run`.
+        self.ultimo_hist: dict | None = None
+
+    # -- API uniforme ---------------------------------------------------
+
+    def agir_todos(self, estado: tuple, explorando: bool = True) -> tuple[int, int, int]:
+        return (
+            self.agentes["armazenamento"].agir(estado, explorando),
+            self.agentes["consumo"].agir(estado,       explorando),
+            self.agentes["gerente"].agir(estado,       explorando),
+        )
+
+    def aprender_todos(self, s, acoes: tuple[int, int, int], r, s2, done) -> None:
+        a_arm, a_cons, a_ger = acoes
+        self.agentes["armazenamento"].aprender(s, a_arm,  r, s2, done)
+        self.agentes["consumo"].aprender(      s, a_cons, r, s2, done)
+        self.agentes["gerente"].aprender(      s, a_ger,  r, s2, done)
+
+    def decair_epsilon_todos(self) -> None:
+        for ag in self.agentes.values():
+            ag.decair_epsilon()
+
+    def reconfigurar(self, novos_params: dict) -> None:
+        """Atualiza hiperparâmetros dos 3 agentes sem destruir as Q-tables."""
+        atributo = {
+            "alpha": "alpha", "beta": "beta", "gamma": "gamma",
+            "epsilon_inicial": "epsilon", "epsilon_final": "eps_min",
+            "epsilon_decay": "eps_decay",
+        }
+        for ag in self.agentes.values():
+            for k, v in novos_params.items():
+                if k in atributo:
+                    setattr(ag, atributo[k], v)
+        self.cfg.update({k: v for k, v in novos_params.items() if k in self.cfg})
+        if "n_episodios" in novos_params:
+            self.n_episodios = novos_params["n_episodios"]
+        if "epsilon_decay" in novos_params:
+            self.decay_manual = True
+
+    def reset_qtables(self) -> None:
+        for ag in self.agentes.values():
+            ag.q_table = defaultdict(lambda n=ag.n_acoes: np.zeros(n))
+            ag.n_updates = 0
+            ag.td_errors = []
+            ag.epsilon = ag.cfg["epsilon_inicial"]
+
+    # -- Treino e avaliação ---------------------------------------------
+
+    def treinar(self, dias, tarifa_24h, env_cls=None, tracker=None, log=None) -> dict:
+        """Treina os 3 agentes por `self.n_episodios` e devolve o sumário.
+
+        Delega a `training.treinar` (early stopping com save-best incluído),
+        reescalando o decaimento de ε para o horizonte pedido — sem isso, um
+        treino curto de servidor herdaria o decay calibrado para 100k episódios
+        e os agentes ficariam aleatórios até o fim. Se alguém fixou
+        `epsilon_decay` via `reconfigurar`, esse valor é respeitado.
+        """
+        from .config import ajustar_decay
+        from .training import treinar as treinar_loop
+
+        if self.decay_manual:
+            cfg = {**self.cfg, "n_episodios": self.n_episodios}
+        else:
+            cfg = ajustar_decay(self.cfg, self.n_episodios)
+            for ag in self.agentes.values():
+                ag.eps_decay = cfg["epsilon_decay"]
+        hist = treinar_loop(dias, tarifa_24h, self.agentes, cfg,
+                            env_cls=env_cls, tracker=tracker, log=log)
+
+        self.ultimo_hist = hist
+        self.soc_propagado = hist["soc_final_pct"]
+        rewards, custos, eps = hist["rewards"], hist["custos"], hist["epsilons"]
+        n = len(rewards)
+        janela = min(50, n)
+        return {
+            "episodios_treinados": n,
+            "reward_ultimo_ep": float(rewards[-1]) if n else 0.0,
+            "reward_media_ultimos_50": float(np.mean(rewards[-janela:])) if n else 0.0,
+            "custo_medio_ultimos_50_rs": float(np.mean(custos[-janela:])) if n else 0.0,
+            "epsilon_final": float(eps[-1]) if n else 0.0,
+            "soc_propagado_final_pct": float(self.soc_propagado),
+            "best_ep": hist["best_ep"],
+            "best_custo_med": hist["best_custo_med"],
+            "duracao_s": hist["duracao_s"],
+            "agentes": {nome: ag.get_info() for nome, ag in self.agentes.items()},
+        }
+
+    def avaliar(self, dias, tarifa_24h, env_cls=None, *, n_dias: int = 30,
+                tracker=None, tracker_key: str = "iql_eval",
+                propagar_soc: bool = True) -> dict:
+        """Avalia a política greedy dos 3 agentes (ver `avaliar_politica`)."""
+        def escolher(env, est):
+            return self.agir_todos(env.discretizar(est), explorando=False)
+
+        return avaliar_politica(
+            escolher, dias, tarifa_24h, cfg=self.cfg, env_cls=env_cls,
+            n_dias=n_dias, tracker=tracker, tracker_key=tracker_key,
+            propagar_soc=propagar_soc,
+        )
+
+    # -- Persistência ----------------------------------------------------
+
+    def save_all(self, dir_path: str | Path) -> None:
+        """Salva as 3 Q-tables em `dir_path/qtable_<nome>.pkl`.
+
+        Mesmo layout de `runs.salvar_run`, então um diretório salvo aqui pode
+        ser lido pelo pipeline offline e vice-versa.
+        """
+        dir_path = Path(dir_path)
+        dir_path.mkdir(parents=True, exist_ok=True)
+        for nome, ag in self.agentes.items():
+            ag.save(dir_path / f"qtable_{nome}.pkl")
+
+    def load_all(self, dir_path: str | Path) -> None:
+        dir_path = Path(dir_path)
+        for nome, ag in self.agentes.items():
+            p = dir_path / f"qtable_{nome}.pkl"
+            if not p.exists():
+                raise FileNotFoundError(f"Q-table não encontrada: {p}")
+            ag.load(p)

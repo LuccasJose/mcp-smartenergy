@@ -28,8 +28,10 @@ def test_env_step_retorna_tupla_correta(env):
     assert isinstance(prox,   dict)
     assert isinstance(reward, float)
     assert isinstance(done,   bool)
-    assert "custo"    in info
+    # `info` é o registro horário completo — o mesmo dict apendado no histórico.
+    assert "custo_r"  in info
     assert "rede_kwh" in info
+    assert info is env.historico[-1]
     assert done is False
 
 

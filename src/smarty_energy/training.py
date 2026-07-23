@@ -58,6 +58,11 @@ def treinar(
     tarifa_24h: np.ndarray,
     agentes: dict,
     cfg: dict = CONFIG,
+    *,
+    env_cls=None,
+    tracker=None,
+    tracker_key: str = "iql_treino",
+    log=None,
 ) -> dict:
     """Treina os três agentes por `cfg['n_episodios']` episódios.
 
@@ -77,15 +82,27 @@ def treinar(
     com menor custo médio — protege contra drift do IQL+Hysteretic.
 
     Args:
-        dias       : lista de DataFrames diários (saída de carregar_dados)
-        tarifa_24h : array (24,) com tarifa em R$/kWh
-        agentes    : dict com chaves 'armazenamento', 'consumo', 'gerente'
-        cfg        : dicionário de hiperparâmetros (padrão: CONFIG)
+        dias        : lista de DataFrames diários (saída de carregar_dados)
+        tarifa_24h  : array (24,) com tarifa em R$/kWh
+        agentes     : dict com chaves 'armazenamento', 'consumo', 'gerente'
+        cfg         : dicionário de hiperparâmetros (padrão: CONFIG)
+        env_cls     : classe do ambiente (None = FazendaEnergyEnv)
+        tracker     : `mcp.tracker.MetricsTracker` opcional, alimentado passo a
+                      passo e por episódio (usado pelo servidor MCP)
+        tracker_key : rótulo do agente no tracker
+        log         : callable de saída (None = print). O servidor MCP passa um
+                      log em stderr para não poluir o canal do protocolo.
 
     Returns:
         dict de histórico com as chaves: 'rewards', 'custos', 'epsilons'
-        (listas por episódio), 'n_episodios', 'best_ep' e 'best_custo_med'.
+        (listas por episódio), 'n_episodios', 'best_ep', 'best_custo_med' e
+        'soc_final_pct'.
     """
+    if env_cls is None:
+        env_cls = FazendaEnergyEnv
+    if log is None:
+        log = print
+
     rewards_hist = []
     custos_hist  = []
     eps_hist     = []
@@ -93,6 +110,10 @@ def treinar(
     soc_proximo  = cfg["soc_inicial_pct"]   # SOC inicial do 1º episódio
 
     # ── Early stopping: snapshot da melhor política observada ──────
+    # A janela é fixa de propósito: com janelas curtas o save-best escolheria
+    # um checkpoint ainda em plena exploração (ε alto), cujo custo médio baixo
+    # não se traduz na política greedy. Treinos com menos de 1000 episódios
+    # simplesmente não geram snapshot.
     EARLY_STOP_WINDOW = 1000           # janela da média móvel
     min_ep_to_save    = max(EARLY_STOP_WINDOW, n_ep // 5)  # ignora primeiros 20%
     best_custo_med    = float("inf")
@@ -102,7 +123,7 @@ def treinar(
     t0 = time.perf_counter()
     for ep in range(n_ep):
         dados_dia = dias[ep % len(dias)]            # sequencial, com wrap-around
-        env       = FazendaEnergyEnv(dados_dia, tarifa_24h, cfg)
+        env       = env_cls(dados_dia, tarifa_24h, cfg)
         est       = env.reset(soc_inicial=soc_proximo)
         s_disc    = env.discretizar(est)
 
@@ -124,7 +145,9 @@ def treinar(
 
             s_disc    = s2_disc
             ep_reward += reward
-            ep_custo  += info["custo"]
+            ep_custo  += info["custo_r"]
+            if tracker:
+                tracker.registrar_passo(info, agente=tracker_key)
 
         soc_proximo = env.soc                   # propaga SOC para o próximo dia
 
@@ -134,6 +157,12 @@ def treinar(
         rewards_hist.append(ep_reward)
         custos_hist.append(ep_custo)
         eps_hist.append(agentes["armazenamento"].epsilon)
+
+        if tracker:
+            tracker.fechar_episodio(
+                agente=tracker_key, reward_total=ep_reward, custo_total=ep_custo,
+                epsilon=agentes["armazenamento"].epsilon, cenario="REAL",
+            )
 
         # \u2500\u2500 Early-stopping: snapshot quando a m\u00e9dia m\u00f3vel atinge novo m\u00ednimo \u2500\u2500
         if (ep + 1) >= EARLY_STOP_WINDOW:
@@ -155,7 +184,7 @@ def treinar(
             eps   = agentes["armazenamento"].epsilon
             n_est = agentes["armazenamento"].n_estados
             best_tag = f"  [best ep {best_ep}: R${best_custo_med:.2f}]" if best_state else ""
-            print(
+            log(
                 f"Ep {ep+1:>6}/{n_ep}  reward={r_med:>8.2f}  "
                 f"custo=R${c_med:>5.2f}  \u03b5={eps:.3f}  estados={n_est}{best_tag}"
             )
@@ -163,17 +192,17 @@ def treinar(
     # \u2500\u2500 Restaura Q-tables do melhor checkpoint observado \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     if best_state is not None:
         custo_final = float(np.mean(custos_hist[-EARLY_STOP_WINDOW:]))
-        print(
+        log(
             f"\n  Early stopping: restaurando Q-tables do ep {best_ep} "
             f"(custo m\u00e9dio R${best_custo_med:.2f})"
         )
-        print(f"  Custo m\u00e9dio nos \u00faltimos {EARLY_STOP_WINDOW} ep: R${custo_final:.2f}  "
-              f"(ganho do checkpoint: R${custo_final - best_custo_med:+.2f})")
+        log(f"  Custo m\u00e9dio nos \u00faltimos {EARLY_STOP_WINDOW} ep: R${custo_final:.2f}  "
+            f"(ganho do checkpoint: R${custo_final - best_custo_med:+.2f})")
         for nome, snapshot in best_state.items():
             ag = agentes[nome]
             ag.q_table = defaultdict(lambda n=ag.n_acoes: np.zeros(n), snapshot)
     else:
-        print(f"\n  [aviso] Sem snapshot \u2014 treino muito curto ou sem melhora detectada")
+        log(f"\n  [aviso] Sem snapshot \u2014 treino muito curto ou sem melhora detectada")
 
     # M\u00e9tricas-resumo do treino (m\u00e9dias da janela final de early stopping)
     janela = min(EARLY_STOP_WINDOW, len(custos_hist))
@@ -203,6 +232,7 @@ def treinar(
         "n_episodios": n_ep,
         "best_ep" : best_ep,
         "best_custo_med": best_custo_med,
+        "soc_final_pct": float(soc_proximo),
         "custo_final": custo_final,
         "reward_final": reward_final,
         "duracao_s": duracao_s,

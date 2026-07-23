@@ -1,9 +1,10 @@
 import numpy as np
 from collections import defaultdict
-from typing import Any
 
-# Limiar de SOC crítico — a nova base usa porcentagem (0-100), não fração (0-1).
-_SOC_MIN_PCT = 15.0
+from ..config import CONFIG
+
+# Limiar de SOC crítico — em porcentagem (0-100), vindo da config do pacote.
+_SOC_MIN_PCT = CONFIG["soc_min_pct"]
 
 
 class MetricsTracker:

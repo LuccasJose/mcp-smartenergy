@@ -12,33 +12,40 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
-
 from mcp.server.fastmcp import FastMCP
 
-from config import (
-    CONFIG, TETOS_KW, BOMBA_HORAS_ON, ID_FAZENDA,
+from ..config import (
+    CONFIG, TETOS_KW, BOMBA_HORAS_ON, ID_FAZENDA, ajustar_decay,
     N_ACOES_ARMAZENAMENTO, N_ACOES_CONSUMO, N_ACOES_GERENTE,
-    N_ESTADOS_TOTAL,
 )
-from environment.data_loader import carregar_dados
-from environment.energy_env import FazendaEnergyEnv
-from environment.scenarios import identificar_cenarios, classificar_dia
-from agents.qlearning_agent import IQLSystem
-from agents.baselines import AgentesHeuristicos, SemAgente
-from metrics.tracker import MetricsTracker
+from ..data_loader import carregar_dados, descrever_base
+from ..environment import FazendaEnergyEnv, ESPACO_ESTADOS_TOTAL as N_ESTADOS_TOTAL
+from ..evaluation import identificar_cenarios, classificar_dia
+from ..agents import IQLSystem, AgentesHeuristicos, SemAgente
+from .. import runs
+from .tracker import MetricsTracker
+
+
+def _log(msg: str) -> None:
+    """Log do servidor — sempre em stderr, para não poluir o canal do protocolo."""
+    print(msg, file=sys.stderr)
 
 
 # ------------------------------------------------------------------ #
 # Estado global do servidor                                            #
 # ------------------------------------------------------------------ #
 
-print("Baixando dataset do Google Sheets...", file=sys.stderr)
-DIAS, TARIFA_24H, DATASET_META = carregar_dados()
-print(f"  {len(DIAS)} dias carregados (fazenda {DATASET_META['id_fazenda']}).",
-      file=sys.stderr)
+# Episódios por chamada de train_agents. Bem menor que o CONFIG do pipeline
+# offline (100k), porque aqui o treino roda dentro de uma tool call; o
+# decaimento de ε é reescalado para o horizonte pedido por `ajustar_decay`.
+N_EPISODIOS_SERVIDOR = int(os.getenv("MCP_N_EPISODIOS", "1000"))
 
-iql = IQLSystem(CONFIG)
+_log("Carregando dataset...")
+DIAS, TARIFA_24H = carregar_dados()
+DATASET_META = descrever_base(DIAS, TARIFA_24H)
+_log(f"  {len(DIAS)} dias carregados (fazenda {DATASET_META['id_fazenda']}).")
+
+iql = IQLSystem(ajustar_decay(CONFIG, N_EPISODIOS_SERVIDOR))
 heuristico = AgentesHeuristicos(CONFIG)
 sem_agente = SemAgente(CONFIG)
 tracker = MetricsTracker()
@@ -188,6 +195,10 @@ def configure_reward_weights(
             }, indent=2)
 
         CONFIG.update(novos)
+        # O IQL trabalha sobre uma cópia do CONFIG (com o decay ajustado ao
+        # horizonte do servidor), então precisa receber os pesos novos também —
+        # é o cfg que ele passa ao env em treino e avaliação.
+        iql.cfg.update(novos)
         # Recria env global para refletir mudanças em step_environment.
         # Treino/avaliação criam env próprio por dia e já usam o CONFIG novo.
         global env
@@ -226,7 +237,8 @@ def train_agents(n_episodios: int = 0) -> str:
         tracker.limpar("iql_treino")
         if n_episodios > 0:
             iql.n_episodios = n_episodios
-        sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv, tracker=tracker)
+        sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
+                              tracker=tracker, log=_log)
         return json.dumps(sumario, indent=2)
     except Exception as e:
         return _err(e)
@@ -609,26 +621,64 @@ def get_actions(explore: bool = False) -> str:
 
 
 @mcp.tool()
-def save_qtables(dir_path: str = "qtables") -> str:
-    """Salva as 3 Q-tables (uma por agente) em arquivos pickle."""
+def save_qtables(dir_path: str = "", label: str = "") -> str:
+    """Salva as 3 Q-tables do treino atual.
+
+    Sem `dir_path`, grava um run versionado em `outputs/runs/<run_id>/` —
+    o mesmo formato que o pipeline offline (`main.py`) e os dashboards leem,
+    incluindo o CONFIG efetivo do treino no meta.json. Use `label` para
+    rotular o run. Com `dir_path`, grava só os 3 pickles no diretório dado.
+    """
     try:
-        iql.save_all(dir_path)
+        if dir_path:
+            iql.save_all(dir_path)
+            return json.dumps({
+                "status": "Q-tables salvas",
+                "dir": dir_path,
+                "arquivos": [f"qtable_{n}.pkl" for n in iql.agentes],
+            }, indent=2)
+
+        if iql.ultimo_hist is None:
+            return json.dumps({
+                "erro": "nenhum treino nesta sessão — rode train_agents() antes, "
+                        "ou informe dir_path para salvar só os pickles.",
+            }, indent=2)
+
+        run_id = runs.salvar_run(iql.agentes, iql.ultimo_hist,
+                                 fonte_dados=f"MCP · {DATASET_META['id_fazenda']}")
+        if label:
+            runs.definir_label(run_id, label)
         return json.dumps({
-            "status": "Q-tables salvas",
-            "dir": dir_path,
-            "arquivos": [f"qtable_{n}.pkl" for n in iql.agentes],
+            "status": "run salvo",
+            "run_id": run_id,
+            "caminho": str(runs.caminho_run(run_id)),
+            "nota": "visível em main.py --replot e nos dashboards.",
         }, indent=2)
     except Exception as e:
         return _err(e)
 
 
 @mcp.tool()
-def load_qtables(dir_path: str = "qtables") -> str:
-    """Carrega Q-tables previamente salvas com save_qtables."""
+def load_qtables(dir_path: str = "", run_id: str = "") -> str:
+    """Carrega Q-tables salvas.
+
+    Sem argumentos, carrega o run mais recente de `outputs/runs/` (inclusive
+    os treinados pelo pipeline offline). Informe `run_id` para escolher um
+    run específico ou `dir_path` para ler 3 pickles soltos.
+    """
     try:
-        iql.load_all(dir_path)
+        if dir_path:
+            iql.load_all(dir_path)
+            origem = dir_path
+        else:
+            rid = run_id or runs.run_mais_recente()
+            if rid is None:
+                return json.dumps({"erro": "nenhum run em outputs/runs/"}, indent=2)
+            runs.carregar_run(rid, iql.agentes)
+            origem = rid
         return json.dumps({
             "status": "Q-tables carregadas",
+            "origem": origem,
             "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
         }, indent=2)
     except Exception as e:
@@ -800,14 +850,23 @@ def describe_schema() -> str:
             "pcc_max_kw": CONFIG["pcc_max_kw"],
             "inversor_fv_max_kw": CONFIG["inversor_fv_max_kw"],
             "eolico_nominal_kw": CONFIG["eolico_nominal_kw"],
+            "pivo_nominal_kw": CONFIG["pivo_nominal_kw"],
+            "bomba_cap_nominal_kw": CONFIG["bomba_cap_nominal_kw"],
+            "secador_max_kw": CONFIG["secador_max_kw"],
+            "secador_meta_kwh": CONFIG["secador_meta_kwh"],
         },
         "restricoes_hard": {
-            "R-PIVO":    "8h consecutivas + 1 ativação/dia (lock automático)",
+            "R-PIVO":    f"8h consecutivas + 1 ativação/dia (lock automático), "
+                         f"{CONFIG['pivo_nominal_kw']} kW durante o lock",
             "R-BOMBA":   f"cronograma fixo nas horas {sorted(BOMBA_HORAS_ON)} — ação do agente é ignorada",
-            "R-SECADOR": "meta diária 20kWh + rescue tardio se faltar energia",
-            "R-SEDE":    "consumo clampado em ±20% do ideal; eco-mode em stress > 80",
-            "R-PCC":     "importação/exportação ≤ 65.8 kW",
-            "R-BAT":     "throughput diário ≤ 48 kWh, η carga 0.92, η descarga 0.95",
+            "R-SECADOR": f"potência da base (coluna secador_kw), meta diária "
+                         f"{CONFIG['secador_meta_kwh']} kWh + rescue tardio a "
+                         f"{CONFIG['secador_max_kw']} kW se faltar energia",
+            "R-SEDE":    f"consumo clampado em ±{int(CONFIG['sede_desvio_max']*100)}% do ideal; "
+                         "eco-mode (−20%) em stress ≥ 70",
+            "R-PCC":     f"importação/exportação ≤ {CONFIG['pcc_max_kw']} kW",
+            "R-BAT":     f"throughput diário ≤ {CONFIG['bat_throughput_max_kwh']} kWh, "
+                         f"η carga {CONFIG['eficiencia_carga']}, η descarga {CONFIG['eficiencia_descarga']}",
         },
         "reward_termos": {
             "pen_custo": -CONFIG["w_custo"],
@@ -839,9 +898,9 @@ def describe_schema() -> str:
             "pcc_violado", "soc_violado", "fonte_geracao_kwh", "fonte_bateria_kwh",
             "fonte_rede_kwh", "pivo_kw_consumido", "captacao_kw_consumido",
             "sede_kw_consumido", "silo_kw_consumido", "secador_kw_consumido",
-            "em_pico_tarifa", "bomba_ligada", "bomba_agendada", "kwh_cortado",
-            "stress", "saldo_creditos_kwh", "teto_excedido", "pivo_em_lock",
-            "secador_kwh_ac",
+            "em_pico_tarifa", "bomba_ligada", "bomba_agendada", "sede_eco",
+            "kwh_cortado", "stress", "saldo_creditos_kwh", "teto_excedido",
+            "pivo_em_lock", "secador_kwh_ac",
         ],
     }
     return json.dumps(schema, indent=2)
@@ -862,12 +921,17 @@ def describe_schema() -> str:
 # dashboard) — mantido só para compatibilidade com clientes que ainda
 # não suportam servidores MCP remotos via HTTP.
 
-if __name__ == "__main__":
-    usar_stdio = "--stdio" in sys.argv or os.getenv("MCP_TRANSPORT", "streamable-http") == "stdio"
+def main(argv: list[str] | None = None) -> None:
+    """Sobe o servidor MCP (chamado pelo `server.py` da raiz do projeto)."""
+    argv = sys.argv if argv is None else argv
+    usar_stdio = "--stdio" in argv or os.getenv("MCP_TRANSPORT", "streamable-http") == "stdio"
     if usar_stdio:
         mcp.run(transport="stdio")
     else:
-        print(f"Servidor MCP em http://{mcp.settings.host}:{mcp.settings.port}"
-              f"{mcp.settings.streamable_http_path} (transporte streamable-http)",
-              file=sys.stderr)
+        _log(f"Servidor MCP em http://{mcp.settings.host}:{mcp.settings.port}"
+             f"{mcp.settings.streamable_http_path} (transporte streamable-http)")
         mcp.run(transport="streamable-http")
+
+
+if __name__ == "__main__":
+    main()

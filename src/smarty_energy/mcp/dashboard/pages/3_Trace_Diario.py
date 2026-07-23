@@ -14,11 +14,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-_ROOT = Path(__file__).resolve().parents[2]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+_SRC = Path(__file__).resolve().parents[4]
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-from dashboard.state import (
+from smarty_energy.mcp.dashboard.state import (
     require_setup, run_episode, select_day, identify_scenarios,
     describe_schema, get_hourly_violations, MCPServerError,
 )

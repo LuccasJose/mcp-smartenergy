@@ -55,3 +55,7 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Pastas originais dos dois repos, mantidas so ate a validacao da juncao
+/Smart_Energy/
+/mcp-smartenergy/

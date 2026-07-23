@@ -104,3 +104,22 @@ def carregar_dados(path: str | None = None) -> tuple[list[pd.DataFrame], np.ndar
         dias.append(dia)
 
     return dias, tarifa_24
+
+
+def descrever_base(dias: list[pd.DataFrame], tarifa_24: np.ndarray,
+                   id_fazenda: str = ID_FAZENDA) -> dict:
+    """Metadados descritivos da base carregada (tool MCP `get_dataset_info`).
+
+    Separado de `carregar_dados` para não mudar a assinatura usada pelo
+    pipeline; o servidor chama as duas em sequência no startup.
+    """
+    return {
+        "n_dias": len(dias),
+        "id_fazenda": id_fazenda,
+        "data_inicio": str(dias[0]["data"].iloc[0])[:10] if dias else None,
+        "data_fim":    str(dias[-1]["data"].iloc[0])[:10] if dias else None,
+        "tarifa_min_rs_kwh": float(tarifa_24.min()),
+        "tarifa_max_rs_kwh": float(tarifa_24.max()),
+        "horas_pico": [int(h) for h in range(len(tarifa_24)) if tarifa_24[h] > 0.9],
+        "fonte": "Google Sheets" if SHEET_ID else str(DATA_PATH),
+    }

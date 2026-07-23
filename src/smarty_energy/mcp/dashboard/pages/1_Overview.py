@@ -10,11 +10,11 @@ from pathlib import Path
 
 import streamlit as st
 
-_ROOT = Path(__file__).resolve().parents[2]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+_SRC = Path(__file__).resolve().parents[4]
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-from dashboard.state import require_setup, health_report, get_dataset_info, MCPServerError
+from smarty_energy.mcp.dashboard.state import require_setup, health_report, get_dataset_info, MCPServerError
 
 st.title("Overview — Veredito do LLM-juiz")
 st.caption("Cobertura, convergencia e comparacao com baselines em um so painel — via MCP.")

@@ -1,6 +1,6 @@
 """Invariantes fisicos e comportamentais do FazendaEnergyEnv."""
 
-from config import BOMBA_HORAS_ON, TETOS_KW
+from smarty_energy.config import BOMBA_HORAS_ON, TETOS_KW
 
 
 # --- reset / step basicos ---------------------------------------------------
@@ -135,7 +135,7 @@ def test_secador_atinge_meta_diaria(env, cfg):
 
 def test_reward_zera_quando_todos_pesos_zerados(dia_fake, tarifa_fake, cfg):
     """Sanity: se todos os pesos sao 0 e nao ha violacao, reward deve ser 0."""
-    from environment.energy_env import FazendaEnergyEnv
+    from smarty_energy.environment import FazendaEnergyEnv
 
     cfg_zero = dict(cfg)
     for k in ("w_custo", "w_estresse", "pen_soc", "pen_teto", "pen_pcc",

@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from agents.qlearning_agent import AgenteQL, IQLSystem
-from config import CONFIG
+from smarty_energy.agents import AgenteQL, IQLSystem
+from smarty_energy.config import CONFIG
 
 
 # --- AgenteQL: aprendizado --------------------------------------------------
@@ -94,7 +94,7 @@ def test_iqlsystem_cria_3_agentes(iql):
 
 def test_iqlsystem_treinar_propaga_soc(dia_fake, tarifa_fake, cfg):
     """SOC final do ep N vira inicial do ep N+1."""
-    from environment.energy_env import FazendaEnergyEnv
+    from smarty_energy.environment import FazendaEnergyEnv
     cfg = dict(cfg, n_episodios=2, epsilon_inicial=0.0)  # determinismo
     iql = IQLSystem(cfg)
     sumario = iql.treinar([dia_fake], tarifa_fake, FazendaEnergyEnv)

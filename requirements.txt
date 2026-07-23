@@ -1,7 +1,20 @@
+# Núcleo (pipeline offline: treino, avaliação, métricas)
 numpy>=1.24
 pandas>=2.0
-matplotlib>=3.7
 openpyxl>=3.1
 python-dotenv>=1.0
-dash>=2.16
-plotly>=5.20
+
+# Visualização e dashboards
+matplotlib>=3.7     # figuras do pipeline e do dashboard tkinter
+dash>=2.16          # dashboard web de BI (main.py --web)
+plotly>=5.20        # gráficos do Dash e do Streamlit
+
+# Camada MCP (servidor de tools + dashboard cliente)
+mcp>=1.9.0          # smarty_energy/mcp/server.py e o cliente do dashboard
+streamlit>=1.30     # dashboard cliente MCP
+
+# Testes
+pytest>=8.0
+
+# Opcional — só para o braço "LLM-direto" do benchmark (llm_policy.py).
+# anthropic>=0.40

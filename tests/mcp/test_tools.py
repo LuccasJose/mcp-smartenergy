@@ -1,7 +1,7 @@
 """Tools do servidor MCP (configure_*, compare_strategies, health_report).
 
-O servidor real puxa dataset do Google Sheets no import. Para isolar,
-monkey-patchamos `carregar_dados` antes de re-importar o modulo `server`.
+O servidor real carrega o dataset no import. Para isolar, monkey-patchamos
+`carregar_dados` antes de re-importar o modulo do servidor.
 """
 
 import json
@@ -9,29 +9,27 @@ import sys
 
 import pytest
 
+_SERVER_MOD = "smarty_energy.mcp.server"
+
 
 @pytest.fixture
 def srv(monkeypatch, dia_fake, tarifa_fake):
-    """Importa server.py com dataset substituido por fixtures sinteticas."""
-    from environment import data_loader
+    """Importa o servidor com o dataset substituido por fixtures sinteticas."""
+    from smarty_energy import data_loader
 
     def fake_carregar(*_args, **_kwargs):
-        meta = {
-            "n_dias": 7, "id_fazenda": "TEST",
-            "data_inicio": "2025-01-01", "data_fim": "2025-01-07",
-            "tarifa_min_rs_kwh": 0.70, "tarifa_max_rs_kwh": 1.10,
-            "horas_pico": [18, 19, 20],
-        }
-        return [dia_fake.copy() for _ in range(7)], tarifa_fake.copy(), meta
+        return [dia_fake.copy() for _ in range(7)], tarifa_fake.copy()
 
     monkeypatch.setattr(data_loader, "carregar_dados", fake_carregar)
-    sys.modules.pop("server", None)
-    import server
+    sys.modules.pop(_SERVER_MOD, None)
+    import importlib
+    server = importlib.import_module(_SERVER_MOD)
 
     # Garante pesos no default pra cada teste (CONFIG eh global mutavel)
-    from config import CONFIG
+    from smarty_energy.config import CONFIG
     for k, v in server._DEFAULT_REWARD_WEIGHTS.items():
         CONFIG[k] = v
+        server.iql.cfg[k] = v
     return server
 
 
@@ -51,7 +49,7 @@ def test_reward_weights_valor_negativo_erra(srv):
 
 
 def test_reward_weights_valido_persiste(srv):
-    from config import CONFIG
+    from smarty_energy.config import CONFIG
     novo = 99.0
     out = json.loads(srv.configure_reward_weights(w_custo=novo))
     assert out["status"] == "pesos atualizados"

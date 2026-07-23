@@ -1,3 +1,4 @@
+import copy
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -84,3 +85,37 @@ TETOS_KW = {0: 20.0, 1: 30.0, 2: 40.0}  # conservador / moderado / liberal
 # Cronograma fixo da bomba — 4 ciclos de 2h igualmente espaçados (6h),
 # evitando o pico tarifário (18-20h). Horas ON: 3-4, 9-10, 15-16, 21-22.
 BOMBA_HORAS_ON = frozenset({3, 4, 9, 10, 15, 16, 21, 22})
+
+# ──────────────────────────────────────────────────────────────
+# Espaços de ação — fonte única (agentes, servidor MCP e schema das tools)
+# ──────────────────────────────────────────────────────────────
+N_ACOES_ARMAZENAMENTO = 3   # 0=carregar, 1=manter, 2=descarregar
+N_ACOES_CONSUMO       = 8   # bitmask 3 bits: pivô(1), bomba(2), secador(4)
+N_ACOES_GERENTE       = 3   # 0=conservador, 1=moderado, 2=liberal
+
+
+def ajustar_decay(cfg: dict = CONFIG, n_episodios: int = None) -> dict:
+    """Copia `cfg` para um treino de `n_episodios`, reescalando o decaimento de ε.
+
+    O `epsilon_decay` do CONFIG é calibrado para o treino longo do pipeline
+    (100.000 episódios). Em treinos curtos — os do servidor MCP e os da suíte
+    de testes — esse decaimento deixaria ε≈1.0 até o último episódio, ou seja,
+    agentes praticamente aleatórios. Aqui ele é recalculado para que ε chegue
+    perto de `epsilon_final` no fim do treino:
+
+        decay = (ε_final / ε_inicial) ** (1 / n_episodios)
+
+    Args:
+        cfg          : config base (não é modificado — a cópia é profunda).
+        n_episodios  : episódios do treino; se None, usa `cfg['n_episodios']`.
+
+    Returns:
+        Novo dict de config com `n_episodios` e `epsilon_decay` ajustados.
+    """
+    novo = copy.deepcopy(cfg)
+    n = max(1, int(n_episodios if n_episodios is not None else novo["n_episodios"]))
+    novo["n_episodios"] = n
+    eps_i, eps_f = novo["epsilon_inicial"], novo["epsilon_final"]
+    if eps_i > 0:
+        novo["epsilon_decay"] = (eps_f / eps_i) ** (1.0 / n)
+    return novo

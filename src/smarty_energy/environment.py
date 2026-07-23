@@ -12,7 +12,8 @@ Estado discreto (chave Q-table): (bucket_hora, bucket_soc, bucket_solar, bucket_
 
 Ações por agente:
   Armazenamento : 0=carregar  1=manter  2=descarregar
-  Consumo       : 0=nada  1=corta_pivo  2=corta_captacao  3=corta_ambos
+  Consumo       : bitmask de 3 bits — bit0=corta pivô, bit1=corta bomba,
+                  bit2=corta secador (0=nada … 7=corta tudo)
   Gerente       : 0=conservador(20kW)  1=moderado(30kW)  2=liberal(40kW)
 
 Restrições implementadas:
@@ -73,7 +74,15 @@ class FazendaEnergyEnv:
             "stress"   : self.fin.calcular_estresse(self.tarifa[self.hora], 0.0), # Simplificado
             "sec_ac"   : self.secador_kwh_ac,
             "bomba_h"  : self.bomba_total_h,
+            # Descritivos — não entram na discretização, mas alimentam o
+            # prompt do LLM (llm_policy) e as tools do servidor MCP.
+            "em_pico_tarifa"    : bool(self.tarifa[self.hora] > 0.9),
+            "saldo_creditos_kwh": float(self.fin.saldo_creditos),
         }
+
+    def get_full_state(self) -> dict:
+        """Estado descritivo para inspeção externa (tools MCP get_current_state)."""
+        return {**self._estado(), "hora_atual": self.hora, "done": self.hora >= 24}
 
     def discretizar(self, est: dict) -> tuple:
         h = est["hora"] // 6
@@ -94,11 +103,12 @@ class FazendaEnergyEnv:
 
         Args:
             a_arm  : ação do agente de armazenamento (0=carregar, 1=manter, 2=descarregar)
-            a_cons : ação do agente de consumo       (0=nada, 1=pivo, 2=captacao, 3=ambos)
+            a_cons : ação do agente de consumo — bitmask (1=pivô, 2=bomba, 4=secador)
             a_ger  : ação do gerente de carga        (0=20kW, 1=30kW, 2=40kW)
 
         Returns:
-            (próximo_estado, reward, done, info)
+            (próximo_estado, reward, done, info) — `info` é o registro horário
+            completo, o mesmo dict apendado em `self.historico`.
         """
         est = self._estado()
         r   = self.dados.iloc[self.hora]
@@ -325,7 +335,11 @@ class FazendaEnergyEnv:
             + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
         )
 
-        self.historico.append({
+        # Registro horário completo — é ao mesmo tempo a linha do histórico e o
+        # `info` devolvido pelo step, para que o tracker do servidor MCP e as
+        # métricas (metrics.py) leiam a MESMA estrutura, sem acessar
+        # `env.historico` por fora.
+        passo_info = {
             "hora": self.hora - 1, "soc": self.soc,
             "geracao_kw": geracao, "consumo_kw": consumo,
             "solar_kw": solar_kw, "eolico_kw": eolico_kw,
@@ -335,6 +349,8 @@ class FazendaEnergyEnv:
             "a_arm": a_arm, "a_cons": a_cons, "a_ger": a_ger,
             "bat_carga": bat_carga, "bat_descarga": bat_descarga,
             "pcc_violado": pcc_violado,
+            "soc_violado": soc_critico,
+            "teto_excedido": teto_excedido,
             # Origem da energia consumida
             "fonte_geracao_kwh": fonte_geracao_kwh,
             "fonte_bateria_kwh": fonte_bateria_kwh,
@@ -350,8 +366,14 @@ class FazendaEnergyEnv:
             "bomba_ligada"  : bomba_ligada,
             "bomba_agendada": self.hora - 1 in BOMBA_HORAS_ON,
             "sede_eco"      : sede_eco_ativo,
+            "pivo_em_lock"  : pivo_em_lock,
             "kwh_cortado"   : kwh_cortado,
-        })
+            # Estado financeiro e progresso de metas
+            "stress"            : stress_lvl,
+            "saldo_creditos_kwh": float(self.fin.saldo_creditos),
+            "secador_kwh_ac"    : self.secador_kwh_ac,
+        }
+        self.historico.append(passo_info)
 
         prox  = self._estado() if not done else est
-        return prox, reward, done, {"custo": custo, "rede_kwh": rede_kwh}
+        return prox, reward, done, passo_info

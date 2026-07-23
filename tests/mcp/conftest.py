@@ -1,4 +1,9 @@
-"""Fixtures comuns para os testes.
+"""Fixtures da suite da camada MCP.
+
+Ficam em um diretorio proprio (com conftest proprio) porque tem os mesmos
+nomes das fixtures de `tests/conftest.py` com valores diferentes: aqui o dia
+sintetico usa a bomba no nominal (15 kW) para exercitar teto e PCC, enquanto
+a suite do pacote usa cargas menores.
 
 Usamos dia sintetico em vez do dataset real para isolar testes de I/O.
 """
@@ -10,13 +15,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# Garante que a raiz do projeto esta no path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# Torna o pacote src/ importavel mesmo sem instalacao (idem tests/conftest.py)
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT / "src"))
 
-from config import CONFIG
-from environment.energy_env import FazendaEnergyEnv
-from agents.qlearning_agent import IQLSystem, AgenteQL
-from metrics.tracker import MetricsTracker
+from smarty_energy.config import CONFIG
+from smarty_energy.environment import FazendaEnergyEnv
+from smarty_energy.agents import IQLSystem, AgenteQL
+from smarty_energy.mcp.tracker import MetricsTracker
 
 
 @pytest.fixture
@@ -35,7 +41,11 @@ def tarifa_fake() -> np.ndarray:
 
 @pytest.fixture
 def dia_fake() -> pd.DataFrame:
-    """Dia sintetico com geracao e consumo constantes."""
+    """Dia sintetico com geracao e consumo constantes.
+
+    Inclui `secador_kw` (coluna da base v8): sem ela o env cairia sempre no
+    rescue do secador e as asserticoes de potencia mudariam.
+    """
     return pd.DataFrame({
         "hora":        list(range(24)),
         "solar_kw":    [10.0] * 24,
@@ -43,6 +53,7 @@ def dia_fake() -> pd.DataFrame:
         "pivo_kw":     [3.0] * 24,
         "captacao_kw": [15.0] * 24,
         "sede_kw":     [1.0] * 24,
+        "secador_kw":  [1.5] * 24,
         "silo_kw":     [0.5] * 24,
         "data":        pd.Timestamp("2025-01-01"),
     })
@@ -61,6 +72,7 @@ def dia_solar_forte() -> pd.DataFrame:
         "pivo_kw":     [3.0] * 24,
         "captacao_kw": [15.0] * 24,
         "sede_kw":     [1.0] * 24,
+        "secador_kw":  [1.5] * 24,
         "silo_kw":     [0.5] * 24,
         "data":        pd.Timestamp("2025-01-02"),
     })

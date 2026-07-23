@@ -9,7 +9,6 @@ Objetivos:
   integração (número de episódios via env var `SMARTY_TEST_EPISODIOS`).
 """
 
-import copy
 import os
 import sys
 from pathlib import Path
@@ -23,7 +22,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "src"))
 
 from smarty_energy import data_loader
-from smarty_energy.config import CONFIG
+from smarty_energy.config import CONFIG, ajustar_decay
 from smarty_energy.agents import AgenteQL
 from smarty_energy.training import treinar
 
@@ -152,17 +151,12 @@ def n_episodios_teste() -> int:
 def config_teste(n_ep: int) -> dict:
     """Copia o CONFIG e ajusta para um treino de `n_ep` episódios.
 
-    Reescala o decaimento de epsilon para que a exploração chegue perto
-    de `epsilon_final` ao fim do treino — sem isso, treinos curtos
-    ficariam quase 100% aleatórios e o RL não aprenderia nada útil.
+    Delega a `config.ajustar_decay`, que reescala o decaimento de epsilon
+    para que a exploração chegue perto de `epsilon_final` ao fim do treino —
+    sem isso, treinos curtos ficariam quase 100% aleatórios e o RL não
+    aprenderia nada útil.
     """
-    cfg = copy.deepcopy(CONFIG)
-    cfg["n_episodios"] = n_ep
-    eps_i = cfg["epsilon_inicial"]
-    eps_f = cfg["epsilon_final"]
-    # decay^n_ep ≈ eps_f/eps_i  →  decay = (eps_f/eps_i)^(1/n_ep)
-    cfg["epsilon_decay"] = (eps_f / eps_i) ** (1.0 / max(1, n_ep))
-    return cfg
+    return ajustar_decay(CONFIG, n_ep)
 
 
 def treinar_agentes(dias, tarifa, n_ep: int, seed: int = SEED) -> dict:

@@ -1,6 +1,6 @@
 """AgentesHeuristicos e SemAgente."""
 
-from agents.baselines import AgentesHeuristicos, SemAgente
+from smarty_energy.agents import AgentesHeuristicos, SemAgente
 
 
 def test_heuristico_decide_acao_para_estado(cfg):
@@ -58,7 +58,7 @@ def test_semagente_sempre_acao_fixa(cfg):
 
 
 def test_semagente_avaliar_retorna_metricas(dia_fake, tarifa_fake, cfg):
-    from environment.energy_env import FazendaEnergyEnv
+    from smarty_energy.environment import FazendaEnergyEnv
     s = SemAgente(cfg)
     metrics = s.avaliar([dia_fake], tarifa_fake, FazendaEnergyEnv, n_dias=2)
     assert metrics["n_dias"] == 2

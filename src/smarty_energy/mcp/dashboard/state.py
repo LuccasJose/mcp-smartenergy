@@ -1,7 +1,7 @@
 """Helpers para manter o estado do dashboard em st.session_state.
 
 Toda operação aqui é uma chamada de ferramenta MCP contra o servidor
-`server.py` (via `dashboard.mcp_client`) — nenhuma métrica é calculada
+`smarty_energy.mcp.server` (via `mcp_client`) — nenhuma métrica é calculada
 localmente. O servidor MCP é quem detém o dataset, as Q-tables e o
 tracker; o dashboard só armazena em cache o último payload JSON
 retornado por cada tool, para renderização.
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from dashboard.mcp_client import MCPServerError, call_tool
+from smarty_energy.mcp.dashboard.mcp_client import MCPServerError, call_tool
 
 __all__ = [
     "ensure_state", "require_setup", "conectar_mcp",

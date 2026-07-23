@@ -5,9 +5,10 @@ import pandas as pd
 
 from .config import CONFIG
 from .environment import FazendaEnergyEnv, ESPACO_ESTADOS_TOTAL
-from .agents import AgentesHeuristicos
+from .agents import AgentesHeuristicos, SemAgente
 
 _heuristica = AgentesHeuristicos()
+_sem_agente = SemAgente()
 
 
 def cobertura_estados(agentes: dict, total: int = ESPACO_ESTADOS_TOTAL) -> dict:
@@ -41,8 +42,9 @@ def rodar_sem_agente(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[di
     """
     env = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
     env.reset()
+    a_arm, a_cons, a_ger = SemAgente.ACOES_FIXAS
     for _ in range(24):
-        _, _, done, _ = env.step(a_arm=1, a_cons=0, a_ger=2)
+        _, _, done, _ = env.step(a_arm, a_cons, a_ger)
         if done:
             break
     return env.historico
@@ -149,3 +151,28 @@ def identificar_cenarios(dias: list[pd.DataFrame]) -> dict[str, int]:
         "ensolarado"  : int(np.argmax(ger_dia)),
         "alto_consumo": int(np.argmax(razao)),
     }
+
+
+def classificar_dia(idx: int, dias: list[pd.DataFrame]) -> str:
+    """Categoria de um dia usando quartis da geração e do consumo do mês.
+
+    Enquanto `identificar_cenarios` devolve só os três dias extremos, esta
+    função etiqueta qualquer dia — usada pelo servidor MCP para agrupar as
+    métricas por cenário.
+
+    Returns:
+        'NUBLADO' | 'ENSOLARADO' | 'ALTO CONSUMO' | 'EQUILIBRADO'
+    """
+    ger_dia  = np.array([d["solar_kw"].sum() + d["eolico_kw"].sum() for d in dias])
+    cons_dia = np.array([(d["pivo_kw"] + d["captacao_kw"] + d["sede_kw"] + d["silo_kw"]).sum()
+                         for d in dias])
+    g, c = ger_dia[idx], cons_dia[idx]
+    q25_g, q75_g = np.quantile(ger_dia, [0.25, 0.75])
+    q75_c        = np.quantile(cons_dia, 0.75)
+    if g <= q25_g:
+        return "NUBLADO"
+    if c >= q75_c and g >= q75_g:
+        return "ALTO CONSUMO"
+    if g >= q75_g:
+        return "ENSOLARADO"
+    return "EQUILIBRADO"
