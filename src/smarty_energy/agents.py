@@ -352,8 +352,11 @@ class IQLSystem:
     """
 
     def __init__(self, cfg: dict = CONFIG):
-        self.cfg = cfg
-        self.agentes = construir_agentes(cfg)
+        # Cópia: `reconfigurar` escreve em self.cfg, e mutar o CONFIG global a
+        # partir daí afetaria o pipeline inteiro. Quem precisa propagar (como o
+        # servidor MCP, em configure_reward_weights) atualiza os dois na mão.
+        self.cfg = dict(cfg)
+        self.agentes = construir_agentes(self.cfg)
         self.n_episodios = cfg["n_episodios"]
         self.soc_propagado = cfg["soc_inicial_pct"]   # SOC inicial do próximo episódio
         # True quando alguém fixou epsilon_decay explicitamente — nesse caso
@@ -404,7 +407,7 @@ class IQLSystem:
             ag.q_table = defaultdict(lambda n=ag.n_acoes: np.zeros(n))
             ag.n_updates = 0
             ag.td_errors = []
-            ag.epsilon = ag.cfg["epsilon_inicial"]
+            ag.epsilon = self.cfg["epsilon_inicial"]
 
     # -- Treino e avaliação ---------------------------------------------
 
