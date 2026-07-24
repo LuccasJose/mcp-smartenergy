@@ -7,6 +7,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
+from .agents import avaliar_politica
 from .config import CONFIG
 from .environment import FazendaEnergyEnv
 
@@ -63,6 +64,8 @@ def treinar(
     tracker=None,
     tracker_key: str = "iql_treino",
     log=None,
+    eval_greedy_cada: int | None = None,
+    dias_selecao: list[pd.DataFrame] | None = None,
 ) -> dict:
     """Treina os três agentes por `cfg['n_episodios']` episódios.
 
@@ -75,11 +78,19 @@ def treinar(
     dia anterior. Os dias são percorridos em ordem (ep % len(dias)),
     reiniciando o ciclo após o último dia do mês.
 
-    Early stopping: a cada episódio, calcula a média móvel do custo
-    sobre os últimos `EARLY_STOP_WINDOW` episódios; se o valor atual
-    for o melhor já observado (após `min_ep_to_save` episódios), faz
-    snapshot das Q-tables. Ao final, restaura as Q-tables do snapshot
-    com menor custo médio — protege contra drift do IQL+Hysteretic.
+    Seleção de modelo (o que sai do treino)
+    ---------------------------------------
+    A cada `eval_greedy_cada` episódios a política **greedy** é avaliada nos
+    dias de seleção, e o melhor checkpoint é restaurado no fim. Isso substitui
+    o critério antigo, que escolhia pela média móvel do custo *durante* o
+    treino — número medido com ε-greedy ativo, que na prática não distingue
+    política boa de ruim: medido em 3 sementes × 100k episódios, o custo de
+    treino ficou cravado em ~R$74/dia enquanto a política greedy oscilava
+    entre R$53 e R$89/dia. Trocar o critério vale ~18 % de custo.
+
+    O treino também não melhora depois de ~10-15 mil episódios: os melhores
+    checkpoints observados ficaram entre 2 mil e 13 mil, e daí em diante a
+    curva só oscila. Horizontes muito longos gastam tempo sem retorno.
 
     Args:
         dias        : lista de DataFrames diários (saída de carregar_dados)
@@ -92,10 +103,17 @@ def treinar(
         tracker_key : rótulo do agente no tracker
         log         : callable de saída (None = print). O servidor MCP passa um
                       log em stderr para não poluir o canal do protocolo.
+        eval_greedy_cada : intervalo (em episódios) da avaliação greedy que
+                      seleciona o checkpoint. None = ~100 avaliações no treino;
+                      0 desliga a seleção (fica com a política do último episódio).
+        dias_selecao : dias usados na avaliação de seleção. None = todos.
+                      Passe um subconjunto para não selecionar no mesmo conjunto
+                      em que os resultados serão reportados.
 
     Returns:
         dict de histórico com as chaves: 'rewards', 'custos', 'epsilons'
-        (listas por episódio), 'n_episodios', 'best_ep', 'best_custo_med' e
+        (listas por episódio), 'n_episodios', 'best_ep', 'best_custo_med'
+        (custo greedy do checkpoint escolhido), 'curva_greedy' e
         'soc_final_pct'.
     """
     if env_cls is None:
@@ -109,16 +127,34 @@ def treinar(
     n_ep         = cfg["n_episodios"]
     soc_proximo  = cfg["soc_inicial_pct"]   # SOC inicial do 1º episódio
 
-    # ── Early stopping: snapshot da melhor política observada ──────
-    # A janela é fixa de propósito: com janelas curtas o save-best escolheria
-    # um checkpoint ainda em plena exploração (ε alto), cujo custo médio baixo
-    # não se traduz na política greedy. Treinos com menos de 1000 episódios
-    # simplesmente não geram snapshot.
-    EARLY_STOP_WINDOW = 1000           # janela da média móvel
-    min_ep_to_save    = max(EARLY_STOP_WINDOW, n_ep // 5)  # ignora primeiros 20%
-    best_custo_med    = float("inf")
+    # ── Seleção de modelo por avaliação greedy ─────────────────────
+    # ~100 avaliações ao longo do treino, com piso de 100 episódios entre elas
+    # (cada avaliação custa 31 dias × 24 passos — barato perto do treino).
+    if eval_greedy_cada is None:
+        eval_greedy_cada = max(100, n_ep // 100)
+    dias_sel = dias_selecao if dias_selecao is not None else dias
+
+    best_custo_greedy = float("inf")
     best_ep           = -1
     best_state        = None           # snapshot das q_tables
+    curva_greedy      = []             # [(ep, custo_greedy)] — diagnóstico
+
+    def _custo_greedy() -> float:
+        """Custo médio diário da política greedy nos dias de seleção.
+
+        Mesmo protocolo do número reportado pelo projeto (`evaluation.rodar_rl`):
+        SOC reinicia em cada dia, sem propagação.
+        """
+        def escolher(env, est):
+            s = env.discretizar(est)
+            return (agentes["armazenamento"].agir(s, explorando=False),
+                    agentes["consumo"].agir(s,       explorando=False),
+                    agentes["gerente"].agir(s,       explorando=False))
+
+        res = avaliar_politica(escolher, dias_sel, tarifa_24h, cfg=cfg,
+                               env_cls=env_cls, n_dias=len(dias_sel),
+                               propagar_soc=False)
+        return res["custo_medio_dia_rs"]
 
     t0 = time.perf_counter()
     for ep in range(n_ep):
@@ -164,11 +200,12 @@ def treinar(
                 epsilon=agentes["armazenamento"].epsilon, cenario="REAL",
             )
 
-        # \u2500\u2500 Early-stopping: snapshot quando a m\u00e9dia m\u00f3vel atinge novo m\u00ednimo \u2500\u2500
-        if (ep + 1) >= EARLY_STOP_WINDOW:
-            c_movel = float(np.mean(custos_hist[-EARLY_STOP_WINDOW:]))
-            if (ep + 1) >= min_ep_to_save and c_movel < best_custo_med:
-                best_custo_med = c_movel
+        # \u2500\u2500 Sele\u00e7\u00e3o: avalia a pol\u00edtica greedy e guarda a melhor \u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        if eval_greedy_cada and (ep + 1) % eval_greedy_cada == 0:
+            c_greedy = _custo_greedy()
+            curva_greedy.append((ep + 1, c_greedy))
+            if c_greedy < best_custo_greedy:
+                best_custo_greedy = c_greedy
                 best_ep = ep + 1
                 best_state = {
                     nome: copy.deepcopy(dict(ag.q_table))
@@ -183,29 +220,30 @@ def treinar(
             c_med = np.mean(custos_hist[-w:])
             eps   = agentes["armazenamento"].epsilon
             n_est = agentes["armazenamento"].n_estados
-            best_tag = f"  [best ep {best_ep}: R${best_custo_med:.2f}]" if best_state else ""
+            best_tag = (f"  [best ep {best_ep}: greedy R${best_custo_greedy:.2f}]"
+                        if best_state else "")
             log(
                 f"Ep {ep+1:>6}/{n_ep}  reward={r_med:>8.2f}  "
                 f"custo=R${c_med:>5.2f}  \u03b5={eps:.3f}  estados={n_est}{best_tag}"
             )
 
-    # \u2500\u2500 Restaura Q-tables do melhor checkpoint observado \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # \u2500\u2500 Restaura Q-tables do melhor checkpoint greedy \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    custo_greedy_final = _custo_greedy() if eval_greedy_cada else None
     if best_state is not None:
-        custo_final = float(np.mean(custos_hist[-EARLY_STOP_WINDOW:]))
-        log(
-            f"\n  Early stopping: restaurando Q-tables do ep {best_ep} "
-            f"(custo m\u00e9dio R${best_custo_med:.2f})"
-        )
-        log(f"  Custo m\u00e9dio nos \u00faltimos {EARLY_STOP_WINDOW} ep: R${custo_final:.2f}  "
-            f"(ganho do checkpoint: R${custo_final - best_custo_med:+.2f})")
+        log(f"\n  Sele\u00e7\u00e3o: restaurando Q-tables do ep {best_ep} "
+            f"(greedy R${best_custo_greedy:.2f}/dia)")
+        log(f"  Pol\u00edtica do \u00faltimo epis\u00f3dio: R${custo_greedy_final:.2f}/dia  "
+            f"(ganho da sele\u00e7\u00e3o: R${custo_greedy_final - best_custo_greedy:+.2f})")
         for nome, snapshot in best_state.items():
             ag = agentes[nome]
             ag.q_table = defaultdict(lambda n=ag.n_acoes: np.zeros(n), snapshot)
+    elif eval_greedy_cada:
+        log("\n  [aviso] Sem snapshot \u2014 treino mais curto que o intervalo de avalia\u00e7\u00e3o")
     else:
-        log(f"\n  [aviso] Sem snapshot \u2014 treino muito curto ou sem melhora detectada")
+        log("\n  [aviso] Sele\u00e7\u00e3o greedy desligada \u2014 fica a pol\u00edtica do \u00faltimo epis\u00f3dio")
 
-    # M\u00e9tricas-resumo do treino (m\u00e9dias da janela final de early stopping)
-    janela = min(EARLY_STOP_WINDOW, len(custos_hist))
+    # M\u00e9tricas-resumo do treino (m\u00e9dias da janela final)
+    janela = min(1000, len(custos_hist))
     custo_final  = float(np.mean(custos_hist[-janela:]))  if custos_hist  else None
     reward_final = float(np.mean(rewards_hist[-janela:])) if rewards_hist else None
     duracao_s = round(time.perf_counter() - t0, 1)
@@ -231,7 +269,13 @@ def treinar(
         "epsilons": eps_hist,
         "n_episodios": n_ep,
         "best_ep" : best_ep,
-        "best_custo_med": best_custo_med,
+        # Custo greedy (R$/dia) do checkpoint escolhido — mesma chave de antes,
+        # agora com um número que reflete a política que de fato sai do treino.
+        "best_custo_med": best_custo_greedy if best_state else None,
+        "criterio_selecao": "greedy" if eval_greedy_cada else "nenhum",
+        "curva_greedy": curva_greedy,
+        "custo_greedy_ultimo_ep": custo_greedy_final,
+        "n_dias_selecao": len(dias_sel),
         "soc_final_pct": float(soc_proximo),
         "custo_final": custo_final,
         "reward_final": reward_final,
