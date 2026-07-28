@@ -5,7 +5,10 @@ from .agents import (
 )
 from .data_loader import carregar_dados, descrever_base
 from .training import treinar
-from .evaluation import rodar_heuristico, rodar_rl, resumo_mes
+from .evaluation import (
+    rodar_heuristico, rodar_rl, resumo_mes,
+    rodar_sem_agente_mes, rodar_heuristico_mes, rodar_rl_mes,
+)
 from . import visualization
 from . import runs
 
@@ -25,6 +28,9 @@ __all__ = [
     "treinar",
     "rodar_heuristico",
     "rodar_rl",
+    "rodar_sem_agente_mes",
+    "rodar_heuristico_mes",
+    "rodar_rl_mes",
     "resumo_mes",
     "visualization",
     "runs",

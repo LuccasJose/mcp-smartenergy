@@ -43,9 +43,8 @@ from smarty_energy.data_loader import carregar_dados
 from smarty_energy.agents import construir_agentes
 from smarty_energy.training import treinar
 from smarty_energy.evaluation import (
-    rodar_sem_agente,
-    rodar_heuristico,
-    rodar_rl,
+    rodar_sem_agente_mes,
+    rodar_heuristico_mes,
     resumo_mes,
     delta_pct,
     identificar_cenarios,
@@ -166,8 +165,9 @@ def main(replot: bool = False, web: bool = False, run_id: str | None = None) -> 
 
     # ── 3. Avaliação das baselines (independem do run) ────────────
     print("\nAvaliando em todos os dias (Sem Agente, Heurístico e RL)...")
-    RES_S = [rodar_sem_agente(d, TARIFA) for d in DIAS]
-    RES_H = [rodar_heuristico(d, TARIFA) for d in DIAS]
+    print("  (SoC propaga entre dias — continuidade real da bateria)")
+    RES_S = rodar_sem_agente_mes(DIAS, TARIFA)
+    RES_H = rodar_heuristico_mes(DIAS, TARIFA)
     CS, RS, VS, RWS = resumo_mes(RES_S)
     CH, RH, VH, RWH = resumo_mes(RES_H)
 

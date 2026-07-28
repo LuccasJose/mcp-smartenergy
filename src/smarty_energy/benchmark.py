@@ -33,7 +33,8 @@ from datetime import datetime
 
 from .config import CONFIG, OUTPUT_DIR
 from .evaluation import (
-    rodar_sem_agente, rodar_heuristico, rodar_rl, rodar_llm, resumo_mes,
+    rodar_sem_agente_mes, rodar_heuristico_mes, rodar_rl_mes, rodar_llm_mes,
+    resumo_mes,
 )
 from .metrics import serie_por_dia
 
@@ -196,16 +197,16 @@ def rodar_benchmark(
     """
     preco = preco or PrecoModelo()
 
-    # -- Braços determinísticos (1 execução) --
-    res_s = [rodar_sem_agente(d, tarifa) for d in dias]
-    res_h = [rodar_heuristico(d, tarifa) for d in dias]
-    res_r = [rodar_rl(d, tarifa, agentes_rl) for d in dias]
+    # -- Braços determinísticos (SoC propaga entre dias, como no treino) --
+    res_s = rodar_sem_agente_mes(dias, tarifa)
+    res_h = rodar_heuristico_mes(dias, tarifa)
+    res_r = rodar_rl_mes(dias, tarifa, agentes_rl)
 
     # -- Braço LLM (n repetições, estocástico) --
     rep_resumos, rep_custos_dia, rep_op = [], [], []
     for _ in range(max(1, n_repeticoes)):
         politica_llm.reset_eventos()
-        res_l = [rodar_llm(d, tarifa, politica_llm) for d in dias]
+        res_l = rodar_llm_mes(dias, tarifa, politica_llm)
         rep_resumos.append(resumo_mes(res_l))
         rep_custos_dia.append(custos_por_dia(res_l))
         rep_op.append(politica_llm.resumo_operacional())

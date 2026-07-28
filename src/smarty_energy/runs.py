@@ -126,11 +126,12 @@ def resultados_rl(run_id: str, dias, tarifa, cfg=None) -> tuple[list, dict]:
     """
     from .agents import construir_agentes
     from .config import CONFIG
-    from .evaluation import rodar_rl
+    from .evaluation import rodar_rl_mes
 
     agentes = construir_agentes(cfg or CONFIG)
     hist = carregar_run(run_id, agentes)
-    res_r = [rodar_rl(d, tarifa, agentes) for d in dias]
+    # SoC propaga entre dias — mesma continuidade real do treino.
+    res_r = rodar_rl_mes(dias, tarifa, agentes)
     return res_r, hist
 
 

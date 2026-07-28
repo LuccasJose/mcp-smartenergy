@@ -142,8 +142,10 @@ def treinar(
     def _custo_greedy() -> float:
         """Custo médio diário da política greedy nos dias de seleção.
 
-        Mesmo protocolo do número reportado pelo projeto (`evaluation.rodar_rl`):
-        SOC reinicia em cada dia, sem propagação.
+        Propaga o SoC entre dias — a mesma continuidade real do treino e da
+        avaliação oficial (`evaluation.rodar_rl_mes`). Selecionar sob a mesma
+        dinâmica em que a política roda evita escolher um checkpoint que só é
+        bom quando cada dia começa com a bateria reiniciada.
         """
         def escolher(env, est):
             s = env.discretizar(est)
@@ -153,7 +155,7 @@ def treinar(
 
         res = avaliar_politica(escolher, dias_sel, tarifa_24h, cfg=cfg,
                                env_cls=env_cls, n_dias=len(dias_sel),
-                               propagar_soc=False)
+                               propagar_soc=True)
         return res["custo_medio_dia_rs"]
 
     t0 = time.perf_counter()

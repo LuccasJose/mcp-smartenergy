@@ -33,15 +33,19 @@ def cobertura_estados(agentes: dict, total: int = ESPACO_ESTADOS_TOTAL) -> dict:
             "fracao": n / total if total else 0.0}
 
 
-def rodar_sem_agente(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[dict]:
+def rodar_sem_agente(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray,
+                     soc_inicial: float | None = None) -> list[dict]:
     """Baseline SEM otimização — a fazenda 'como está hoje'.
 
     Comportamento fixo: bateria em modo 'manter' (sem gestão), nenhuma máquina
     cortada e teto de consumo liberal. Serve como referência de custo para
     comparar Heurístico e RL.
+
+    `soc_inicial` permite encadear dias (ver `rodar_sem_agente_mes`); None usa
+    o SoC inicial padrão do CONFIG.
     """
     env = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
-    env.reset()
+    env.reset(soc_inicial=soc_inicial)
     a_arm, a_cons, a_ger = SemAgente.ACOES_FIXAS
     for _ in range(24):
         _, _, done, _ = env.step(a_arm, a_cons, a_ger)
@@ -50,14 +54,15 @@ def rodar_sem_agente(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[di
     return env.historico
 
 
-def rodar_heuristico(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[dict]:
+def rodar_heuristico(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray,
+                     soc_inicial: float | None = None) -> list[dict]:
     """Executa os agentes heurísticos em um dia completo.
 
     Returns:
         historico — lista de 24 dicts com métricas horárias
     """
     env = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
-    est = env.reset()
+    est = env.reset(soc_inicial=soc_inicial)
     for _ in range(24):
         stress = _heuristica.stress_financeiro(est)
         a_arm  = _heuristica.armazenamento(est)
@@ -69,14 +74,15 @@ def rodar_heuristico(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray) -> list[di
     return env.historico
 
 
-def rodar_rl(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, agentes: dict) -> list[dict]:
+def rodar_rl(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, agentes: dict,
+             soc_inicial: float | None = None) -> list[dict]:
     """Executa os agentes RL treinados em modo greedy (sem exploração).
 
     Returns:
         historico — lista de 24 dicts com métricas horárias
     """
     env    = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
-    est    = env.reset()
+    est    = env.reset(soc_inicial=soc_inicial)
     s_disc = env.discretizar(est)
     for _ in range(24):
         a_arm  = agentes["armazenamento"].agir(s_disc, explorando=False)
@@ -89,7 +95,42 @@ def rodar_rl(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, agentes: dict) -> 
     return env.historico
 
 
-def rodar_llm(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, politica) -> list[dict]:
+# ──────────────────────────────────────────────────────────────
+# Execução mensal com continuidade da bateria (SoC propagado)
+# ──────────────────────────────────────────────────────────────
+
+def _rodar_mes(dias, rodar_dia, propagar_soc: bool) -> list[list[dict]]:
+    """Roda `rodar_dia(dia, soc_inicial)` em todos os dias, na ordem.
+
+    Com `propagar_soc=True`, o SoC do fim de um dia inicia o próximo —
+    a mesma continuidade real usada no treino (`training.treinar`). Devolve a
+    lista de históricos por dia (mesmo formato de `[rodar_x(d, t) for d in dias]`),
+    que as visualizações consomem.
+    """
+    resultados: list[list[dict]] = []
+    soc = CONFIG["soc_inicial_pct"]
+    for dia in dias:
+        hist = rodar_dia(dia, soc if propagar_soc else None)
+        resultados.append(hist)
+        if propagar_soc and hist:
+            soc = hist[-1]["soc"]     # SoC ao fim da hora 23 → início do dia seguinte
+    return resultados
+
+
+def rodar_sem_agente_mes(dias, tarifa_24h, *, propagar_soc: bool = True) -> list[list[dict]]:
+    return _rodar_mes(dias, lambda d, s: rodar_sem_agente(d, tarifa_24h, s), propagar_soc)
+
+
+def rodar_heuristico_mes(dias, tarifa_24h, *, propagar_soc: bool = True) -> list[list[dict]]:
+    return _rodar_mes(dias, lambda d, s: rodar_heuristico(d, tarifa_24h, s), propagar_soc)
+
+
+def rodar_rl_mes(dias, tarifa_24h, agentes, *, propagar_soc: bool = True) -> list[list[dict]]:
+    return _rodar_mes(dias, lambda d, s: rodar_rl(d, tarifa_24h, agentes, s), propagar_soc)
+
+
+def rodar_llm(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, politica,
+              soc_inicial: float | None = None) -> list[dict]:
     """Executa uma PoliticaLLM em um dia completo (braço 'com MCP').
 
     Clone de ``rodar_rl`` trocando apenas o decisor: o LLM escolhe as 3 ações a
@@ -104,13 +145,17 @@ def rodar_llm(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray, politica) -> list
         historico — lista de 24 dicts com métricas horárias (idêntico a rodar_rl).
     """
     env = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
-    est = env.reset()
+    est = env.reset(soc_inicial=soc_inicial)
     for _ in range(24):
         a_arm, a_cons, a_ger = politica.agir(est)
         est, _, done, _ = env.step(a_arm, a_cons, a_ger)
         if done:
             break
     return env.historico
+
+
+def rodar_llm_mes(dias, tarifa_24h, politica, *, propagar_soc: bool = True) -> list[list[dict]]:
+    return _rodar_mes(dias, lambda d, s: rodar_llm(d, tarifa_24h, politica, s), propagar_soc)
 
 
 def resumo_mes(historicos: list[list[dict]]) -> tuple[float, float, float, float]:
