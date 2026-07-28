@@ -1,8 +1,8 @@
-"""Pagina Overview — health_report renderizado em cards.
+"""Página Overview — health_report renderizado em cards.
 
 Reproduz visualmente o veredito que um LLM-juiz veria via `health_report`.
-Toda a pagina eh construida a partir de DUAS chamadas MCP (health_report +
-get_dataset_info) — nenhum calculo de metrica acontece no dashboard.
+Toda a página é construída a partir de DUAS chamadas MCP (health_report +
+get_dataset_info) — nenhum cálculo de métrica acontece no dashboard.
 """
 
 import sys
@@ -17,7 +17,7 @@ if str(_SRC) not in sys.path:
 from smarty_energy.mcp.dashboard.state import require_setup, health_report, get_dataset_info, MCPServerError
 
 st.title("Overview — Veredito do LLM-juiz")
-st.caption("Cobertura, convergencia e comparacao com baselines em um so painel — via MCP.")
+st.caption("Cobertura, convergência e comparação com baselines em um só painel — via MCP.")
 
 if not require_setup():
     st.stop()
@@ -49,7 +49,7 @@ for nome, info in hr["agentes"].items():
         cols[1].metric("Estados visitados", info["n_estados_visitados"])
         cols[2].metric("Cobertura", f"{cob_pct:.1f} %")
         cols[3].metric("n_updates", info["n_updates"])
-        cols[4].metric("TD-error |medio|",
+        cols[4].metric("TD-error |médio|",
                         f"{info['td_error_recente']['td_abs_medio']:.2f}")
         cols[0].caption(f"epsilon = {info['epsilon']:.3f}")
 
@@ -60,10 +60,10 @@ st.subheader("Treino")
 treino = hr["treino"]
 if "n_episodios" in treino:
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Episodios", treino["n_episodios"])
-    c2.metric("Reward medio (ultimos 50)",
+    c1.metric("Episódios", treino["n_episodios"])
+    c2.metric("Reward médio (últimos 50)",
                 f"{treino['reward_media_ultimos_50']:.2f}")
-    c3.metric("Custo medio (ultimos 50)",
+    c3.metric("Custo médio (últimos 50)",
                 f"R${treino['custo_medio_ultimos_50_rs']:.2f}")
     c4.metric("Epsilon final", f"{treino['epsilon_final']:.3f}")
 else:
@@ -72,26 +72,26 @@ else:
 st.divider()
 
 # ── Avaliacao ─────────────────────────────────────────────────────────────
-st.subheader("Avaliacao atual (iql_eval)")
+st.subheader("Avaliação atual (iql_eval)")
 eval_m = hr["avaliacao_atual"]
 if "n_dias" in eval_m:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Dias", eval_m["n_dias"])
-    c2.metric("Custo medio", f"R${eval_m['custo_medio_dia_rs']:.2f}/dia")
-    c3.metric("Rede media", f"{eval_m['rede_media_dia_kwh']:.0f} kWh/dia")
-    c4.metric("Violacoes PCC", eval_m.get("violacoes_pcc_total", 0))
+    c2.metric("Custo médio", f"R${eval_m['custo_medio_dia_rs']:.2f}/dia")
+    c3.metric("Rede média", f"{eval_m['rede_media_dia_kwh']:.0f} kWh/dia")
+    c4.metric("Violações PCC", eval_m.get("violacoes_pcc_total", 0))
     c5_, c6_, c7_, c8_ = st.columns(4)
-    c5_.metric("Violacoes SOC", eval_m.get("violacoes_soc_total_h", 0))
+    c5_.metric("Violações SOC", eval_m.get("violacoes_soc_total_h", 0))
     c6_.metric("kWh cortado", f"{eval_m.get('kwh_cortado_total', 0):.0f}")
-    c7_.metric("Reward medio", f"{eval_m['reward_medio_dia']:.2f}")
+    c7_.metric("Reward médio", f"{eval_m['reward_medio_dia']:.2f}")
     c8_.metric("Std custo", f"R${eval_m.get('custo_std_rs', 0):.2f}")
 else:
-    st.info("Sem avaliacao registrada. Use 'Avaliar' na sidebar.")
+    st.info("Sem avaliação registrada. Use 'Avaliar' na sidebar.")
 
 st.divider()
 
 # ── Comparacao com baselines ───────────────────────────────────────────────
-st.subheader("Comparacao com baselines")
+st.subheader("Comparação com baselines")
 comparacao = hr.get("comparacao_baselines")
 
 if comparacao:
@@ -100,26 +100,26 @@ if comparacao:
     c_sem = comparacao["custo_sem_agente_rs_dia"]
     c1, c2, c3 = st.columns(3)
     c1.metric("IQL (RL)", f"R${c_iql:.2f}/dia")
-    c2.metric("Heuristico", f"R${c_heur:.2f}/dia", f"{(c_iql - c_heur):+.2f}")
+    c2.metric("Heurístico", f"R${c_heur:.2f}/dia", f"{(c_iql - c_heur):+.2f}")
     c3.metric("SemAgente", f"R${c_sem:.2f}/dia", f"{(c_iql - c_sem):+.2f}")
 
     st.markdown(
-        f"**Reducao IQL vs SemAgente:** {comparacao.get('reducao_iql_vs_sem_pct', 0):.2f} % "
-        f"&nbsp;&nbsp;&nbsp; **vs Heuristico:** {comparacao.get('reducao_iql_vs_heur_pct', 0):.2f} %"
+        f"**Redução IQL vs SemAgente:** {comparacao.get('reducao_iql_vs_sem_pct', 0):.2f} % "
+        f"&nbsp;&nbsp;&nbsp; **vs Heurístico:** {comparacao.get('reducao_iql_vs_heur_pct', 0):.2f} %"
     )
 
     import plotly.graph_objects as go
     fig = go.Figure(go.Bar(
-        x=["IQL", "Heuristico", "SemAgente"],
+        x=["IQL", "Heurístico", "SemAgente"],
         y=[c_iql, c_heur, c_sem],
         text=[f"R${v:.2f}" for v in (c_iql, c_heur, c_sem)],
         textposition="outside",
     ))
-    fig.update_layout(yaxis_title="Custo medio (R$/dia)",
+    fig.update_layout(yaxis_title="Custo médio (R$/dia)",
                        margin=dict(t=10, b=30), height=350)
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("Sem comparacao. Use 'Comparar' na sidebar.")
+    st.info("Sem comparação. Use 'Comparar' na sidebar.")
 
 st.divider()
 

@@ -1,8 +1,8 @@
-"""Pagina Trace Diario — navega pelos dias, mostra trace + violacoes por hora.
+"""Página Trace Diário — navega pelos dias, mostra trace + violações por hora.
 
 Roda 1 dia via `run_episode` (tool MCP) em vez de reimplementar o loop de
-simulacao no dashboard, e le violacoes agregadas via `get_hourly_violations`.
-Nao ha nenhum FazendaEnergyEnv/IQLSystem local aqui.
+simulação no dashboard, e lê violações agregadas via `get_hourly_violations`.
+Não há nenhum FazendaEnergyEnv/IQLSystem local aqui.
 """
 
 import sys
@@ -23,8 +23,8 @@ from smarty_energy.mcp.dashboard.state import (
     describe_schema, get_hourly_violations, MCPServerError,
 )
 
-st.title("Trace Diario")
-st.caption("Navegue pelos dias do dataset, veja decisoes hora-a-hora e violacoes. Via MCP.")
+st.title("Trace Diário")
+st.caption("Navegue pelos dias do dataset, veja decisões hora-a-hora e violações. Via MCP.")
 
 if not require_setup():
     st.stop()
@@ -43,13 +43,13 @@ soc_min_pct = schema["parametros_fisicos"]["soc_min_pct"]
 n_dias = dataset["n_dias"]
 
 col_a, col_b, col_c = st.columns([3, 1, 1])
-dia_idx = col_a.slider("Dia (indice)", 0, n_dias - 1, 0)
-mode_label = col_b.selectbox("Modo", ["greedy", "exploracao"])
+dia_idx = col_a.slider("Dia (índice)", 0, n_dias - 1, 0)
+mode_label = col_b.selectbox("Modo", ["greedy", "exploração"])
 mode = "eval" if mode_label == "greedy" else "train"
 
 try:
     dia_sel = select_day(dia_idx)
-    col_c.metric("Cenario", dia_sel["categoria"])
+    col_c.metric("Cenário", dia_sel["categoria"])
 except MCPServerError as e:
     col_c.error("erro")
 
@@ -61,12 +61,12 @@ st.caption(
 )
 
 if not st.session_state.treinado:
-    st.warning("Modelo nao treinado. O agente vai jogar quase aleatorio.")
+    st.warning("Modelo não treinado. O agente vai jogar quase aleatório.")
 
-# ── Roda 1 episodio (via tool run_episode) ─────────────────────────────────
+# ── Roda 1 episódio (via tool run_episode) ─────────────────────────────────
 if st.button("Rodar dia", type="primary"):
     try:
-        with st.spinner("Executando episodio via MCP..."):
+        with st.spinner("Executando episódio via MCP..."):
             resultado = run_episode(mode=mode, dia_idx=dia_idx)
         st.session_state.trace_dia = {
             "passos": resultado["trace"],
@@ -83,7 +83,7 @@ if st.button("Rodar dia", type="primary"):
 if "trace_dia" in st.session_state and st.session_state.trace_dia:
     td = st.session_state.trace_dia
     if td["dia_idx"] != dia_idx or td["mode"] != mode:
-        st.info("Trace mostrado eh de outra simulacao — clique em 'Rodar dia' para atualizar.")
+        st.info("Trace mostrado é de outra simulação — clique em 'Rodar dia' para atualizar.")
 
     df = pd.DataFrame(td["passos"])
 
@@ -91,18 +91,18 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
     c1.metric("Reward total", f"{td['reward_total']:.2f}")
     c2.metric("Custo total", f"R${td['custo_total']:.2f}")
     c3.metric("SOC final", f"{td['soc_final']:.1f} %")
-    c4.metric("Violacoes PCC", int(df["pcc_violado"].sum()))
+    c4.metric("Violações PCC", int(df["pcc_violado"].sum()))
 
-    # ── Plot triplo: geracao/consumo, SOC, custo ──────────────────────────
+    # ── Plot triplo: geracao/consumo, SOC, custo ──────────────────────
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
                           row_heights=[0.45, 0.30, 0.25],
                           vertical_spacing=0.05,
-                          subplot_titles=("Geracao vs Consumo (kW)",
+                          subplot_titles=("Geração vs Consumo (kW)",
                                             "SOC (%)",
-                                            "Custo horario (R$)"))
+                                            "Custo horário (R$)"))
 
     fig.add_trace(go.Scatter(x=df["hora"], y=df["geracao_kw"], mode="lines+markers",
-                               name="Geracao", line=dict(color="rgb(255,127,14)")),
+                               name="Geração", line=dict(color="rgb(255,127,14)")),
                     row=1, col=1)
     fig.add_trace(go.Scatter(x=df["hora"], y=df["consumo_kw"], mode="lines+markers",
                                name="Consumo", line=dict(color="rgb(31,119,180)")),
@@ -133,7 +133,34 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
     fig.update_yaxes(title_text="R$", row=3, col=1)
     st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("Acoes hora-a-hora (a_arm, a_cons, a_ger)"):
+    # ── Uso dos equipamentos hora-a-hora (dia simulado) ─────────────────
+    st.subheader("Uso dos equipamentos hora-a-hora")
+    EQUIP_TRACE = {
+        "pivo_kw_consumido":     ("Pivô",             "rgb(31,119,180)"),
+        "captacao_kw_consumido": ("Captação (bomba)", "rgb(255,127,14)"),
+        "secador_kw_consumido":  ("Secador",          "rgb(44,160,44)"),
+        "sede_kw_consumido":     ("Sede",             "rgb(148,103,189)"),
+        "silo_kw_consumido":     ("Silo",             "rgb(140,86,75)"),
+    }
+    fig_eq = go.Figure()
+    for campo, (rotulo, cor) in EQUIP_TRACE.items():
+        if campo in df.columns:
+            fig_eq.add_trace(go.Bar(x=df["hora"], y=df[campo],
+                                      name=rotulo, marker_color=cor))
+    fig_eq.add_trace(go.Scatter(x=df["hora"], y=df["geracao_kw"],
+                                  name="Geração", mode="lines+markers",
+                                  line=dict(color="rgb(188,189,34)", width=2.5)))
+    for h_pico in df.loc[df["em_pico_tarifa"], "hora"]:
+        fig_eq.add_vrect(x0=h_pico - 0.5, x1=h_pico + 0.5,
+                          fillcolor="rgba(214,39,40,0.08)", line_width=0)
+    fig_eq.update_layout(barmode="stack", hovermode="x unified",
+                           legend=dict(orientation="h", y=1.12),
+                           yaxis_title="kW", height=380,
+                           margin=dict(t=30, b=40))
+    fig_eq.update_xaxes(title_text="Hora (faixa vermelha = pico tarifário)", dtick=1)
+    st.plotly_chart(fig_eq, use_container_width=True)
+
+    with st.expander("Ações hora-a-hora (a_arm, a_cons, a_ger)"):
         df_acoes = df[["hora", "a_arm", "a_cons", "a_ger", "tarifa",
                          "pivo_kw_consumido", "captacao_kw_consumido",
                          "secador_kw_consumido", "bat_carga", "bat_descarga"]].copy()
@@ -142,13 +169,13 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
 st.divider()
 
 # ── Violacoes agregadas por hora (via tool MCP) ───────────────────────────
-st.subheader("Violacoes por hora do dia (avaliacao atual)")
-st.caption("Heatmap agregando todos os dias da ultima evaluate ou compare.")
+st.subheader("Violações por hora do dia (avaliação atual)")
+st.caption("Heatmap agregando todos os dias da última evaluate ou compare.")
 
 opcoes_agente = {
     "iql_eval": "IQL (evaluate_agents)",
     "iql_eval_cmp": "IQL (compare_strategies)",
-    "heuristico": "Heuristico",
+    "heuristico": "Heurístico",
     "sem_agente": "SemAgente",
 }
 agente_sel = st.selectbox("Origem dos dados",

@@ -6,6 +6,15 @@ from ..config import CONFIG
 # Limiar de SOC crítico — em porcentagem (0-100), vindo da config do pacote.
 _SOC_MIN_PCT = CONFIG["soc_min_pct"]
 
+# Equipamentos rastreados nos info dicts do env (campo por máquina).
+_EQUIPAMENTOS = {
+    "pivo":     "pivo_kw_consumido",
+    "captacao": "captacao_kw_consumido",
+    "secador":  "secador_kw_consumido",
+    "sede":     "sede_kw_consumido",
+    "silo":     "silo_kw_consumido",
+}
+
 
 class MetricsTracker:
     """
@@ -239,6 +248,88 @@ class MetricsTracker:
                 "kwh_cortado_total": round(d["kwh_cortado"], 4),
             }
         return resultado
+
+    # ------------------------------------------------------------------ #
+    # Equipamentos: uso hora-a-hora e KPIs estilo BI                      #
+    # ------------------------------------------------------------------ #
+
+    def get_equipment_hourly(self, agente: str = "iql_eval") -> dict:
+        """Uso médio por hora-do-dia de cada equipamento (kW), agregando dias.
+
+        Inclui também bateria (carga/descarga), rede e geração médias, para
+        montar o painel de uso hora-a-hora dos equipamentos no dashboard.
+        """
+        passos = self.passos.get(agente, [])
+        if not passos:
+            return {"aviso": f"Nenhum passo registrado para '{agente}'"}
+
+        por_hora: dict[int, list[dict]] = defaultdict(list)
+        for p in passos:
+            por_hora[int(p.get("hora", 0))].append(p)
+
+        def media(lista, campo):
+            return float(np.mean([p.get(campo, 0.0) for p in lista])) if lista else 0.0
+
+        resultado = {}
+        for h in sorted(por_hora):
+            lst = por_hora[h]
+            resultado[h] = {
+                **{nome: round(media(lst, campo), 4)
+                   for nome, campo in _EQUIPAMENTOS.items()},
+                "bat_carga":    round(media(lst, "bat_carga"), 4),
+                "bat_descarga": round(media(lst, "bat_descarga"), 4),
+                "rede_kwh":     round(media(lst, "rede_kwh"), 4),
+                "geracao_kw":   round(media(lst, "geracao_kw"), 4),
+                "n_observacoes": len(lst),
+            }
+        return resultado
+
+    def get_equipment_stats(self, agente: str = "iql_eval") -> dict:
+        """KPIs por equipamento (lógica de BI): energia, horas ligada, pico, custo.
+
+        custo_energia_rs = Σ (kWh × tarifa da hora) — custo bruto da energia
+        consumida pelo equipamento na tarifa vigente, independente da fonte.
+        """
+        passos = self.passos.get(agente, [])
+        if not passos:
+            return {"aviso": f"Nenhum passo registrado para '{agente}'"}
+
+        n_dias = max(1, len(self.episodios.get(agente, [])) or len(passos) // 24)
+
+        equipamentos = {}
+        for nome, campo in _EQUIPAMENTOS.items():
+            kwh_total = kwh_pico = custo = 0.0
+            horas_ligada = 0
+            for p in passos:
+                kw = float(p.get(campo, 0.0))
+                if kw <= 0.0:
+                    continue
+                kwh_total += kw
+                horas_ligada += 1
+                custo += kw * float(p.get("tarifa", 0.0))
+                if p.get("em_pico_tarifa", False):
+                    kwh_pico += kw
+            equipamentos[nome] = {
+                "kwh_total": round(kwh_total, 4),
+                "kwh_medio_dia": round(kwh_total / n_dias, 4),
+                "horas_ligada_total": horas_ligada,
+                "horas_ligada_media_dia": round(horas_ligada / n_dias, 2),
+                "kwh_em_pico": round(kwh_pico, 4),
+                "pct_kwh_em_pico": round(kwh_pico / kwh_total * 100, 2) if kwh_total > 0 else 0.0,
+                "custo_energia_rs": round(custo, 4),
+            }
+
+        consumo_total = sum(e["kwh_total"] for e in equipamentos.values())
+        for e in equipamentos.values():
+            e["pct_do_consumo_total"] = (
+                round(e["kwh_total"] / consumo_total * 100, 2) if consumo_total > 0 else 0.0
+            )
+
+        return {
+            "n_dias": n_dias,
+            "consumo_total_kwh": round(consumo_total, 4),
+            "equipamentos": equipamentos,
+        }
 
     # ------------------------------------------------------------------ #
     # Snapshot completo de um episódio                                    #
