@@ -134,7 +134,11 @@ def test_secador_atinge_meta_diaria(env, cfg):
 # --- reward responde a pesos -----------------------------------------------
 
 def test_reward_zera_quando_todos_pesos_zerados(dia_fake, tarifa_fake, cfg):
-    """Sanity: se todos os pesos sao 0 e nao ha violacao, reward deve ser 0."""
+    """Sanity: com todos os pesos 0 e sem violacao, o reward vira so o offset.
+
+    Com pesos zerados o unico termo restante e o `reward_offset` constante,
+    entao a soma dos 24 passos deve ser exatamente 24 * reward_offset.
+    """
     from smarty_energy.environment import FazendaEnergyEnv
 
     cfg_zero = dict(cfg)
@@ -143,15 +147,20 @@ def test_reward_zera_quando_todos_pesos_zerados(dia_fake, tarifa_fake, cfg):
               "pen_secador_pico", "bonus_excedente", "bonus_soc_ok",
               "bonus_pivo_solar", "bonus_sec_excedente", "w_bonus_carga"):
         cfg_zero[k] = 0.0
+    cfg_zero["reward_offset"] = 7.5   # valor arbitrario nao-nulo p/ o teste
 
     env_zero = FazendaEnergyEnv(dia_fake, tarifa_fake, cfg_zero)
     env_zero.reset()
     soma_reward = 0.0
+    n = 0
     for _ in range(24):
         _, r, done, _ = env_zero.step(1, 0, 1)
         soma_reward += r
+        n += 1
         if done: break
-    assert abs(soma_reward) < 1e-6, f"reward deveria ser 0, foi {soma_reward}"
+    esperado = n * cfg_zero["reward_offset"]
+    assert abs(soma_reward - esperado) < 1e-6, \
+        f"reward deveria ser {esperado}, foi {soma_reward}"
 
 
 # --- discretizacao ----------------------------------------------------------

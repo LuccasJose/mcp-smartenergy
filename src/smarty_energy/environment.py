@@ -335,6 +335,15 @@ class FazendaEnergyEnv:
             + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
         )
 
+        # Deslocamento constante da escala do reward (item 3). O episódio tem
+        # horizonte fixo (24 passos, `done = hora >= 24`), então somar a mesma
+        # constante a todo passo é policy-preserving: o argmax de cada estado
+        # não muda. Serve para tirar o reward do regime majoritariamente
+        # negativo (que trava o hysteretic, pois os Q-values partem de 0 e só
+        # precisam descer → aprende só com beta). NÃO afeta o custo em R$
+        # (medido em `custo_r`, à parte). Default 0.0 = sem mudança.
+        reward += cfg.get("reward_offset", 0.0)
+
         # Registro horário completo — é ao mesmo tempo a linha do histórico e o
         # `info` devolvido pelo step, para que o tracker do servidor MCP e as
         # métricas (metrics.py) leiam a MESMA estrutura, sem acessar

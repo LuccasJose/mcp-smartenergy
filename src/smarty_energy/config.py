@@ -72,6 +72,21 @@ CONFIG = {
     "pen_secador_meta": 20.0,   # fallback se rescue não alcançar (defensivo)
     "pen_sede_desvio": 5.0,     # reservado para violações de clamp (defensivo)
 
+    # Deslocamento constante da escala do reward (item 3 das verificações).
+    # Horizonte fixo (24 passos) ⇒ somar constante a todo passo preservaria a
+    # política ótima NUMA Q-table convergida. Na prática (treino finito +
+    # seleção de checkpoint), o offset muda a dinâmica do hysteretic e o efeito
+    # NÃO é monotônico — medido em holdout, 8k ep, 3 sementes:
+    #   offset   0 → R$60,0/dia · |Q|≈8
+    #   offset  60 → R$56,8/dia · |Q|≈107   (melhor: centra a média em ~0)
+    #   offset 160 → R$67,6/dia · |Q|≈814   (pior: α domina, Q estoura)
+    #   offset 200 → R$68,3/dia · |Q|≈1340  (pior ainda)
+    # Ou seja: centrar a média perto de 0 ajuda (~5%); tornar TUDO positivo
+    # atrapalha. Default 0.0 mantém o comportamento histórico — mude para ~60
+    # apenas com re-treino e re-validação (muda o número oficial). NÃO altera o
+    # custo em R$ (medido em `custo_r`, à parte do reward).
+    "reward_offset": 0.0,
+
     # Shaping por ponto ótimo de cada máquina
     "pen_pivo_pico"      : 18.0, # pivô ligado em pico tarifário
     "pen_secador_pico"   : 8.0,  # secador ligado em pico tarifário (carga menor)
