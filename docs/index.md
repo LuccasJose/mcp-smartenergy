@@ -41,13 +41,19 @@ pode ser carregado pelo servidor e vice-versa.
 
 ## Resultados finais
 
-Após as otimizações de Hysteretic Q-Learning e o rebalanceamento de rewards:
+Run canônico (`outputs/runs/2026-06-19_145038`, 100 mil episódios), avaliado nos
+31 dias da base v8 com o SoC da bateria propagado entre dias:
 
 | Métrica | Resultado |
 |---|---|
-| Economia no custo diário médio | **57,2 %** |
-| Redução da dependência da rede | **64,0 %** |
-| Violações de segurança (SOC e PCC) | **Zero** |
+| Custo médio diário (RL) | **R$ 63,25** |
+| Economia no custo diário médio | **40,8 %** |
+| Redução da dependência da rede | **40,2 %** |
+| Violações de PCC | **Zero** |
+| Violações de SOC | 0,032 h/dia |
+
+Referências do mesmo protocolo: sem agente R$ 106,90/dia e heurístico
+R$ 103,35/dia.
 
 ## Por onde começar
 

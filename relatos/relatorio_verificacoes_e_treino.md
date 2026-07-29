@@ -194,6 +194,19 @@ Após todas as mudanças, sob propagação, no mesmo run e mesmos 31 dias:
 Prova de que os dois mundos continuam batendo bit a bit — não sobrou CONFIG nem
 física duplicada.
 
+**Agora travado por teste.** Essa conferência era manual — se alguém quebrasse a
+igualdade, nada avisaria. Virou `test_compare_strategies_bate_com_o_pipeline`
+(`tests/mcp/test_fisica_unificada.py`), que compara as 4 métricas do resumo
+(custo, rede, violações de SoC, reward) nas 3 estratégias, pelos dois caminhos
+independentes — `IQLSystem.avaliar` com o cfg do servidor contra `rodar_*_mes`
+com o CONFIG do pacote.
+
+O teste semeia as Q-tables de propósito: com agentes zerados, `argmax` devolve
+sempre a ação 0, a política fica degenerada em `(0,0,0)` e a bateria nunca
+descarrega — nessa condição uma divergência de capacidade da bateria passava
+despercebida. Semeado, ele pega: bateria 24→30 kWh só no MCP acusa R$0,85 de
+diferença; bomba 17,6→20 kW acusa R$2,83.
+
 ---
 
 ## Arquivos alterados
@@ -211,15 +224,33 @@ física duplicada.
 | `src/smarty_energy/__init__.py` | exporta os wrappers `*_mes` |
 | `tests/test_resultados.py`, `tests/mcp/test_env.py` | ajustados aos novos protocolos |
 
-**Testes:** 108 (57 do pacote + 51 da camada MCP), todos verdes.
+**Testes:** 116 (57 do pacote + 59 da camada MCP), todos verdes — inclusive sob
+o orçamento real de treino (`SMARTY_TEST_EPISODIOS=100000`) e com o limite de
+violação de SoC apertado 10× (`SMARTY_MAX_VIOL_SOC=0.05`): 116 passados em
+7min06s, zero pulados.
+
+> **Cuidado ao rodar a suíte.** O `dados_reais` do `tests/conftest.py` faz
+> *skip* se a base não carregar, e a base vem do Google Sheets a cada sessão.
+> Um rate limit (`HTTP 400`) já produziu um run "verde" com **35 testes pulados
+> em silêncio e exit code 0** — tudo que toca a base real ficou sem ser testado.
+> Para um resultado confiável, baixe a planilha uma vez e rode offline:
+>
+> ```powershell
+> $env:SHEET_ID = ""
+> $env:DATA_PATH = "caminho\para\base_v8.xlsx"
+> pytest -q -rs        # -rs expõe qualquer skip
+> ```
 
 ---
 
 ## Decisões em aberto (para o autor)
 
-1. **O número oficial mudou de R$66,59 para R$63,25/dia** (propagação, item 5).
-   O `README.md` ainda cita "57,2% de economia", de outra época. Atualizar os
-   textos do TCC com os números atuais é decisão do autor.
+1. ~~**O número oficial mudou de R$66,59 para R$63,25/dia**~~ — **resolvido**.
+   `README.md` e `docs/index.md` foram atualizados: economia 57,2% → **40,8%**,
+   redução da rede 64,0% → **40,2%**, e o "zero violações" virou "PCC zero ·
+   SoC 0,032 h/dia" (as três afirmações estavam erradas, não só a primeira).
+   Ambos agora declaram o run e o protocolo (SoC propagado). **Os textos do
+   próprio TCC continuam por conta do autor.**
 2. **`reward_offset` fica em 0.** Adotar ~60 renderia ~5%, mas exige re-treino
    canônico + re-validação e muda o número oficial de novo. Recomenda-se decidir
    junto com um eventual re-treino, não isolado.

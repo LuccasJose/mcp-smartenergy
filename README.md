@@ -71,10 +71,20 @@ servidor, em [docs/execucao-mcp.md](docs/execucao-mcp.md).
 
 ## Resultados
 
-Após as otimizações de Hysteretic Q-Learning e rebalanceamento de rewards, o sistema atingiu:
-*   57.2% de economia no custo diário médio.
-*   64.0% de redução na dependência da rede elétrica.
-*   Zero violações de segurança operacional (SOC e PCC).
+Run canônico (`outputs/runs/2026-06-19_145038`, 100 mil episódios), avaliado nos
+31 dias da base v8 com o SoC da bateria propagado entre dias — o dia seguinte
+começa com a carga que sobrou do anterior, a mesma dinâmica em que a política
+treina:
+
+| Métrica (média diária) | Sem agente | Heurístico | RL (IQL) |
+|---|---|---|---|
+| Custo | R$ 106,90 | R$ 103,35 | **R$ 63,25** |
+| Energia importada da rede | 154,9 kWh | — | **92,6 kWh** |
+
+*   **40,8 %** de economia no custo diário médio ante a fazenda sem gestão.
+*   **40,2 %** de redução na dependência da rede elétrica.
+*   Zero violações de PCC. O SoC fica abaixo do mínimo em **0,032 h/dia** —
+    cerca de uma hora ao longo dos 31 dias.
 
 ### Otimizações aplicadas
 
