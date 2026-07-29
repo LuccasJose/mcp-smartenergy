@@ -7,9 +7,11 @@ mudar um valor físico só de um lado, algum destes testes quebra.
 """
 
 import importlib
+import itertools
 import json
 import sys
 
+import numpy as np
 import pytest
 
 from smarty_energy import config as pkg_config
@@ -62,6 +64,67 @@ def test_describe_schema_reflete_config(srv):
 
 
 # ── Comportamento idêntico: mesmo dia, mesmas ações → mesmo histórico ──
+
+def _semear_qtables(agentes: dict, seed: int = 7) -> None:
+    """Preenche as Q-tables com valores determinísticos para todo o espaço.
+
+    Um agente recém-criado tem Q-table zerada, e `argmax` de um vetor de zeros
+    devolve sempre a ação 0 — a política fica degenerada em `(0, 0, 0)`. Semear
+    faz a política variar por estado, exercitando carga *e* descarga da bateria,
+    os cortes de carga e os três tetos do gerente.
+    """
+    rng = np.random.default_rng(seed)
+    for ag in agentes.values():
+        for estado in itertools.product(*(range(n) for n in pkg_env.BUCKETS_ESTADO)):
+            ag.q_table[estado] = rng.normal(size=ag.n_acoes)
+
+
+def test_compare_strategies_bate_com_o_pipeline(srv):
+    """As 3 estratégias custam o mesmo pelo MCP e pelo pipeline.
+
+    O teste acima trava a física passo a passo; este trava o **número que sai
+    na ponta** — o custo médio diário que o TCC reporta. Os dois caminhos são
+    independentes de propósito:
+
+      MCP      : `compare_strategies` → `IQLSystem.avaliar` → `avaliar_politica`,
+                 com o cfg do servidor (`ajustar_decay(CONFIG, …)`, um dict
+                 *copiado*, não o CONFIG do pacote);
+      pipeline : wrappers `rodar_*_mes` → `resumo_mes`, com o CONFIG do pacote.
+
+    Basta alguém mudar um parâmetro físico só de um lado, ou trocar o protocolo
+    de propagação de SoC em um dos caminhos, para os números descolarem aqui.
+    Compara as 4 métricas do resumo, não só o custo.
+    """
+    from smarty_energy.evaluation import (
+        resumo_mes, rodar_rl_mes, rodar_heuristico_mes, rodar_sem_agente_mes,
+    )
+
+    # Q-tables semeadas: sem isso os agentes zerados escolhem (0,0,0) em todo
+    # estado, e a comparação exercitaria um caminho só — nunca descarregaria a
+    # bateria, por exemplo. Com valores pseudo-aleatórios determinísticos a
+    # política varia entre estados e cobre as 3 ações de cada agente.
+    _semear_qtables(srv.iql.agentes)
+
+    dias, tarifa = srv.DIAS, srv.TARIFA_24H
+    mcp = json.loads(srv.compare_strategies(n_dias=len(dias), propagar_soc=True))
+
+    pipeline = {
+        "IQL":        resumo_mes(rodar_rl_mes(dias, tarifa, srv.iql.agentes)),
+        "Heuristico": resumo_mes(rodar_heuristico_mes(dias, tarifa)),
+        "SemAgente":  resumo_mes(rodar_sem_agente_mes(dias, tarifa)),
+    }
+    # resumo_mes devolve (custo, rede, violações, reward) — mesma ordem das
+    # chaves correspondentes em avaliar_politica.
+    chaves = ("custo_medio_dia_rs", "rede_media_dia_kwh",
+              "violacoes_soc_media_h_dia", "reward_medio_dia")
+
+    for nome, valores_pipeline in pipeline.items():
+        for chave, v_pipeline in zip(chaves, valores_pipeline):
+            v_mcp = mcp[nome][chave]
+            assert v_mcp == pytest.approx(v_pipeline, abs=1e-9), (
+                f"{nome}.{chave}: MCP {v_mcp} != pipeline {v_pipeline}"
+            )
+
 
 def test_env_do_servidor_igual_ao_do_pacote(srv, dia_fake, tarifa_fake):
     acoes = [(0, 0, 2), (1, 3, 1), (2, 5, 0), (0, 7, 2)] * 6  # 24 passos
