@@ -126,3 +126,44 @@ def test_configure_agents_aceita_validos(srv):
         assert ag.alpha == 0.2
         assert ag.gamma == 0.9
         assert ag.beta == 0.05
+
+
+# --- equipamentos + export --------------------------------------------------
+
+def test_equipment_tools_apos_compare(srv):
+    srv.configure_agents(n_episodios=2)
+    srv.train_agents()
+    srv.compare_strategies(n_dias=2)
+
+    for chave in ("iql_eval_cmp", "heuristico", "sem_agente"):
+        stats = json.loads(srv.get_equipment_stats(chave))
+        assert "equipamentos" in stats, f"stats de {chave} sem equipamentos"
+        assert set(stats["equipamentos"]) == {"pivo", "captacao", "secador",
+                                               "sede", "silo"}
+        hourly = json.loads(srv.get_equipment_hourly(chave))
+        assert "aviso" not in hourly
+        assert "0" in hourly and "23" in hourly
+
+
+def test_equipment_tools_sem_dados_avisa(srv):
+    out = json.loads(srv.get_equipment_stats("iql_eval"))
+    assert "aviso" in out
+
+
+def test_export_all_data_estrutura(srv):
+    srv.configure_agents(n_episodios=2)
+    srv.train_agents()
+    srv.compare_strategies(n_dias=2)
+
+    out = json.loads(srv.export_all_data())
+    assert "gerado_em" in out
+    assert out["dataset"]["n_dias"] == 7
+    assert "config" in out and "w_custo" in out["config"]
+    assert out["treino"] is not None
+    assert out["curva_aprendizado"] is not None
+    assert out["avaliacoes"]["iql_eval_cmp"] is not None
+    assert out["avaliacoes"]["heuristico"] is not None
+    assert out["equipamentos_kpis"]["sem_agente"] is not None
+    assert out["equipamentos_hora_a_hora"]["iql_eval_cmp"] is not None
+    # chave nunca populada fica None em vez de dict de aviso
+    assert out["avaliacoes"]["iql_eval"] is None

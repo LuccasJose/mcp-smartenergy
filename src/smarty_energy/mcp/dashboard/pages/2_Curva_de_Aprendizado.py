@@ -1,6 +1,6 @@
-"""Pagina Curva de Aprendizado — reward/custo/epsilon por episodio.
+"""Página Curva de Aprendizado — reward/custo/epsilon por episódio.
 
-Toda a pagina eh construida a partir de chamadas MCP:
+Toda a página é construída a partir de chamadas MCP:
 get_learning_curve (reward/custo/epsilon) + get_td_error_series (1 por
 agente) — nenhum dado vem de Q-tables ou tracker locais.
 """
@@ -20,7 +20,7 @@ if str(_SRC) not in sys.path:
 from smarty_energy.mcp.dashboard.state import require_setup, get_learning_curve, get_td_error_series, MCPServerError
 
 st.title("Curva de Aprendizado")
-st.caption("Reward, custo e epsilon por episodio — diagnostico de convergencia. Via MCP.")
+st.caption("Reward, custo e epsilon por episódio — diagnóstico de convergência. Via MCP.")
 
 if not require_setup():
     st.stop()
@@ -31,7 +31,7 @@ if not st.session_state.treinado:
 
 # ── Controles ─────────────────────────────────────────────────────────────
 col_a, col_b = st.columns([2, 1])
-janela = col_a.slider("Janela da media movel", 5, 200, 20, step=5)
+janela = col_a.slider("Janela da média móvel", 5, 200, 20, step=5)
 mostrar_eps = col_b.toggle("Mostrar epsilon", value=True)
 
 # ── Dados (via MCP) ─────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ except MCPServerError as e:
     st.stop()
 
 if not curva:
-    st.info("Sem episodios de treino registrados no servidor.")
+    st.info("Sem episódios de treino registrados no servidor.")
     st.stop()
 
 x = curva["episodios"]
@@ -81,14 +81,14 @@ if mostrar_eps and epsilons:
 
 fig.update_layout(hovermode="x unified", legend=dict(orientation="h", y=1.1),
                     margin=dict(t=40, b=40), height=500)
-fig.update_xaxes(title_text="Episodio")
+fig.update_xaxes(title_text="Episódio")
 fig.update_yaxes(title_text="Reward / epsilon", secondary_y=False)
 fig.update_yaxes(title_text="Custo (R$/dia)", secondary_y=True)
 st.plotly_chart(fig, use_container_width=True)
 
 # ── Convergencia: TD-error rolante (via MCP, 1 chamada por agente) ────────
-st.subheader("TD-error rolante (convergencia)")
-st.caption("Janela de 5.000 atualizacoes mais recentes por agente.")
+st.subheader("TD-error rolante (convergência)")
+st.caption("Janela de 5.000 atualizações mais recentes por agente.")
 
 AGENTES = ["armazenamento", "consumo", "gerente"]
 cols = st.columns(3)
@@ -104,7 +104,7 @@ for col, nome in zip(cols, AGENTES):
         fig_td = go.Figure()
         fig_td.add_trace(go.Scatter(y=tds_abs, mode="lines",
                                        line=dict(color="rgb(148,103,189)")))
-        fig_td.update_layout(title=f"<b>{nome}</b><br><sub>|TD| medio recente: "
+        fig_td.update_layout(title=f"<b>{nome}</b><br><sub>|TD| médio recente: "
                                        f"{float(np.mean(tds_abs[-500:])):.2f}</sub>",
                                 margin=dict(t=60, b=20), height=240,
                                 showlegend=False)

@@ -60,6 +60,47 @@ def test_peak_offpeak_separa_por_tarifa(tracker):
     assert abs(stats["fora_pico"]["custo_rs"] - 3.0) < 1e-9
 
 
+def test_equipment_hourly_agrega_medias(tracker):
+    tracker.registrar_passo({**_info_passo(0), "pivo_kw_consumido": 2.0}, agente="a")
+    tracker.registrar_passo({**_info_passo(0), "pivo_kw_consumido": 4.0}, agente="a")
+    tracker.registrar_passo(_info_passo(5), agente="a")
+
+    h = tracker.get_equipment_hourly("a")
+    assert h[0]["n_observacoes"] == 2
+    assert abs(h[0]["pivo"] - 3.0) < 1e-9          # média de 2.0 e 4.0
+    assert abs(h[5]["captacao"] - 15.0) < 1e-9
+    assert 5 in h and 1 not in h
+
+
+def test_equipment_hourly_vazio(tracker):
+    assert "aviso" in tracker.get_equipment_hourly("inexistente")
+
+
+def test_equipment_stats_kpis(tracker):
+    # 1 dia: pivô ligado 2h (1 em pico com tarifa 1.10, 1 fora com 0.70)
+    p1 = {**_info_passo(18, em_pico_tarifa=True), "tarifa": 1.10}
+    p2 = {**_info_passo(10, em_pico_tarifa=False), "tarifa": 0.70}
+    p3 = {**_info_passo(3), "pivo_kw_consumido": 0.0, "tarifa": 0.70}
+    for p in (p1, p2, p3):
+        tracker.registrar_passo(p, agente="a")
+    tracker.fechar_episodio(agente="a", reward_total=-1.0, custo_total=1.0,
+                             epsilon=0.1)
+
+    stats = tracker.get_equipment_stats("a")
+    pivo = stats["equipamentos"]["pivo"]
+    assert stats["n_dias"] == 1
+    assert abs(pivo["kwh_total"] - 6.0) < 1e-9        # 3.0 + 3.0
+    assert pivo["horas_ligada_total"] == 2
+    assert abs(pivo["kwh_em_pico"] - 3.0) < 1e-9
+    assert abs(pivo["pct_kwh_em_pico"] - 50.0) < 1e-9
+    assert abs(pivo["custo_energia_rs"] - (3.0 * 1.10 + 3.0 * 0.70)) < 1e-9
+    assert stats["consumo_total_kwh"] > 0
+
+
+def test_equipment_stats_vazio(tracker):
+    assert "aviso" in tracker.get_equipment_stats("inexistente")
+
+
 def test_get_eval_metrics_calcula_media(tracker):
     tracker.registrar_passo(_info_passo(0, custo_r=1.0, rede_kwh=10.0), agente="a")
     tracker.registrar_passo(_info_passo(1, custo_r=2.0, rede_kwh=20.0), agente="a")

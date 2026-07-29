@@ -447,6 +447,71 @@ def get_hourly_violations(agente: str = "iql_eval") -> str:
     return json.dumps(tracker.get_hourly_violations(agente), indent=2)
 
 
+@mcp.tool()
+def get_equipment_hourly(agente: str = "iql_eval") -> str:
+    """Uso médio por hora-do-dia de cada equipamento (kW), agregando dias.
+
+    Retorna pivô, captação, secador, sede, silo + bateria (carga/descarga),
+    rede e geração médias por hora 0-23.
+
+    `agente`: "iql_eval", "iql_eval_cmp", "heuristico", "sem_agente", "iql_trace".
+    """
+    return json.dumps(tracker.get_equipment_hourly(agente), indent=2)
+
+
+@mcp.tool()
+def get_equipment_stats(agente: str = "iql_eval") -> str:
+    """KPIs por equipamento (lógica de BI) da última avaliação/comparação.
+
+    Por equipamento: kWh total e médio/dia, horas ligada, kWh em pico,
+    % do consumo total e custo bruto da energia (kWh × tarifa da hora).
+
+    `agente`: "iql_eval", "iql_eval_cmp", "heuristico", "sem_agente", "iql_trace".
+    """
+    return json.dumps(tracker.get_equipment_stats(agente), indent=2)
+
+
+@mcp.tool()
+def export_all_data() -> str:
+    """Exporta em um único JSON todos os dados do servidor: dataset, config,
+    Q-tables (resumo), treino, curva de aprendizado, avaliações de todas as
+    estratégias, violações por hora e KPIs de equipamentos.
+
+    Pensado para o botão "Exportar dados" do dashboard — o payload pode ser
+    salvo direto em arquivo.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        chaves_eval = ("iql_eval", "iql_eval_cmp", "heuristico", "sem_agente")
+
+        def _se_tem(d: dict) -> dict | None:
+            return None if (not d or "aviso" in d) else d
+
+        return json.dumps({
+            "gerado_em": datetime.now(timezone.utc).isoformat(),
+            "dataset": DATASET_META,
+            "config": {k: (sorted(v) if isinstance(v, frozenset) else v)
+                       for k, v in CONFIG.items()},
+            "tetos_kw": TETOS_KW,
+            "bomba_horas_on": sorted(BOMBA_HORAS_ON),
+            "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
+            "soc_propagado_pct": round(float(iql.soc_propagado), 2),
+            "treino": _se_tem(tracker.get_training_metrics("iql_treino")),
+            "curva_aprendizado": _se_tem(tracker.get_learning_curve("iql_treino")),
+            "avaliacoes": {k: _se_tem(tracker.get_eval_metrics(k))
+                           for k in chaves_eval},
+            "violacoes_por_hora": {k: _se_tem(tracker.get_hourly_violations(k))
+                                   for k in chaves_eval},
+            "equipamentos_kpis": {k: _se_tem(tracker.get_equipment_stats(k))
+                                  for k in chaves_eval},
+            "equipamentos_hora_a_hora": {k: _se_tem(tracker.get_equipment_hourly(k))
+                                         for k in chaves_eval},
+        }, indent=2, default=str)
+    except Exception as e:
+        return _err(e)
+
+
 # ------------------------------------------------------------------ #
 # Cenários e dataset                                                    #
 # ------------------------------------------------------------------ #

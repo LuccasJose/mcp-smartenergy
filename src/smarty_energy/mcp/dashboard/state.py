@@ -18,6 +18,7 @@ __all__ = [
     "treinar", "avaliar", "comparar",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
+    "get_equipment_hourly", "get_equipment_stats", "export_all_data",
     "run_episode", "select_day", "identify_scenarios", "describe_schema",
     "MCPServerError",
 ]
@@ -105,6 +106,18 @@ def get_td_error_series(agente: str) -> dict:
 
 def get_hourly_violations(agente: str = "iql_eval") -> dict:
     return call_tool("get_hourly_violations", agente=agente)
+
+
+def get_equipment_hourly(agente: str = "iql_eval") -> dict:
+    return call_tool("get_equipment_hourly", agente=agente)
+
+
+def get_equipment_stats(agente: str = "iql_eval") -> dict:
+    return call_tool("get_equipment_stats", agente=agente)
+
+
+def export_all_data() -> dict:
+    return call_tool("export_all_data")
 
 
 def run_episode(mode: str = "eval", dia_idx: int | None = None) -> dict:
