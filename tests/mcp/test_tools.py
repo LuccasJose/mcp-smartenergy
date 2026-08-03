@@ -110,6 +110,18 @@ def test_compare_strategies_calcula_reducoes(srv):
     assert "reducao_iql_vs_sem_pct" in out
 
 
+def test_evaluate_agents_atualiza_soc_propagado_no_health_report(srv):
+    srv.configure_agents(n_episodios=2)
+    srv.train_agents()
+
+    out_eval = json.loads(srv.evaluate_agents(n_dias=2, propagar_soc=True))
+    out_hr = json.loads(srv.health_report())
+
+    assert "soc_final_pct" in out_eval
+    assert srv.iql.soc_propagado == pytest.approx(out_eval["soc_final_pct"])
+    assert out_hr["soc_propagado_pct"] == pytest.approx(out_eval["soc_final_pct"], abs=1e-2)
+
+
 # --- configure_agents -------------------------------------------------------
 
 def test_configure_agents_valida_ranges(srv):

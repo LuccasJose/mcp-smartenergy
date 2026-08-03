@@ -295,6 +295,7 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
 
     custos, redes, viols_soc, rewards = [], [], [], []
     soc_proximo = cfg["soc_inicial_pct"]
+    soc_final = soc_proximo
 
     for ep in range(n_dias):
         env = env_cls(dias[ep % len(dias)], tarifa_24h, cfg)
@@ -315,6 +316,7 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
             if done:
                 break
 
+        soc_final = env.soc
         if propagar_soc:
             soc_proximo = env.soc
 
@@ -336,6 +338,7 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
         "rede_media_dia_kwh": float(np.mean(redes)),
         "violacoes_soc_media_h_dia": float(np.mean(viols_soc)),
         "reward_medio_dia": float(np.mean(rewards)),
+        "soc_final_pct": float(soc_final),
     }
 
 
@@ -457,11 +460,13 @@ class IQLSystem:
         def escolher(env, est):
             return self.agir_todos(env.discretizar(est), explorando=False)
 
-        return avaliar_politica(
+        res = avaliar_politica(
             escolher, dias, tarifa_24h, cfg=self.cfg, env_cls=env_cls,
             n_dias=n_dias, tracker=tracker, tracker_key=tracker_key,
             propagar_soc=propagar_soc,
         )
+        self.soc_propagado = float(res["soc_final_pct"])
+        return res
 
     # -- Persistência ----------------------------------------------------
 
