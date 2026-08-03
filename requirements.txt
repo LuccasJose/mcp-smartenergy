@@ -10,7 +10,7 @@ dash>=2.16          # dashboard web de BI (main.py --web)
 plotly>=5.20        # gráficos do Dash e do Streamlit
 
 # Camada MCP (servidor de tools + dashboard cliente)
-mcp>=1.9.0          # smarty_energy/mcp/server.py e o cliente do dashboard
+mcp>=1.9.0,<2.0     # smarty_energy/mcp/server.py e o cliente do dashboard (FastMCP)
 streamlit>=1.30     # dashboard cliente MCP
 
 # Testes

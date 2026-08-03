@@ -15,7 +15,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "dash>=2.16",
     "plotly>=5.20",
-    "mcp>=1.9.0",
+    "mcp>=1.9.0,<2.0",
     "streamlit>=1.30",
 ]
 
