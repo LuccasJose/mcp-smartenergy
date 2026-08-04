@@ -120,8 +120,10 @@ def export_all_data() -> dict:
     return call_tool("export_all_data")
 
 
-def run_episode(mode: str = "eval", dia_idx: int | None = None) -> dict:
-    return call_tool("run_episode", mode=mode, dia_idx=dia_idx)
+def run_episode(mode: str = "eval", dia_idx: int | None = None,
+                continuar_soc: bool = True) -> dict:
+    return call_tool("run_episode", mode=mode, dia_idx=dia_idx,
+                     continuar_soc=continuar_soc)
 
 
 def select_day(dia_idx: int) -> dict:

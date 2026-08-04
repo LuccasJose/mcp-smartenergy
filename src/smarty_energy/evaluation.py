@@ -37,18 +37,18 @@ def rodar_sem_agente(dados_dia: pd.DataFrame, tarifa_24h: np.ndarray,
                      soc_inicial: float | None = None) -> list[dict]:
     """Baseline SEM otimização — a fazenda 'como está hoje'.
 
-    Comportamento fixo: bateria em modo 'manter' (sem gestão), nenhuma máquina
-    cortada e teto de consumo liberal. Serve como referência de custo para
-    comparar Heurístico e RL.
+    Comportamento ingênuo: bateria inerte, teto liberal, secador no
+    cronograma bruto da base e pivô tardio (16-23h, atravessa o pico — ver
+    `SemAgente`). Serve como referência de custo para comparar Heurístico e RL.
 
     `soc_inicial` permite encadear dias (ver `rodar_sem_agente_mes`); None usa
     o SoC inicial padrão do CONFIG.
     """
     env = FazendaEnergyEnv(dados_dia, tarifa_24h, CONFIG)
-    env.reset(soc_inicial=soc_inicial)
-    a_arm, a_cons, a_ger = SemAgente.ACOES_FIXAS
+    est = env.reset(soc_inicial=soc_inicial)
+    agente = SemAgente()
     for _ in range(24):
-        _, _, done, _ = env.step(a_arm, a_cons, a_ger)
+        est, _, done, _ = env.step(*agente.agir(est))
         if done:
             break
     return env.historico

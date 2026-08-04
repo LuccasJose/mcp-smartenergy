@@ -64,14 +64,21 @@ if not st.session_state.treinado:
     st.warning("Modelo não treinado. O agente vai jogar quase aleatório.")
 
 # ── Roda 1 episódio (via tool run_episode) ─────────────────────────────────
-if st.button("Rodar dia", type="primary"):
+col_run, col_soc = st.columns([1, 3])
+continuar_soc = col_soc.toggle(
+    "Continuidade da bateria (SOC do dia anterior)", value=True,
+    help="Ligado: o dia começa com o SOC final da última simulação "
+         "(primeira começa em 50%). Desligado: reinicia do SOC pós-treino.")
+if col_run.button("Rodar dia", type="primary"):
     try:
         with st.spinner("Executando episódio via MCP..."):
-            resultado = run_episode(mode=mode, dia_idx=dia_idx)
+            resultado = run_episode(mode=mode, dia_idx=dia_idx,
+                                     continuar_soc=continuar_soc)
         st.session_state.trace_dia = {
             "passos": resultado["trace"],
             "reward_total": resultado["reward_total"],
             "custo_total": resultado["custo_total_rs"],
+            "soc_inicial": resultado.get("soc_inicial_pct"),
             "soc_final": resultado["soc_final_pct"],
             "dia_idx": dia_idx,
             "mode": mode,
@@ -90,7 +97,10 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Reward total", f"{td['reward_total']:.2f}")
     c2.metric("Custo total", f"R${td['custo_total']:.2f}")
-    c3.metric("SOC final", f"{td['soc_final']:.1f} %")
+    soc_ini = td.get("soc_inicial")
+    c3.metric("SOC final", f"{td['soc_final']:.1f} %",
+               delta=(f"início {soc_ini:.1f} %" if soc_ini is not None else None),
+               delta_color="off")
     c4.metric("Violações PCC", int(df["pcc_violado"].sum()))
 
     # ── Plot triplo: geracao/consumo, SOC, custo ──────────────────────

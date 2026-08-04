@@ -65,13 +65,14 @@ st.sidebar.divider()
 
 # Treino
 st.sidebar.subheader("Treino")
-n_eps = st.sidebar.slider("n_episodios", 50, 5000, 500, step=50,
-                           disabled=not st.session_state.mcp_conectado)
+n_eps = st.sidebar.number_input("n_episodios", min_value=50, max_value=1_000_000,
+                                 value=500, step=50,
+                                 disabled=not st.session_state.mcp_conectado)
 if st.sidebar.button("Treinar IQL", use_container_width=True,
                       disabled=not st.session_state.mcp_conectado):
     try:
         with st.spinner(f"Treinando {n_eps} episódios via MCP..."):
-            sumario = treinar(n_eps)
+            sumario = treinar(int(n_eps))
         st.sidebar.success(
             f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia, "
             f"epsilon = {sumario['epsilon_final']:.3f}"

@@ -51,10 +51,14 @@ def test_heuristico_gerente_conservador_em_stress_alto(cfg):
 
 # --- SemAgente --------------------------------------------------------------
 
-def test_semagente_sempre_acao_fixa(cfg):
+def test_semagente_horarios_ingenuos(cfg):
     s = SemAgente(cfg)
-    est = {"hora": 12, "soc": 50.0, "solar_kw": 10.0, "tarifa": 0.7}
-    assert s.agir(est) == (1, 0, 2)
+    # antes das 16h: pivô segurado, bateria inerte, teto liberal
+    assert s.agir({"hora": 8}) == (1, 1, 2)
+    assert s.agir({"hora": 15}) == (1, 1, 2)
+    # 16h em diante: pivô liberado (8h que atravessam o pico 18-20h)
+    assert s.agir({"hora": 16}) == (1, 0, 2)
+    assert s.agir({"hora": 20}) == (1, 0, 2)
 
 
 def test_semagente_avaliar_retorna_metricas(dia_fake, tarifa_fake, cfg):

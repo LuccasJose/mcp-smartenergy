@@ -244,24 +244,28 @@ class AgentesHeuristicos:
 class SemAgente:
     """Cenário sem gestão nenhuma — a fazenda 'como está hoje'.
 
-    Bateria em manter, nenhuma carga cortada, gerente liberal. É a referência
-    C0 do plano de testes; a versão de dia único é `evaluation.rodar_sem_agente`.
+    Sem otimização: a bateria nunca é despachada (inerte), o teto é liberal,
+    o secador segue o cronograma bruto da base e o pivô só começa no fim da
+    tarde — as 8h de irrigação (16-23h) atravessam o pico tarifário 18-20h
+    inteiro, sem sol para compensar. É a referência C0 do plano de testes;
+    a versão de dia único é `evaluation.rodar_sem_agente`.
     """
 
-    ACOES_FIXAS = (1, 0, 2)
+    PIVO_HORA_INICIO = 16  # irrigação tardia — atravessa o pico 18-20h inteiro
 
     def __init__(self, cfg: dict = CONFIG):
         self.cfg = cfg
 
     def agir(self, est: dict) -> tuple[int, int, int]:
-        return self.ACOES_FIXAS
+        a_cons = 1 if est["hora"] < self.PIVO_HORA_INICIO else 0
+        return (1, a_cons, 2)         # bateria inerte, teto liberal
 
     def avaliar(self, dias, tarifa_24h, env_cls=None, *, n_dias: int = 30,
                 tracker=None, tracker_key: str = "sem_agente",
                 propagar_soc: bool = True) -> dict:
         """Roda o baseline sem gestão em `n_dias` (ver `avaliar_politica`)."""
         return avaliar_politica(
-            lambda env, est: self.ACOES_FIXAS, dias, tarifa_24h, cfg=self.cfg,
+            lambda env, est: self.agir(est), dias, tarifa_24h, cfg=self.cfg,
             env_cls=env_cls, n_dias=n_dias, tracker=tracker,
             tracker_key=tracker_key, propagar_soc=propagar_soc,
         )

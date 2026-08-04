@@ -52,6 +52,9 @@ tracker = MetricsTracker()
 
 # Env "atual" usado por get_current_state e step_environment (dia 0 por default).
 _dia_atual_idx = 0
+
+# SOC encadeado entre chamadas de run_episode (continuidade da bateria no Trace).
+_soc_trace: float | None = None
 env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
 
 # Host/porta do transporte HTTP — usados quando o servidor roda como
@@ -317,20 +320,28 @@ def compare_strategies(n_dias: int = 30, propagar_soc: bool = True) -> str:
 
 
 @mcp.tool()
-def run_episode(mode: str = "eval", dia_idx: int | None = None) -> str:
+def run_episode(mode: str = "eval", dia_idx: int | None = None,
+                continuar_soc: bool = True) -> str:
     """Executa 1 dia completo e retorna o trace hora-a-hora.
 
     mode: "eval" (greedy) ou "train" (ε-greedy com aprendizado online)
     dia_idx: índice do dia no dataset (None = dia atual selecionado)
+    continuar_soc: True (default) encadeia o SOC — o dia começa com o SOC
+        final da última run_episode (continuidade da bateria); a primeira
+        chamada parte do soc_propagado do IQL (50% se nunca treinou).
+        False reinicia a cadeia a partir do soc_propagado.
     """
     try:
+        global _soc_trace
         idx = _dia_atual_idx if dia_idx is None else int(dia_idx)
         if not (0 <= idx < len(DIAS)):
             return json.dumps({"erro": f"dia_idx fora do range [0, {len(DIAS)-1}]"}, indent=2)
 
         tracker.limpar("iql_trace")
         e = FazendaEnergyEnv(DIAS[idx], TARIFA_24H, CONFIG)
-        est = e.reset(soc_inicial=iql.soc_propagado)
+        soc_ini = (_soc_trace if (continuar_soc and _soc_trace is not None)
+                   else iql.soc_propagado)
+        est = e.reset(soc_inicial=soc_ini)
         s = e.discretizar(est)
 
         explore = mode == "train"
@@ -348,11 +359,13 @@ def run_episode(mode: str = "eval", dia_idx: int | None = None) -> str:
             reward_total += reward
             custo_total  += info["custo_r"]
 
+        _soc_trace = float(e.soc)
         return json.dumps({
             "mode": mode,
             "dia_idx": idx,
             "data": DATASET_META.get("data_inicio") if idx == 0 else str(DIAS[idx]["data"].iloc[0])[:10],
             "cenario": classificar_dia(idx, DIAS),
+            "soc_inicial_pct": round(float(soc_ini), 2),
             "reward_total": round(reward_total, 4),
             "custo_total_rs": round(custo_total, 4),
             "soc_final_pct": round(e.soc, 2),
@@ -586,13 +599,14 @@ def reset_environment(reset_agents: bool = False, dia_idx: int | None = None) ->
     soc_propagado mantido pelo IQLSystem.
     """
     try:
-        global env, _dia_atual_idx
+        global env, _dia_atual_idx, _soc_trace
         if dia_idx is not None:
             if not (0 <= dia_idx < len(DIAS)):
                 return json.dumps({"erro": f"dia_idx fora de [0, {len(DIAS)-1}]"}, indent=2)
             _dia_atual_idx = dia_idx
         env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
         env.reset(soc_inicial=iql.soc_propagado)
+        _soc_trace = None
 
         if reset_agents:
             iql.reset_qtables()
