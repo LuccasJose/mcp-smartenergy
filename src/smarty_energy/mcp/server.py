@@ -21,7 +21,7 @@ from ..config import (
 from ..data_loader import carregar_dados, descrever_base
 from ..environment import FazendaEnergyEnv, ESPACO_ESTADOS_TOTAL as N_ESTADOS_TOTAL
 from ..evaluation import identificar_cenarios, classificar_dia
-from ..agents import IQLSystem, AgentesHeuristicos, SemAgente
+from ..agents import IQLSystem, AgentesHeuristicos, SemAgente, avaliar_politica
 from .. import runs
 from .tracker import MetricsTracker
 
@@ -55,6 +55,9 @@ _dia_atual_idx = 0
 
 # SOC encadeado entre chamadas de run_episode (continuidade da bateria no Trace).
 _soc_trace: float | None = None
+
+# Políticas congeladas por snapshot_policy — nome -> {agente: {estado: qvalues}}.
+_snapshots: dict[str, dict] = {}
 env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
 
 # Host/porta do transporte HTTP — usados quando o servidor roda como
@@ -252,41 +255,55 @@ def train_agents(n_episodios: int = 0) -> str:
 # ------------------------------------------------------------------ #
 
 @mcp.tool()
-def evaluate_agents(n_dias: int = 30, propagar_soc: bool = True) -> str:
+def evaluate_agents(n_dias: int = 30, propagar_soc: bool = True,
+                    continuar_do_treino: bool = True) -> str:
     """Avalia o IQL em modo greedy por n_dias percorrendo o dataset.
 
     propagar_soc=True (default) mantém o SOC final como inicial do próximo
     dia, refletindo continuidade real. False reseta para soc_inicial em
     cada dia (útil para diagnóstico isolado).
+    continuar_do_treino=True (default): o 1º dia herda o soc_propagado do
+    fim do treino; False parte dos 50% padrão. O SOC final da avaliação
+    atualiza o soc_propagado.
     """
     try:
         tracker.limpar("iql_eval")
+        soc_ini = iql.soc_propagado if continuar_do_treino else None
         resultado = iql.avaliar(
             DIAS, TARIFA_24H, FazendaEnergyEnv,
             n_dias=n_dias, tracker=tracker, propagar_soc=propagar_soc,
+            soc_inicial=soc_ini,
         )
+        if propagar_soc:
+            iql.soc_propagado = resultado["soc_final_pct"]
         return json.dumps(resultado, indent=2)
     except Exception as e:
         return _err(e)
 
 
 @mcp.tool()
-def compare_strategies(n_dias: int = 30, propagar_soc: bool = True) -> str:
-    """Compara IQL vs Heurístico vs SemAgente nos mesmos n_dias do dataset.
+def compare_strategies(n_dias: int = 30, propagar_soc: bool = True,
+                       continuar_do_treino: bool = True) -> str:
+    """Compara as estratégias do projeto nos mesmos n_dias do dataset.
 
-    Cada estratégia roda independentemente sobre as mesmas datas e a mesma
-    sequência de SOC inicial. Popula tracker com chaves 'iql_eval_cmp',
-    'heuristico', 'sem_agente'.
+    Braços: IQL atual (RL + LLM-juiz se o juiz já agiu), Heurístico,
+    SemAgente e — se snapshot_policy("iql_puro") foi chamada — o RL puro
+    congelado antes do juiz. Todos rodam sobre as mesmas datas e o MESMO
+    SOC inicial (soc_propagado do treino se continuar_do_treino, senão 50%).
+    Popula tracker com 'iql_eval_cmp', 'iql_puro', 'heuristico', 'sem_agente'.
     """
     try:
         tracker.limpar("iql_eval")
         tracker.limpar("iql_eval_cmp")
+        tracker.limpar("iql_puro")
         tracker.limpar("heuristico")
         tracker.limpar("sem_agente")
 
+        soc_ini = iql.soc_propagado if continuar_do_treino else None
         r_iql  = iql.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
                               n_dias=n_dias, tracker=tracker,
-                              propagar_soc=propagar_soc)
+                              propagar_soc=propagar_soc,
+                              soc_inicial=soc_ini)
         # iql escreve em 'iql_eval'; renomeia para não conflitar
         tracker.passos["iql_eval_cmp"]     = tracker.passos.pop("iql_eval", [])
         tracker.episodios["iql_eval_cmp"]  = tracker.episodios.pop("iql_eval", [])
@@ -294,11 +311,13 @@ def compare_strategies(n_dias: int = 30, propagar_soc: bool = True) -> str:
         r_heur = heuristico.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
                                      n_dias=n_dias, tracker=tracker,
                                      tracker_key="heuristico",
-                                     propagar_soc=propagar_soc)
+                                     propagar_soc=propagar_soc,
+                                     soc_inicial=soc_ini)
         r_sem  = sem_agente.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
                                      n_dias=n_dias, tracker=tracker,
                                      tracker_key="sem_agente",
-                                     propagar_soc=propagar_soc)
+                                     propagar_soc=propagar_soc,
+                                     soc_inicial=soc_ini)
 
         resultados = {
             "IQL":        r_iql,
@@ -306,6 +325,32 @@ def compare_strategies(n_dias: int = 30, propagar_soc: bool = True) -> str:
             "SemAgente":  r_sem,
             "tracker_keys": ["iql_eval_cmp", "heuristico", "sem_agente"],
         }
+
+        # 4º braço: RL puro congelado por snapshot_policy (antes do LLM-juiz)
+        if "iql_puro" in _snapshots:
+            snap = _snapshots["iql_puro"]
+
+            def escolher_puro(env_, est):
+                s = env_.discretizar(est)
+                acoes = []
+                for nome_ag in ("armazenamento", "consumo", "gerente"):
+                    q = snap[nome_ag].get(s)
+                    acoes.append(int(q.argmax()) if q is not None else 0)
+                return tuple(acoes)
+
+            r_puro = avaliar_politica(
+                escolher_puro, DIAS, TARIFA_24H, cfg=CONFIG,
+                env_cls=FazendaEnergyEnv, n_dias=n_dias, tracker=tracker,
+                tracker_key="iql_puro", propagar_soc=propagar_soc,
+                soc_inicial=soc_ini,
+            )
+            resultados["IQL_puro"] = r_puro
+            resultados["tracker_keys"].insert(1, "iql_puro")
+            if r_puro["custo_medio_dia_rs"] > 0:
+                resultados["reducao_juiz_vs_rl_puro_pct"] = round(
+                    (r_puro["custo_medio_dia_rs"] - r_iql["custo_medio_dia_rs"])
+                    / r_puro["custo_medio_dia_rs"] * 100, 2)
+
         custo_iql, custo_heur, custo_sem = (r["custo_medio_dia_rs"]
                                              for r in (r_iql, r_heur, r_sem))
         if custo_sem > 0:
@@ -496,7 +541,8 @@ def export_all_data() -> str:
     try:
         from datetime import datetime, timezone
 
-        chaves_eval = ("iql_eval", "iql_eval_cmp", "heuristico", "sem_agente")
+        chaves_eval = ("iql_eval", "iql_eval_cmp", "iql_puro",
+                       "heuristico", "sem_agente")
 
         def _se_tem(d: dict) -> dict | None:
             return None if (not d or "aviso" in d) else d
@@ -781,6 +827,29 @@ def get_financeiro_state() -> str:
         return _err(e)
 
 
+@mcp.tool()
+def snapshot_policy(nome: str = "iql_puro") -> str:
+    """Congela a política IQL atual (cópia das Q-tables) sob um nome.
+
+    Chame ao fim do treino baseline, ANTES do loop do LLM-juiz: o snapshot
+    "iql_puro" vira o braço 'RL puro' de compare_strategies, permitindo medir
+    quanto o juiz melhorou a política em relação ao RL sem intervenção.
+    """
+    try:
+        snap = {n: {s: q.copy() for s, q in ag.q_table.items()}
+                for n, ag in iql.agentes.items()}
+        _snapshots[nome] = snap
+        return json.dumps({
+            "status": "política congelada",
+            "nome": nome,
+            "estados_por_agente": {n: len(qt) for n, qt in snap.items()},
+            "uso": "compare_strategies agora inclui o braço 'IQL_puro'"
+                   if nome == "iql_puro" else None,
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
 # ------------------------------------------------------------------ #
 # Diagnóstico consolidado e schema                                      #
 # ------------------------------------------------------------------ #
@@ -805,6 +874,7 @@ def health_report() -> str:
 
         eval_iql  = tracker.get_eval_metrics("iql_eval")
         eval_cmp  = tracker.get_eval_metrics("iql_eval_cmp")
+        eval_puro = tracker.get_eval_metrics("iql_puro")
         eval_heur = tracker.get_eval_metrics("heuristico")
         eval_sem  = tracker.get_eval_metrics("sem_agente")
 
@@ -818,6 +888,11 @@ def health_report() -> str:
                 "reducao_iql_vs_sem_pct":  round((c_sem - c_iql) / c_sem * 100, 2) if c_sem > 0 else None,
                 "reducao_iql_vs_heur_pct": round((c_heur - c_iql) / c_heur * 100, 2) if c_heur > 0 else None,
             }
+            if "custo_medio_dia_rs" in eval_puro:
+                c_puro = eval_puro["custo_medio_dia_rs"]
+                comparacao["custo_rl_puro_rs_dia"] = round(c_puro, 4)
+                comparacao["reducao_juiz_vs_rl_puro_pct"] = (
+                    round((c_puro - c_iql) / c_puro * 100, 2) if c_puro > 0 else None)
 
         alertas = []
         cob_min = min(cobertura.values())

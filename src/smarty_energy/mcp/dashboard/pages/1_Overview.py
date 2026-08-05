@@ -91,33 +91,52 @@ else:
 st.divider()
 
 # ── Comparacao com baselines ───────────────────────────────────────────────
-st.subheader("Comparação com baselines")
+st.subheader("Comparação entre estratégias")
 comparacao = hr.get("comparacao_baselines")
 
 if comparacao:
     c_iql = comparacao["custo_iql_rs_dia"]
     c_heur = comparacao["custo_heuristico_rs_dia"]
     c_sem = comparacao["custo_sem_agente_rs_dia"]
-    c1, c2, c3 = st.columns(3)
-    c1.metric("IQL (RL)", f"R${c_iql:.2f}/dia")
-    c2.metric("Heurístico", f"R${c_heur:.2f}/dia", f"{(c_iql - c_heur):+.2f}")
-    c3.metric("SemAgente", f"R${c_sem:.2f}/dia", f"{(c_iql - c_sem):+.2f}")
+    c_puro = comparacao.get("custo_rl_puro_rs_dia")
 
-    st.markdown(
-        f"**Redução IQL vs SemAgente:** {comparacao.get('reducao_iql_vs_sem_pct', 0):.2f} % "
-        f"&nbsp;&nbsp;&nbsp; **vs Heurístico:** {comparacao.get('reducao_iql_vs_heur_pct', 0):.2f} %"
-    )
+    # Ordem narrativa: do pior cenário (sem otimização) ao melhor (RL + juiz)
+    barras = [("Sem otimização", c_sem), ("Heurísticas", c_heur)]
+    if c_puro is not None:
+        barras.append(("RL puro", c_puro))
+    barras.append(("RL + LLM-juiz", c_iql))
+
+    cols = st.columns(len(barras))
+    for col, (nome, custo) in zip(cols, barras):
+        col.metric(nome, f"R${custo:.2f}/dia",
+                    f"{(custo - c_sem):+.2f} vs sem otim." if nome != "Sem otimização" else None,
+                    delta_color="inverse")
+
+    reducoes = [
+        f"**Redução RL vs Sem otimização:** {comparacao.get('reducao_iql_vs_sem_pct', 0):.2f} %",
+        f"**vs Heurísticas:** {comparacao.get('reducao_iql_vs_heur_pct', 0):.2f} %",
+    ]
+    if comparacao.get("reducao_juiz_vs_rl_puro_pct") is not None:
+        reducoes.append(f"**Juiz vs RL puro:** {comparacao['reducao_juiz_vs_rl_puro_pct']:.2f} %")
+    st.markdown(" &nbsp;&nbsp; ".join(reducoes))
 
     import plotly.graph_objects as go
     fig = go.Figure(go.Bar(
-        x=["IQL", "Heurístico", "SemAgente"],
-        y=[c_iql, c_heur, c_sem],
-        text=[f"R${v:.2f}" for v in (c_iql, c_heur, c_sem)],
+        x=[n for n, _ in barras],
+        y=[v for _, v in barras],
+        text=[f"R${v:.2f}" for _, v in barras],
         textposition="outside",
+        marker_color=["rgb(214,39,40)", "rgb(255,127,14)",
+                       "rgb(31,119,180)", "rgb(44,160,44)"][:len(barras)],
     ))
     fig.update_layout(yaxis_title="Custo médio (R$/dia)",
                        margin=dict(t=10, b=30), height=350)
     st.plotly_chart(fig, use_container_width=True)
+
+    if c_puro is None:
+        st.caption("Braço 'RL puro' ausente — congele a política (botão na "
+                    "sidebar ou tool snapshot_policy) antes do LLM-juiz e "
+                    "rode Comparar de novo.")
 else:
     st.info("Sem comparação. Use 'Comparar' na sidebar.")
 

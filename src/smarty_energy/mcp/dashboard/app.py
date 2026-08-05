@@ -28,7 +28,7 @@ if str(_SRC) not in sys.path:
 
 from smarty_energy.mcp.dashboard.state import (
     MCPServerError, ensure_state, conectar_mcp, treinar, avaliar, comparar,
-    export_all_data,
+    export_all_data, snapshot_policy,
 )
 from smarty_energy.mcp.dashboard.mcp_client import MCP_SERVER_URL
 
@@ -77,6 +77,17 @@ if st.sidebar.button("Treinar IQL", use_container_width=True,
             f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia, "
             f"epsilon = {sumario['epsilon_final']:.3f}"
         )
+    except MCPServerError as e:
+        st.sidebar.error(str(e))
+
+if st.sidebar.button("Congelar como RL puro", use_container_width=True,
+                      disabled=not st.session_state.treinado,
+                      help="Salva um snapshot da política atual como o braço "
+                           "'RL puro' da comparação. Faça isso ANTES de rodar "
+                           "o LLM-juiz — aí 'Comparar' mostra as 4 estratégias."):
+    try:
+        res = snapshot_policy("iql_puro")
+        st.sidebar.success("Política congelada como 'RL puro'")
     except MCPServerError as e:
         st.sidebar.error(str(e))
 

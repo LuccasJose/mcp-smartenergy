@@ -44,21 +44,24 @@ EQUIP_CORES = {
     "silo":     "rgb(140,86,75)",
 }
 ESTRATEGIAS = {
-    "iql_eval_cmp": "Com MCP + agente RL (IQL)",
-    "heuristico":   "Sem agente RL (heurísticas)",
-    "sem_agente":   "Sem otimização (SemAgente)",
+    "iql_eval_cmp": "RL + LLM-juiz (política atual)",
+    "iql_puro":     "RL puro (snapshot)",
+    "heuristico":   "Heurísticas",
+    "sem_agente":   "Sem otimização",
 }
 ESTRATEGIA_CORES = {
     "iql_eval_cmp": "rgb(44,160,44)",
+    "iql_puro":     "rgb(31,119,180)",
     "heuristico":   "rgb(255,127,14)",
     "sem_agente":   "rgb(214,39,40)",
 }
 
 ORIGENS = {
-    "iql_eval":     "IQL (evaluate_agents)",
-    "iql_eval_cmp": "IQL (compare_strategies)",
-    "heuristico":   "Heurístico",
-    "sem_agente":   "SemAgente",
+    "iql_eval":     "RL — política atual (Avaliar)",
+    "iql_eval_cmp": "RL + LLM-juiz (Comparar)",
+    "iql_puro":     "RL puro — snapshot (Comparar)",
+    "heuristico":   "Heurísticas",
+    "sem_agente":   "Sem otimização",
 }
 
 # ── 1. KPIs estilo BI por equipamento ──────────────────────────────────────
@@ -156,8 +159,10 @@ else:
 st.divider()
 
 # ── 3. Comparação entre estratégias ────────────────────────────────────────
-st.subheader("Comparação: com RL vs heurísticas vs sem otimização")
-st.caption("Requer **Comparar** na sidebar (compare_strategies preenche as 3 origens).")
+st.subheader("Comparação: sem otimização × heurísticas × RL puro × RL + LLM-juiz")
+st.caption("Requer **Comparar** na sidebar. O braço 'RL puro' só aparece se a "
+            "política foi congelada (botão na sidebar ou tool snapshot_policy) "
+            "antes do LLM-juiz agir.")
 
 if not st.session_state.comparado:
     st.info("Rode **Comparar** na sidebar para preencher as 3 estratégias.")

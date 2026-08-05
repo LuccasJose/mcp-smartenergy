@@ -183,10 +183,11 @@ st.subheader("Violações por hora do dia (avaliação atual)")
 st.caption("Heatmap agregando todos os dias da última evaluate ou compare.")
 
 opcoes_agente = {
-    "iql_eval": "IQL (evaluate_agents)",
-    "iql_eval_cmp": "IQL (compare_strategies)",
-    "heuristico": "Heurístico",
-    "sem_agente": "SemAgente",
+    "iql_eval": "RL — política atual (Avaliar)",
+    "iql_eval_cmp": "RL + LLM-juiz (Comparar)",
+    "iql_puro": "RL puro — snapshot (Comparar)",
+    "heuristico": "Heurísticas",
+    "sem_agente": "Sem otimização",
 }
 agente_sel = st.selectbox("Origem dos dados",
                             options=list(opcoes_agente.keys()),

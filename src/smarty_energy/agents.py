@@ -232,12 +232,14 @@ class AgentesHeuristicos:
 
     def avaliar(self, dias, tarifa_24h, env_cls=None, *, n_dias: int = 30,
                 tracker=None, tracker_key: str = "heuristico",
-                propagar_soc: bool = True) -> dict:
+                propagar_soc: bool = True,
+                soc_inicial: float | None = None) -> dict:
         """Roda o baseline heurístico em `n_dias` (ver `avaliar_politica`)."""
         return avaliar_politica(
             lambda env, est: self.agir(est), dias, tarifa_24h, cfg=self.cfg,
             env_cls=env_cls, n_dias=n_dias, tracker=tracker,
             tracker_key=tracker_key, propagar_soc=propagar_soc,
+            soc_inicial=soc_inicial,
         )
 
 
@@ -262,12 +264,14 @@ class SemAgente:
 
     def avaliar(self, dias, tarifa_24h, env_cls=None, *, n_dias: int = 30,
                 tracker=None, tracker_key: str = "sem_agente",
-                propagar_soc: bool = True) -> dict:
+                propagar_soc: bool = True,
+                soc_inicial: float | None = None) -> dict:
         """Roda o baseline sem gestão em `n_dias` (ver `avaliar_politica`)."""
         return avaliar_politica(
             lambda env, est: self.agir(est), dias, tarifa_24h, cfg=self.cfg,
             env_cls=env_cls, n_dias=n_dias, tracker=tracker,
             tracker_key=tracker_key, propagar_soc=propagar_soc,
+            soc_inicial=soc_inicial,
         )
 
 
@@ -278,7 +282,8 @@ class SemAgente:
 def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
                      env_cls=None, n_dias: int = 30, tracker=None,
                      tracker_key: str = "politica",
-                     propagar_soc: bool = True) -> dict:
+                     propagar_soc: bool = True,
+                     soc_inicial: float | None = None) -> dict:
     """Roda uma política por `n_dias` e devolve as métricas médias diárias.
 
     Fonte única do laço de avaliação — IQL, heurístico e sem-agente usam este
@@ -290,6 +295,8 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
         env_cls      : classe do ambiente; None usa `FazendaEnergyEnv`
                        (import tardio para evitar ciclo com environment.py).
         propagar_soc : se True, o SOC final de um dia inicia o dia seguinte.
+        soc_inicial  : SOC do 1º dia; None usa `cfg['soc_inicial_pct']` (50%).
+                       Permite continuar do SOC final do treino.
         tracker      : `mcp.tracker.MetricsTracker` opcional, alimentado passo
                        a passo e por episódio.
     """
@@ -298,7 +305,9 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
         env_cls = FazendaEnergyEnv
 
     custos, redes, viols_soc, rewards = [], [], [], []
-    soc_proximo = cfg["soc_inicial_pct"]
+    soc_primeiro = cfg["soc_inicial_pct"] if soc_inicial is None else float(soc_inicial)
+    soc_proximo  = soc_primeiro
+    soc_final    = soc_primeiro
 
     for ep in range(n_dias):
         env = env_cls(dias[ep % len(dias)], tarifa_24h, cfg)
@@ -321,6 +330,7 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
 
         if propagar_soc:
             soc_proximo = env.soc
+        soc_final = env.soc
 
         custos.append(custo_dia)
         redes.append(rede_dia)
@@ -335,6 +345,8 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
 
     return {
         "n_dias": n_dias,
+        "soc_inicial_pct": float(soc_primeiro),
+        "soc_final_pct": float(soc_final),
         "custo_medio_dia_rs": float(np.mean(custos)),
         "custo_std": float(np.std(custos)),
         "rede_media_dia_kwh": float(np.mean(redes)),
@@ -456,7 +468,8 @@ class IQLSystem:
 
     def avaliar(self, dias, tarifa_24h, env_cls=None, *, n_dias: int = 30,
                 tracker=None, tracker_key: str = "iql_eval",
-                propagar_soc: bool = True) -> dict:
+                propagar_soc: bool = True,
+                soc_inicial: float | None = None) -> dict:
         """Avalia a política greedy dos 3 agentes (ver `avaliar_politica`)."""
         def escolher(env, est):
             return self.agir_todos(env.discretizar(est), explorando=False)
@@ -464,7 +477,7 @@ class IQLSystem:
         return avaliar_politica(
             escolher, dias, tarifa_24h, cfg=self.cfg, env_cls=env_cls,
             n_dias=n_dias, tracker=tracker, tracker_key=tracker_key,
-            propagar_soc=propagar_soc,
+            propagar_soc=propagar_soc, soc_inicial=soc_inicial,
         )
 
     # -- Persistência ----------------------------------------------------
