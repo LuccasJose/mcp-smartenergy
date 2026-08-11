@@ -68,8 +68,26 @@ st.sidebar.subheader("Treino")
 n_eps = st.sidebar.number_input("n_episodios", min_value=50, max_value=1_000_000,
                                  value=500, step=50,
                                  disabled=not st.session_state.mcp_conectado)
+
+
+def _avaliar_e_comparar() -> None:
+    """Compara e avalia todos os dias do dataset (SOC sempre contínuo).
+
+    Comparar antes de avaliar: compare_strategies limpa a chave 'iql_eval',
+    então a ordem inversa apagaria os dados do Avaliar.
+    """
+    n_dias_total = (st.session_state.meta or {}).get("n_dias", 31)
+    with st.spinner(f"Comparando estratégias em {n_dias_total} dias..."):
+        comparar(n_dias_total, True)
+    with st.spinner(f"Avaliando IQL em {n_dias_total} dias..."):
+        avaliar(n_dias_total, True)
+    st.sidebar.success(f"Avaliado e comparado em {n_dias_total} dias")
+
+
 if st.sidebar.button("Treinar IQL", use_container_width=True,
-                      disabled=not st.session_state.mcp_conectado):
+                      disabled=not st.session_state.mcp_conectado,
+                      help="Treina e, em seguida, avalia e compara todas as "
+                           "estratégias em todos os dias do dataset."):
     try:
         with st.spinner(f"Treinando {n_eps} episódios via MCP..."):
             sumario = treinar(int(n_eps))
@@ -77,6 +95,7 @@ if st.sidebar.button("Treinar IQL", use_container_width=True,
             f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia, "
             f"epsilon = {sumario['epsilon_final']:.3f}"
         )
+        _avaliar_e_comparar()
     except MCPServerError as e:
         st.sidebar.error(str(e))
 
@@ -84,36 +103,24 @@ if st.sidebar.button("Congelar como RL puro", use_container_width=True,
                       disabled=not st.session_state.treinado,
                       help="Salva um snapshot da política atual como o braço "
                            "'RL puro' da comparação. Faça isso ANTES de rodar "
-                           "o LLM-juiz — aí 'Comparar' mostra as 4 estratégias."):
+                           "o LLM-juiz. A comparação é refeita na hora."):
     try:
-        res = snapshot_policy("iql_puro")
+        snapshot_policy("iql_puro")
         st.sidebar.success("Política congelada como 'RL puro'")
+        _avaliar_e_comparar()
     except MCPServerError as e:
         st.sidebar.error(str(e))
 
 st.sidebar.divider()
 
-# Avaliação
+# Reavaliação manual (o fluxo normal já roda tudo após o treino)
 st.sidebar.subheader("Avaliação")
-n_dias_eval = st.sidebar.slider("n_dias", 1, 31, 10,
-                                  disabled=not st.session_state.mcp_conectado)
-propagar = st.sidebar.checkbox("Propagar SOC entre dias", value=True,
-                                 disabled=not st.session_state.mcp_conectado)
-col_a, col_b = st.sidebar.columns(2)
-if col_a.button("Avaliar", use_container_width=True,
-                  disabled=not st.session_state.treinado):
+st.sidebar.caption("Automática após o treino — todos os dias do dataset, "
+                    "SOC contínuo (começa em 50% e propaga entre dias).")
+if st.sidebar.button("Reavaliar + Comparar", use_container_width=True,
+                      disabled=not st.session_state.treinado):
     try:
-        with st.spinner("Avaliando via MCP..."):
-            res = avaliar(n_dias_eval, propagar)
-        st.sidebar.success(f"custo = R${res['custo_medio_dia_rs']:.2f}/dia")
-    except MCPServerError as e:
-        st.sidebar.error(str(e))
-if col_b.button("Comparar", use_container_width=True,
-                  disabled=not st.session_state.treinado):
-    try:
-        with st.spinner("Comparando IQL vs Heurístico vs SemAgente via MCP..."):
-            comparar(n_dias_eval, propagar)
-        st.sidebar.success("Comparação concluída")
+        _avaliar_e_comparar()
     except MCPServerError as e:
         st.sidebar.error(str(e))
 
@@ -165,10 +172,10 @@ if not st.session_state.mcp_conectado:
     st.markdown(
         "1. **`python server.py`** em um terminal (fica rodando, expõe MCP via HTTP)\n"
         "2. **Conectar** na sidebar deste dashboard\n"
-        "3. **Treinar IQL** (~500 episódios = ~10s)\n"
-        "4. **Avaliar** ou **Comparar com baselines**\n"
-        "5. Navegar pelas páginas para inspecionar resultados\n"
-        "6. **Exportar dados** para salvar tudo em um JSON"
+        "3. **Treinar IQL** — ao terminar, avalia e compara todas as "
+        "estratégias em todos os dias automaticamente\n"
+        "4. Navegar pelas páginas para inspecionar resultados\n"
+        "5. **Exportar dados** para salvar tudo em um JSON"
     )
 else:
     m = st.session_state.meta

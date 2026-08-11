@@ -64,16 +64,12 @@ if not st.session_state.treinado:
     st.warning("Modelo não treinado. O agente vai jogar quase aleatório.")
 
 # ── Roda 1 episódio (via tool run_episode) ─────────────────────────────────
-col_run, col_soc = st.columns([1, 3])
-continuar_soc = col_soc.toggle(
-    "Continuidade da bateria (SOC do dia anterior)", value=True,
-    help="Ligado: o dia começa com o SOC final da última simulação "
-         "(primeira começa em 50%). Desligado: reinicia do SOC pós-treino.")
-if col_run.button("Rodar dia", type="primary"):
+# SOC sempre contínuo: cada dia começa com o SOC final da última simulação.
+if st.button("Rodar dia", type="primary"):
     try:
         with st.spinner("Executando episódio via MCP..."):
             resultado = run_episode(mode=mode, dia_idx=dia_idx,
-                                     continuar_soc=continuar_soc)
+                                     continuar_soc=True)
         st.session_state.trace_dia = {
             "passos": resultado["trace"],
             "reward_total": resultado["reward_total"],

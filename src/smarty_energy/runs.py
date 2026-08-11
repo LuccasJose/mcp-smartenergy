@@ -15,10 +15,11 @@ from __future__ import annotations
 import json
 import pickle
 import shutil
+import warnings
 from datetime import datetime
 from pathlib import Path
 
-from .config import OUTPUT_DIR
+from .config import CONFIG, OUTPUT_DIR
 
 RUNS_DIR = OUTPUT_DIR / "runs"
 _LATEST = RUNS_DIR / "latest.txt"
@@ -94,14 +95,81 @@ def carregar_run(run_id: str, agentes: dict) -> dict:
     """Carrega as Q-tables do run em ``agentes`` e devolve o histórico.
 
     Os agentes devem ter sido instanciados com o mesmo nº de ações do treino.
+    Antes de devolver, valida a compatibilidade do run com a discretização e a
+    física atuais (ver ``verificar_compatibilidade``): recarregar uma Q-table
+    de um espaço de estados antigo re-simularia a política sob regras diferentes,
+    produzindo uma comparação inválida sem nenhum aviso.
     """
     origem = caminho_run(run_id)
     if not origem.exists():
         raise FileNotFoundError(f"Run '{run_id}' não encontrado em {RUNS_DIR}")
     for ag in agentes.values():
         ag.load(origem / f"qtable_{ag.nome.lower()}.pkl")
+    verificar_compatibilidade(run_id, agentes)
     with open(origem / "training_history.pkl", "rb") as f:
         return pickle.load(f)
+
+
+# Parâmetros que mudam a dinâmica do ambiente — se divergirem, a política
+# antiga re-simulada não reflete os números do treino original.
+_PARAMS_FISICOS = (
+    "bateria_cap_kwh", "soc_min_pct", "soc_max_pct", "eficiencia_carga",
+    "eficiencia_descarga", "bat_throughput_max_kwh", "pcc_max_kw",
+    "inversor_fv_max_kw", "eolico_nominal_kw", "pivo_horas_alvo",
+    "pivo_nominal_kw", "bomba_cap_nominal_kw", "secador_meta_kwh",
+    "secador_max_kw", "sede_desvio_max", "tarifa_estresse_limiar",
+)
+
+
+def verificar_compatibilidade(run_id: str, agentes: dict, cfg: dict | None = None) -> None:
+    """Valida um run recarregado contra a discretização e a física atuais.
+
+    Levanta ``ValueError`` quando as chaves das Q-tables não cabem na
+    discretização atual (espaço de estados mudou → argmax sobre vetores zerados
+    → política degenerada ``(0,0,0)`` silenciosa). Emite ``warnings.warn`` quando
+    a física registrada no ``meta.json`` diverge do CONFIG atual, ou quando o run
+    é legado (``config_completo`` vazio) e a checagem de física não é possível.
+    """
+    from .environment import BUCKETS_ESTADO   # tardio: evita ciclo de import
+
+    # (1) Estrutura das chaves — dimensão e faixa de cada bucket.
+    for nome, ag in agentes.items():
+        for chave in ag.q_table:
+            if (len(chave) != len(BUCKETS_ESTADO)
+                    or any(not (0 <= v < b) for v, b in zip(chave, BUCKETS_ESTADO))):
+                raise ValueError(
+                    f"Run '{run_id}' incompatível: a Q-table '{nome}' tem a chave "
+                    f"{chave}, fora da discretização atual {BUCKETS_ESTADO}. "
+                    "Foi treinado com outra versão do espaço de estados — "
+                    "recarregar re-simularia a política sob regras diferentes, "
+                    "produzindo uma comparação inválida."
+                )
+
+    # (2) Física registrada vs. CONFIG atual (advisory).
+    cfg_atual = cfg or CONFIG
+    cfg_run = (ler_meta(run_id).get("config_completo") or {})
+    if not cfg_run:
+        warnings.warn(
+            f"Run '{run_id}' não registrou 'config_completo' (run legado); a "
+            "compatibilidade de física/pesos não pôde ser verificada. Os números "
+            "assumem que ele foi treinado sob a física atual.",
+            stacklevel=2,
+        )
+        return
+    difs = [
+        (p, cfg_run.get(p), cfg_atual.get(p))
+        for p in _PARAMS_FISICOS
+        if p in cfg_run and cfg_run.get(p) != cfg_atual.get(p)
+    ]
+    if difs:
+        detalhe = "; ".join(f"{p}: run={r} vs atual={a}" for p, r, a in difs)
+        warnings.warn(
+            f"Run '{run_id}' foi treinado com física diferente da atual ({detalhe}). "
+            "A comparação re-simula a política sob a física atual — os números "
+            "podem não refletir o treino original.",
+            stacklevel=2,
+        )
+
 
 
 def ler_historico(run_id: str) -> dict:

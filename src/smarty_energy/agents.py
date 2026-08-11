@@ -112,7 +112,17 @@ class AgenteQL:
         """Carrega uma Q-table salva anteriormente."""
         with open(path, "rb") as f:
             data = pickle.load(f)
-        self.n_acoes   = data.get("n_acoes", self.n_acoes)
+        # Guarda de compatibilidade: um run salvo com outro espaço de ações
+        # produziria índices inválidos no argmax. Runs legados não gravavam
+        # n_acoes (None) — nesse caso mantém o valor esperado.
+        n_salvo = data.get("n_acoes")
+        if n_salvo is not None and n_salvo != self.n_acoes:
+            raise ValueError(
+                f"Q-table '{self.nome}' salva com n_acoes={n_salvo}, esperado "
+                f"{self.n_acoes}. Espaço de ações incompatível — recarregar "
+                "produziria uma política inválida."
+            )
+        self.n_acoes   = n_salvo if n_salvo is not None else self.n_acoes
         self.q_table   = defaultdict(lambda: np.zeros(self.n_acoes), data["q_table"])
         self.epsilon   = data.get("epsilon", self.epsilon)
         self.n_updates = data.get("n_updates", 0)
