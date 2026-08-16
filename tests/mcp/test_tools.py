@@ -130,6 +130,32 @@ def test_configure_agents_aceita_validos(srv):
 
 # --- equipamentos + export --------------------------------------------------
 
+def test_snapshot_policy_habilita_braco_rl_puro(srv):
+    srv.configure_agents(n_episodios=2)
+    srv.train_agents()
+
+    # Sem snapshot: comparação com 3 braços
+    out = json.loads(srv.compare_strategies(n_dias=2))
+    assert "IQL_puro" not in out
+
+    # Congela o RL puro e compara de novo: 4 braços
+    snap = json.loads(srv.snapshot_policy("iql_puro"))
+    assert snap["status"] == "política congelada"
+
+    out = json.loads(srv.compare_strategies(n_dias=2))
+    assert "IQL_puro" in out
+    assert "iql_puro" in out["tracker_keys"]
+    assert len(srv.tracker.passos["iql_puro"]) == 2 * 24
+    assert "reducao_juiz_vs_rl_puro_pct" in out
+    # Snapshot da mesma política → custo idêntico ao IQL atual
+    assert abs(out["IQL_puro"]["custo_medio_dia_rs"]
+               - out["IQL"]["custo_medio_dia_rs"]) < 1e-6
+
+    # health_report reflete o 4º braço
+    hr = json.loads(srv.health_report())
+    assert hr["comparacao_baselines"]["custo_rl_puro_rs_dia"] is not None
+
+
 def test_equipment_tools_apos_compare(srv):
     srv.configure_agents(n_episodios=2)
     srv.train_agents()

@@ -15,7 +15,7 @@ from smarty_energy.mcp.dashboard.mcp_client import MCPServerError, call_tool
 
 __all__ = [
     "ensure_state", "require_setup", "conectar_mcp",
-    "treinar", "avaliar", "comparar",
+    "treinar", "avaliar", "comparar", "snapshot_policy",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
     "get_equipment_hourly", "get_equipment_stats", "export_all_data",
@@ -93,6 +93,13 @@ def comparar(n_dias: int, propagar_soc: bool = True) -> dict:
     ss = st.session_state
     res = call_tool("compare_strategies", n_dias=n_dias, propagar_soc=propagar_soc)
     ss.comparado = True
+    return res
+
+
+def snapshot_policy(nome: str = "iql_puro") -> dict:
+    ss = st.session_state
+    res = call_tool("snapshot_policy", nome=nome)
+    ss.rl_puro_congelado = True
     return res
 
 

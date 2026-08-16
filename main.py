@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import numpy as np
 
-from smarty_energy.config import CONFIG, DATA_PATH
+from smarty_energy.config import CONFIG, DATA_PATH, ajustar_decay
 from smarty_energy.data_loader import carregar_dados
 from smarty_energy.agents import construir_agentes
 from smarty_energy.training import treinar
@@ -146,7 +146,11 @@ def main(replot: bool = False, web: bool = False, run_id: str | None = None) -> 
         print("  Run legado importado de outputs/models/")
 
     # ── 2. Agentes + treino OU carregamento de run salvo ─────────
-    AGENTES = construir_agentes(CONFIG)
+    # epsilon_decay reescalado ao horizonte real de treino: o valor do CONFIG
+    # é calibrado para 100k; sem isto, mudar n_episodios deixaria ε≈0.5 no fim
+    # (agentes semi-aleatórios). Mantém o mesmo n_episodios do CONFIG.
+    CFG_TREINO = ajustar_decay(CONFIG)
+    AGENTES = construir_agentes(CFG_TREINO)
 
     if replot or run_id:
         run_atual = run_id or runs.run_mais_recente()
@@ -155,8 +159,8 @@ def main(replot: bool = False, web: bool = False, run_id: str | None = None) -> 
             return
         print(f"\n[--replot] Pulando treinamento. Run selecionado: {run_atual}")
     else:
-        print(f"\nIniciando treinamento ({CONFIG['n_episodios']} episódios × 24 timesteps)...\n")
-        hist = treinar(DIAS, TARIFA, AGENTES, CONFIG)
+        print(f"\nIniciando treinamento ({CFG_TREINO['n_episodios']} episódios × 24 timesteps)...\n")
+        hist = treinar(DIAS, TARIFA, AGENTES, CFG_TREINO)
         print("\nTreinamento concluído!")
         for ag in AGENTES.values():
             print(f"  {ag.nome:<16} | {ag.n_estados:>3} estados | {ag.n_updates:>6} updates | ε={ag.epsilon:.3f}")

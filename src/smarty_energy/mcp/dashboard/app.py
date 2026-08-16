@@ -25,9 +25,7 @@ _SRC = Path(__file__).resolve().parents[3]
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from smarty_energy.mcp.dashboard.state import (
-    MCPServerError, ensure_state, conectar_mcp,
-)
+from smarty_energy.mcp.dashboard.state import MCPServerError, ensure_state, conectar_mcp
 from smarty_energy.mcp.dashboard.mcp_client import MCP_SERVER_URL
 
 st.set_page_config(

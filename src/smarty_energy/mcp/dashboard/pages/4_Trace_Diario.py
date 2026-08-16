@@ -78,7 +78,7 @@ if col_run.button("Rodar dia", type="primary"):
     try:
         with st.spinner("Executando episódio via MCP..."):
             resultado = run_episode(mode=mode, dia_idx=dia_idx,
-                                     continuar_soc=continuar_soc)
+                                     continuar_soc=True)
         st.session_state.trace_dia = {
             "passos": resultado["trace"],
             "reward_total": resultado["reward_total"],
@@ -188,10 +188,11 @@ st.subheader("Violações ao longo do dia")
 st.caption("O mapa de calor agrega a última avaliação ou comparação. Cores mais fortes mostram horários mais críticos.")
 
 opcoes_agente = {
-    "iql_eval": "IQL (evaluate_agents)",
-    "iql_eval_cmp": "IQL (compare_strategies)",
-    "heuristico": "Heurístico",
-    "sem_agente": "SemAgente",
+    "iql_eval": "RL — política atual (Avaliar)",
+    "iql_eval_cmp": "RL + LLM-juiz (Comparar)",
+    "iql_puro": "RL puro — snapshot (Comparar)",
+    "heuristico": "Heurísticas",
+    "sem_agente": "Sem otimização",
 }
 agente_sel = st.selectbox("Origem dos dados",
                             options=list(opcoes_agente.keys()),

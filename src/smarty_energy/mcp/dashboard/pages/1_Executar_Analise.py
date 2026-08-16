@@ -19,6 +19,7 @@ from smarty_energy.mcp.dashboard.state import (
     comparar,
     export_all_data,
     require_setup,
+    snapshot_policy,
     treinar,
 )
 
@@ -63,8 +64,8 @@ if st.button("Treinar agentes", type="primary", disabled=not st.session_state.mc
 st.divider()
 st.header("2. Medir o desempenho")
 st.caption(
-    "A avaliação mede o IQL em vários dias. A comparação executa as três estratégias "
-    "para mostrar se o aprendizado supera a heurística e a ausência de otimização."
+    "A avaliação mede o IQL em vários dias. A comparação mostra o resultado contra "
+    "heurísticas, ausência de otimização e, quando congelado, o RL puro."
 )
 
 col_a, col_b = st.columns([2, 1])
@@ -85,6 +86,14 @@ propagar_soc = col_a.checkbox(
 col_b.metric("Avaliação", "Concluída" if st.session_state.avaliado else "Pendente")
 col_b.metric("Comparação", "Concluída" if st.session_state.comparado else "Pendente")
 
+if st.button("Congelar política como RL puro", disabled=not st.session_state.treinado,
+             help="Salva a política atual para comparar o RL puro com a política assistida pelo LLM-juiz."):
+    try:
+        snapshot_policy("iql_puro")
+        st.success("Política congelada como RL puro. Agora execute a comparação.")
+    except MCPServerError as e:
+        st.error(str(e))
+
 col_a, col_b = st.columns(2)
 if col_a.button("Avaliar o IQL", disabled=not st.session_state.treinado, use_container_width=True):
     try:
@@ -96,8 +105,10 @@ if col_a.button("Avaliar o IQL", disabled=not st.session_state.treinado, use_con
 
 if col_b.button("Comparar estratégias", disabled=not st.session_state.avaliado, use_container_width=True):
     try:
-        with st.spinner("Comparando IQL, heurística e sem otimização..."):
+        with st.spinner("Comparando estratégias..."):
             comparar(int(n_dias), propagar_soc)
+        with st.spinner("Atualizando a avaliação da política atual..."):
+            avaliar(int(n_dias), propagar_soc)
         st.success("Comparação concluída. Acesse a Visão geral para interpretar o resultado.")
     except MCPServerError as e:
         st.error(str(e))
