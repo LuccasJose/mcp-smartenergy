@@ -43,16 +43,27 @@ def conectar_mcp() -> dict:
     """
     ss = st.session_state
     meta = call_tool("get_dataset_info")
+    sincronizar_status()
     ss.meta = meta
     ss.mcp_conectado = True
     return meta
+
+
+def sincronizar_status() -> dict:
+    """Sincroniza os indicadores da sessão com o estado real do servidor MCP."""
+    ss = st.session_state
+    relatorio = health_report()
+    ss.treinado = "n_episodios" in relatorio.get("treino", {})
+    ss.avaliado = "custo_medio_dia_rs" in relatorio.get("avaliacao_atual", {})
+    ss.comparado = relatorio.get("comparacao_baselines") is not None
+    return relatorio
 
 
 def require_setup() -> bool:
     """Mostra aviso se ainda não conectou ao MCP. Retorna True se ok."""
     ensure_state()
     if not st.session_state.mcp_conectado:
-        st.info("Conecte ao servidor MCP na sidebar para começar "
+        st.info("Conecte ao servidor MCP usando o botão na barra lateral para começar "
                  "(o servidor precisa estar rodando: `python server.py`).")
         return False
     return True
@@ -65,6 +76,9 @@ def treinar(n_episodios: int) -> dict:
     call_tool("configure_agents", n_episodios=n_episodios)
     sumario = call_tool("train_agents", n_episodios=n_episodios)
     ss.treinado = True
+    ss.avaliado = False
+    ss.comparado = False
+    ss.pop("export_payload", None)
     return sumario
 
 

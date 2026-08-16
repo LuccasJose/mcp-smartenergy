@@ -9,12 +9,11 @@ Pré-requisito: o servidor MCP precisa estar rodando à parte:
 O dashboard é um CLIENTE MCP puro — toda métrica, log ou ação de
 treino/avaliação passa por uma ferramenta do servidor (`state.py` +
 `mcp_client.py`). Nenhum dado é calculado localmente.
-Cada página (Overview, Curva de Aprendizado, Trace Diário) consome o
+Cada página (Visão geral, Curva de aprendizado, Trace diário) consome o
 estado compartilhado em st.session_state, que só guarda o último payload
 retornado pelo MCP.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -27,8 +26,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from smarty_energy.mcp.dashboard.state import (
-    MCPServerError, ensure_state, conectar_mcp, treinar, avaliar, comparar,
-    export_all_data,
+    MCPServerError, ensure_state, conectar_mcp,
 )
 from smarty_energy.mcp.dashboard.mcp_client import MCP_SERVER_URL
 
@@ -43,12 +41,16 @@ ensure_state()
 # ── Sidebar: conexão MCP + controles ────────────────────────────────────────
 
 st.sidebar.title("SmartEnergy IQL")
-st.sidebar.caption(f"Dashboard MCP-cliente — servidor em `{MCP_SERVER_URL}`")
+st.sidebar.caption("Painel de gestão e diagnóstico energético")
+st.sidebar.info(
+    "Use **Executar análise** para preparar os resultados. Depois, abra "
+    "**Investigar resultados** para entender o que aconteceu."
+)
 
 st.sidebar.divider()
 
-st.sidebar.subheader("Servidor MCP")
-if st.sidebar.button("Conectar", use_container_width=True,
+st.sidebar.subheader("Conexão")
+if st.sidebar.button("Conectar ao servidor", use_container_width=True,
                       type="primary" if not st.session_state.mcp_conectado else "secondary"):
     try:
         meta = conectar_mcp()
@@ -62,118 +64,63 @@ if st.session_state.mcp_conectado:
                         f"{m['n_dias']} dias ({m['data_inicio']} → {m['data_fim']})")
 
 st.sidebar.divider()
-
-# Treino
-st.sidebar.subheader("Treino")
-n_eps = st.sidebar.number_input("n_episodios", min_value=50, max_value=1_000_000,
-                                 value=500, step=50,
-                                 disabled=not st.session_state.mcp_conectado)
-if st.sidebar.button("Treinar IQL", use_container_width=True,
-                      disabled=not st.session_state.mcp_conectado):
-    try:
-        with st.spinner(f"Treinando {n_eps} episódios via MCP..."):
-            sumario = treinar(int(n_eps))
-        st.sidebar.success(
-            f"OK — custo_med_50ep = R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia, "
-            f"epsilon = {sumario['epsilon_final']:.3f}"
-        )
-    except MCPServerError as e:
-        st.sidebar.error(str(e))
-
-st.sidebar.divider()
-
-# Avaliação
-st.sidebar.subheader("Avaliação")
-n_dias_eval = st.sidebar.slider("n_dias", 1, 31, 10,
-                                  disabled=not st.session_state.mcp_conectado)
-propagar = st.sidebar.checkbox("Propagar SOC entre dias", value=True,
-                                 disabled=not st.session_state.mcp_conectado)
-col_a, col_b = st.sidebar.columns(2)
-if col_a.button("Avaliar", use_container_width=True,
-                  disabled=not st.session_state.treinado):
-    try:
-        with st.spinner("Avaliando via MCP..."):
-            res = avaliar(n_dias_eval, propagar)
-        st.sidebar.success(f"custo = R${res['custo_medio_dia_rs']:.2f}/dia")
-    except MCPServerError as e:
-        st.sidebar.error(str(e))
-if col_b.button("Comparar", use_container_width=True,
-                  disabled=not st.session_state.treinado):
-    try:
-        with st.spinner("Comparando IQL vs Heurístico vs SemAgente via MCP..."):
-            comparar(n_dias_eval, propagar)
-        st.sidebar.success("Comparação concluída")
-    except MCPServerError as e:
-        st.sidebar.error(str(e))
-
-st.sidebar.divider()
-
-# Exportação
-st.sidebar.subheader("Exportar dados")
-if st.sidebar.button("Gerar arquivo de exportação", use_container_width=True,
-                      disabled=not st.session_state.treinado,
-                      help="Reúne treino, avaliações, violações e KPIs de "
-                           "equipamentos em um único JSON."):
-    try:
-        with st.spinner("Coletando dados do servidor MCP..."):
-            st.session_state.export_payload = export_all_data()
-    except MCPServerError as e:
-        st.sidebar.error(str(e))
-
-if st.session_state.get("export_payload"):
-    payload = st.session_state.export_payload
-    st.sidebar.download_button(
-        "Baixar smartenergy_export.json",
-        data=json.dumps(payload, indent=2, ensure_ascii=False),
-        file_name="smartenergy_export.json",
-        mime="application/json",
-        use_container_width=True,
-    )
-    st.sidebar.caption(f"Gerado em {payload.get('gerado_em', '?')} (UTC)")
-
-st.sidebar.divider()
 st.sidebar.caption(
-    "Use o menu acima para navegar entre páginas:\n"
-    "1. Overview — veredito do juiz\n"
-    "2. Curva de Aprendizado — convergência\n"
-    "3. Trace Diário — dia a dia + violações\n"
-    "4. Equipamentos — uso por máquina + BI"
+    "Fluxo recomendado:\n"
+    "1. Executar análise\n"
+    "2. Visão geral\n"
+    "3. Curva de aprendizado, trace diário ou equipamentos\n"
+    "4. Exportar resultados"
 )
 
 # ── Conteudo central da home ───────────────────────────────────────────────
 
-st.title("SmartEnergy IQL — Dashboard")
+st.title("SmartEnergy IQL")
+st.caption("Gestão energética por agentes de aprendizado por reforço")
 
 if not st.session_state.mcp_conectado:
+    st.header("Comece por aqui")
     st.info(
-        "Comece clicando em **Conectar** na sidebar. Se der erro, rode o "
-        "servidor MCP em outro terminal: `python server.py` — o dashboard "
-        "é um cliente MCP e não funciona sem ele."
+        "O painel precisa acessar o servidor de dados antes de exibir qualquer resultado. "
+        "Clique em **Conectar ao servidor** na barra lateral."
     )
-    st.markdown("### Fluxo recomendado")
+    st.markdown("### Seu fluxo de trabalho")
     st.markdown(
-        "1. **`python server.py`** em um terminal (fica rodando, expõe MCP via HTTP)\n"
-        "2. **Conectar** na sidebar deste dashboard\n"
-        "3. **Treinar IQL** (~500 episódios = ~10s)\n"
-        "4. **Avaliar** ou **Comparar com baselines**\n"
-        "5. Navegar pelas páginas para inspecionar resultados\n"
-        "6. **Exportar dados** para salvar tudo em um JSON"
+        "1. Abra **Executar análise** no menu lateral.\n"
+        "2. Conecte ao servidor e confirme a base carregada.\n"
+        "3. Treine, avalie e compare as estratégias.\n"
+        "4. Abra **Visão geral** para interpretar o resultado."
     )
 else:
     m = st.session_state.meta
+    st.header("Resumo da execução")
+    st.caption(
+        f"Dataset conectado: fazenda {m['id_fazenda']}, de {m['data_inicio']} "
+        f"a {m['data_fim']}."
+    )
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fazenda", m["id_fazenda"])
     c2.metric("Dias no dataset", m["n_dias"])
     c3.metric("Tarifa min (R$/kWh)", f"{m['tarifa_min_rs_kwh']:.4f}")
     c4.metric("Tarifa max (R$/kWh)", f"{m['tarifa_max_rs_kwh']:.4f}")
 
-    st.markdown("### Status")
+    st.markdown("### Progresso")
     cs1, cs2, cs3 = st.columns(3)
-    cs1.metric("Treinado", "sim" if st.session_state.treinado else "não")
-    cs2.metric("Avaliado", "sim" if st.session_state.avaliado else "não")
-    cs3.metric("Comparado", "sim" if st.session_state.comparado else "não")
+    cs1.metric("1. Treino", "Concluído" if st.session_state.treinado else "Pendente")
+    cs2.metric("2. Avaliação", "Concluída" if st.session_state.avaliado else "Pendente")
+    cs3.metric("3. Comparação", "Concluída" if st.session_state.comparado else "Pendente")
 
-    st.markdown(
-        "Use as páginas no menu superior para o detalhe. "
-        "Comece por **Overview** após treinar/avaliar."
-    )
+    if not st.session_state.treinado:
+        st.warning("Próximo passo: abra **Executar análise** e treine os agentes.")
+    elif not st.session_state.avaliado:
+        st.warning("Próximo passo: abra **Executar análise** e avalie o desempenho do IQL.")
+    elif not st.session_state.comparado:
+        st.warning("Próximo passo: volte a **Executar análise** e compare as estratégias.")
+    else:
+        st.success("Fluxo concluído. Comece pela página **Visão geral** para interpretar os resultados.")
+
+    st.markdown("### Próximas tarefas")
+    destinos = st.columns(4)
+    destinos[0].markdown("**Visão geral**\n\nO resultado completo em um único lugar: qualidade do treino, custo, violações e comparação.")
+    destinos[1].markdown("**Curva de aprendizado**\n\nMostra se o agente aprendeu e se o treino se estabilizou.")
+    destinos[2].markdown("**Trace diário**\n\nPermite acompanhar as decisões hora a hora em um dia específico.")
+    destinos[3].markdown("**Equipamentos**\n\nExplica quais máquinas consomem energia e como as estratégias diferem.")

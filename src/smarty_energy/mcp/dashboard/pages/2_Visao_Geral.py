@@ -1,4 +1,4 @@
-"""Página Overview — health_report renderizado em cards.
+"""Página Visão geral — health_report renderizado em cards.
 
 Reproduz visualmente o veredito que um LLM-juiz veria via `health_report`.
 Toda a página é construída a partir de DUAS chamadas MCP (health_report +
@@ -16,8 +16,8 @@ if str(_SRC) not in sys.path:
 
 from smarty_energy.mcp.dashboard.state import require_setup, health_report, get_dataset_info, MCPServerError
 
-st.title("Overview — Veredito do LLM-juiz")
-st.caption("Cobertura, convergência e comparação com baselines em um só painel — via MCP.")
+st.title("Visão geral")
+st.caption("Resumo executivo: o agente aprendeu, economizou e respeitou os limites?")
 
 if not require_setup():
     st.stop()
@@ -29,8 +29,34 @@ except MCPServerError as e:
     st.error(str(e))
     st.stop()
 
+# ── Veredito executivo ─────────────────────────────────────────────────────
+comparacao = hr.get("comparacao_baselines")
+alertas = hr.get("alertas", [])
+st.header("Veredito da análise")
+if not hr.get("treino", {}).get("n_episodios"):
+    st.info("A análise ainda não foi executada. Abra **Executar análise** para treinar os agentes.")
+elif not hr.get("avaliacao_atual", {}).get("custo_medio_dia_rs"):
+    st.info("O treino existe, mas ainda falta avaliar o IQL para obter um resultado.")
+elif comparacao:
+    reducao = comparacao.get("reducao_iql_vs_heur_pct")
+    if reducao is not None and reducao >= 0 and not alertas:
+        st.success(
+            f"O IQL apresentou custo {reducao:.1f}% menor que a heurística e não há alertas registrados."
+        )
+    elif reducao is not None:
+        st.warning(
+            f"O IQL apresentou custo {reducao:.1f}% menor que a heurística, mas há alertas que merecem investigação."
+        )
+    else:
+        st.warning("A comparação foi concluída, mas não foi possível calcular a redução de custo.")
+else:
+    st.info("A avaliação está pronta. Execute a comparação em **Executar análise** para completar o veredito.")
+
+st.divider()
+
 # ── Dataset ────────────────────────────────────────────────────────────────
-st.subheader("Dataset")
+st.subheader("Base analisada")
+st.caption("Identifica a fazenda, o período observado e as condições usadas nos cálculos.")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Fazenda", hr["dataset"]["fazenda"])
 c2.metric("Dias", hr["dataset"]["n_dias"])
@@ -40,7 +66,8 @@ c4.metric("Horas de pico", str(dataset.get("horas_pico", "-")))
 st.divider()
 
 # ── Agentes IQL ────────────────────────────────────────────────────────────
-st.subheader("Q-tables (3 agentes IQL)")
+st.subheader("Aprendizado dos agentes")
+st.caption("Cobertura mostra os estados visitados; erro TD menor e estável sugere maior convergência.")
 for nome, info in hr["agentes"].items():
     cob_pct = hr["cobertura_pct"][nome]
     with st.container(border=True):
@@ -49,30 +76,32 @@ for nome, info in hr["agentes"].items():
         cols[1].metric("Estados visitados", info["n_estados_visitados"])
         cols[2].metric("Cobertura", f"{cob_pct:.1f} %")
         cols[3].metric("n_updates", info["n_updates"])
-        cols[4].metric("TD-error |médio|",
+        cols[4].metric("Erro TD médio",
                         f"{info['td_error_recente']['td_abs_medio']:.2f}")
         cols[0].caption(f"epsilon = {info['epsilon']:.3f}")
 
 st.divider()
 
 # ── Treino ─────────────────────────────────────────────────────────────────
-st.subheader("Treino")
+st.subheader("Resultado do treino")
+st.caption("Use os valores recentes para entender o comportamento ao final do treinamento.")
 treino = hr["treino"]
 if "n_episodios" in treino:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Episódios", treino["n_episodios"])
-    c2.metric("Reward médio (últimos 50)",
+    c2.metric("Retorno médio (últimos 50)",
                 f"{treino['reward_media_ultimos_50']:.2f}")
     c3.metric("Custo médio (últimos 50)",
                 f"R${treino['custo_medio_ultimos_50_rs']:.2f}")
-    c4.metric("Epsilon final", f"{treino['epsilon_final']:.3f}")
+    c4.metric("Exploração final", f"{treino['epsilon_final']:.3f}")
 else:
-    st.info("Sem treino registrado. Use a sidebar para treinar.")
+    st.info("Sem treino registrado. Volte a **Executar análise** para treinar os agentes.")
 
 st.divider()
 
 # ── Avaliacao ─────────────────────────────────────────────────────────────
-st.subheader("Avaliação atual (iql_eval)")
+st.subheader("Avaliação atual")
+st.caption("Resume o desempenho do IQL nos dias selecionados em Executar análise.")
 eval_m = hr["avaliacao_atual"]
 if "n_dias" in eval_m:
     c1, c2, c3, c4 = st.columns(4)
@@ -83,25 +112,25 @@ if "n_dias" in eval_m:
     c5_, c6_, c7_, c8_ = st.columns(4)
     c5_.metric("Violações SOC", eval_m.get("violacoes_soc_total_h", 0))
     c6_.metric("kWh cortado", f"{eval_m.get('kwh_cortado_total', 0):.0f}")
-    c7_.metric("Reward médio", f"{eval_m['reward_medio_dia']:.2f}")
+    c7_.metric("Retorno médio", f"{eval_m['reward_medio_dia']:.2f}")
     c8_.metric("Std custo", f"R${eval_m.get('custo_std_rs', 0):.2f}")
 else:
-    st.info("Sem avaliação registrada. Use 'Avaliar' na sidebar.")
+    st.info("Sem avaliação registrada. Volte a **Executar análise** para avaliar o IQL.")
 
 st.divider()
 
 # ── Comparacao com baselines ───────────────────────────────────────────────
-st.subheader("Comparação com baselines")
-comparacao = hr.get("comparacao_baselines")
+st.subheader("Comparação entre estratégias")
+st.caption("Quanto menor o custo, melhor. A comparação mostra se o aprendizado supera referências simples.")
 
 if comparacao:
     c_iql = comparacao["custo_iql_rs_dia"]
     c_heur = comparacao["custo_heuristico_rs_dia"]
     c_sem = comparacao["custo_sem_agente_rs_dia"]
     c1, c2, c3 = st.columns(3)
-    c1.metric("IQL (RL)", f"R${c_iql:.2f}/dia")
-    c2.metric("Heurístico", f"R${c_heur:.2f}/dia", f"{(c_iql - c_heur):+.2f}")
-    c3.metric("SemAgente", f"R${c_sem:.2f}/dia", f"{(c_iql - c_sem):+.2f}")
+    c1.metric("IQL (aprendizado)", f"R${c_iql:.2f}/dia")
+    c2.metric("Heurística", f"R${c_heur:.2f}/dia", f"{(c_iql - c_heur):+.2f}")
+    c3.metric("Sem otimização", f"R${c_sem:.2f}/dia", f"{(c_iql - c_sem):+.2f}")
 
     st.markdown(
         f"**Redução IQL vs SemAgente:** {comparacao.get('reducao_iql_vs_sem_pct', 0):.2f} % "
@@ -119,7 +148,7 @@ if comparacao:
                        margin=dict(t=10, b=30), height=350)
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("Sem comparação. Use 'Comparar' na sidebar.")
+    st.info("Sem comparação. Volte a **Executar análise** para comparar as estratégias.")
 
 st.divider()
 

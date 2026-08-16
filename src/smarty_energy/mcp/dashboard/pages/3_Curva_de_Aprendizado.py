@@ -19,20 +19,24 @@ if str(_SRC) not in sys.path:
 
 from smarty_energy.mcp.dashboard.state import require_setup, get_learning_curve, get_td_error_series, MCPServerError
 
-st.title("Curva de Aprendizado")
-st.caption("Reward, custo e epsilon por episódio — diagnóstico de convergência. Via MCP.")
+st.title("Curva de aprendizado")
+st.caption("Responde a uma pergunta: o agente está aprendendo uma política melhor ao longo dos episódios?")
 
 if not require_setup():
     st.stop()
 
 if not st.session_state.treinado:
-    st.info("Sem treino registrado. Use a sidebar para treinar primeiro.")
+    st.info("Sem treino registrado. Volte a **Executar análise** para treinar os agentes primeiro.")
     st.stop()
 
 # ── Controles ─────────────────────────────────────────────────────────────
+st.subheader("Como ler o gráfico")
+st.caption("Procure por retorno crescente, custo decrescente e exploração reduzida ao longo do treino.")
 col_a, col_b = st.columns([2, 1])
-janela = col_a.slider("Janela da média móvel", 5, 200, 20, step=5)
-mostrar_eps = col_b.toggle("Mostrar epsilon", value=True)
+janela = col_a.slider("Tamanho da janela da média móvel", 5, 200, 20, step=5,
+                      help="Quantidade de episódios usada para suavizar a curva.")
+mostrar_eps = col_b.toggle("Mostrar exploração", value=True,
+                            help="Exibe o epsilon, que começa alto e diminui conforme o agente explora menos.")
 
 # ── Dados (via MCP) ─────────────────────────────────────────────────────────
 try:
@@ -56,11 +60,11 @@ epsilons = curva.get("epsilons", [])
 fig = make_subplots(specs=[[{"secondary_y": True}]])
 
 fig.add_trace(go.Scatter(x=x, y=rewards, mode="lines",
-                           name="Reward (bruto)",
+                           name="Retorno (bruto)",
                            line=dict(color="rgba(31,119,180,0.25)"),
-                           hovertemplate="ep=%{x}<br>reward=%{y:.2f}<extra></extra>"))
+                           hovertemplate="episódio=%{x}<br>retorno=%{y:.2f}<extra></extra>"))
 fig.add_trace(go.Scatter(x=x, y=rewards_ma, mode="lines",
-                           name=f"Reward (MA-{janela})",
+                           name=f"Retorno (média {janela})",
                            line=dict(color="rgb(31,119,180)", width=2.5)))
 
 fig.add_trace(go.Scatter(x=x, y=custos, mode="lines",
@@ -82,13 +86,13 @@ if mostrar_eps and epsilons:
 fig.update_layout(hovermode="x unified", legend=dict(orientation="h", y=1.1),
                     margin=dict(t=40, b=40), height=500)
 fig.update_xaxes(title_text="Episódio")
-fig.update_yaxes(title_text="Reward / epsilon", secondary_y=False)
+fig.update_yaxes(title_text="Retorno / exploração", secondary_y=False)
 fig.update_yaxes(title_text="Custo (R$/dia)", secondary_y=True)
 st.plotly_chart(fig, use_container_width=True)
 
 # ── Convergencia: TD-error rolante (via MCP, 1 chamada por agente) ────────
-st.subheader("TD-error rolante (convergência)")
-st.caption("Janela de 5.000 atualizações mais recentes por agente.")
+st.subheader("Estabilidade do aprendizado")
+st.caption("O erro TD mede a diferença entre a previsão e o resultado observado. Valores menores e estáveis indicam convergência.")
 
 AGENTES = ["armazenamento", "consumo", "gerente"]
 cols = st.columns(3)
@@ -109,7 +113,7 @@ for col, nome in zip(cols, AGENTES):
                                 margin=dict(t=60, b=20), height=240,
                                 showlegend=False)
         fig_td.update_xaxes(title_text="update #")
-        fig_td.update_yaxes(title_text="|TD-error|")
+        fig_td.update_yaxes(title_text="|erro TD|")
         col.plotly_chart(fig_td, use_container_width=True)
     else:
-        col.info(f"{nome}: sem TD-errors registrados")
+        col.info(f"{nome}: sem erros TD registrados")

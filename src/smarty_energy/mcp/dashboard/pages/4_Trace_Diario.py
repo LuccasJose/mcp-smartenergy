@@ -23,8 +23,8 @@ from smarty_energy.mcp.dashboard.state import (
     describe_schema, get_hourly_violations, MCPServerError,
 )
 
-st.title("Trace Diário")
-st.caption("Navegue pelos dias do dataset, veja decisões hora-a-hora e violações. Via MCP.")
+st.title("Trace diário")
+st.caption("Investigue um dia específico: o que o agente decidiu em cada hora e quais limites foram atingidos?")
 
 if not require_setup():
     st.stop()
@@ -40,12 +40,15 @@ except MCPServerError as e:
 soc_min_pct = schema["parametros_fisicos"]["soc_min_pct"]
 
 # ── Seletor de dia ────────────────────────────────────────────────────────
+st.subheader("Escolha o cenário para investigar")
+st.caption("Use um dia extremo para diagnóstico rápido ou percorra os índices para comparar condições diferentes.")
 n_dias = dataset["n_dias"]
 
 col_a, col_b, col_c = st.columns([3, 1, 1])
 dia_idx = col_a.slider("Dia (índice)", 0, n_dias - 1, 0)
-mode_label = col_b.selectbox("Modo", ["greedy", "exploração"])
-mode = "eval" if mode_label == "greedy" else "train"
+mode_label = col_b.selectbox("Comportamento", ["decisão aprendida", "exploração"],
+                             help="A decisão aprendida usa a melhor ação conhecida; exploração mantém escolhas experimentais.")
+mode = "eval" if mode_label == "decisão aprendida" else "train"
 
 try:
     dia_sel = select_day(dia_idx)
@@ -64,6 +67,8 @@ if not st.session_state.treinado:
     st.warning("Modelo não treinado. O agente vai jogar quase aleatório.")
 
 # ── Roda 1 episódio (via tool run_episode) ─────────────────────────────────
+st.subheader("Execute a simulação")
+st.caption("O trace simula o dia escolhido; ele não substitui a avaliação do dataset completo.")
 col_run, col_soc = st.columns([1, 3])
 continuar_soc = col_soc.toggle(
     "Continuidade da bateria (SOC do dia anterior)", value=True,
@@ -95,7 +100,7 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
     df = pd.DataFrame(td["passos"])
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Reward total", f"{td['reward_total']:.2f}")
+    c1.metric("Retorno total", f"{td['reward_total']:.2f}")
     c2.metric("Custo total", f"R${td['custo_total']:.2f}")
     soc_ini = td.get("soc_inicial")
     c3.metric("SOC final", f"{td['soc_final']:.1f} %",
@@ -170,7 +175,7 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
     fig_eq.update_xaxes(title_text="Hora (faixa vermelha = pico tarifário)", dtick=1)
     st.plotly_chart(fig_eq, use_container_width=True)
 
-    with st.expander("Ações hora-a-hora (a_arm, a_cons, a_ger)"):
+    with st.expander("Decisões hora a hora"):
         df_acoes = df[["hora", "a_arm", "a_cons", "a_ger", "tarifa",
                          "pivo_kw_consumido", "captacao_kw_consumido",
                          "secador_kw_consumido", "bat_carga", "bat_descarga"]].copy()
@@ -179,8 +184,8 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
 st.divider()
 
 # ── Violacoes agregadas por hora (via tool MCP) ───────────────────────────
-st.subheader("Violações por hora do dia (avaliação atual)")
-st.caption("Heatmap agregando todos os dias da última evaluate ou compare.")
+st.subheader("Violações ao longo do dia")
+st.caption("O mapa de calor agrega a última avaliação ou comparação. Cores mais fortes mostram horários mais críticos.")
 
 opcoes_agente = {
     "iql_eval": "IQL (evaluate_agents)",

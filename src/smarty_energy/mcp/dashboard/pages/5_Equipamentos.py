@@ -23,8 +23,8 @@ from smarty_energy.mcp.dashboard.state import (
     require_setup, get_equipment_stats, get_equipment_hourly, MCPServerError,
 )
 
-st.title("Equipamentos — uso por máquina + BI")
-st.caption("KPIs por equipamento, uso hora-a-hora e comparação entre estratégias. Via MCP.")
+st.title("Equipamentos")
+st.caption("Descubra quais máquinas concentram o consumo e em quais horários cada estratégia as utiliza.")
 
 if not require_setup():
     st.stop()
@@ -44,9 +44,9 @@ EQUIP_CORES = {
     "silo":     "rgb(140,86,75)",
 }
 ESTRATEGIAS = {
-    "iql_eval_cmp": "Com MCP + agente RL (IQL)",
-    "heuristico":   "Sem agente RL (heurísticas)",
-    "sem_agente":   "Sem otimização (SemAgente)",
+    "iql_eval_cmp": "IQL (aprendizado)",
+    "heuristico":   "Heurística",
+    "sem_agente":   "Sem otimização",
 }
 ESTRATEGIA_CORES = {
     "iql_eval_cmp": "rgb(44,160,44)",
@@ -55,14 +55,15 @@ ESTRATEGIA_CORES = {
 }
 
 ORIGENS = {
-    "iql_eval":     "IQL (evaluate_agents)",
-    "iql_eval_cmp": "IQL (compare_strategies)",
+    "iql_eval":     "IQL (avaliação)",
+    "iql_eval_cmp": "IQL (comparação)",
     "heuristico":   "Heurístico",
-    "sem_agente":   "SemAgente",
+    "sem_agente":   "Sem otimização",
 }
 
 # ── 1. KPIs estilo BI por equipamento ──────────────────────────────────────
-st.subheader("Visão por equipamento (BI)")
+st.subheader("Consumo por equipamento")
+st.caption("Comece aqui para identificar os maiores consumidores e o custo associado a cada máquina.")
 
 origem = st.selectbox("Origem dos dados",
                        options=list(ORIGENS.keys()),
@@ -74,7 +75,7 @@ except MCPServerError as e:
     stats = {"aviso": str(e)}
 
 if "aviso" in stats:
-    st.info(f"{stats['aviso']} — rode **Avaliar** ou **Comparar** na sidebar.")
+    st.info(f"{stats['aviso']} — volte a **Executar análise** para avaliar ou comparar.")
 else:
     c1, c2 = st.columns(2)
     c1.metric("Dias avaliados", stats["n_dias"])
@@ -104,8 +105,8 @@ else:
 st.divider()
 
 # ── 2. Uso hora-a-hora dos equipamentos ────────────────────────────────────
-st.subheader("Uso hora-a-hora dos equipamentos")
-st.caption("Média por hora do dia, agregando todos os dias da origem selecionada acima.")
+st.subheader("Perfil de uso ao longo do dia")
+st.caption("A média por hora mostra quando as máquinas trabalham e ajuda a localizar concentração no horário de pico.")
 
 try:
     hourly = get_equipment_hourly(origem)
@@ -156,11 +157,11 @@ else:
 st.divider()
 
 # ── 3. Comparação entre estratégias ────────────────────────────────────────
-st.subheader("Comparação: com RL vs heurísticas vs sem otimização")
-st.caption("Requer **Comparar** na sidebar (compare_strategies preenche as 3 origens).")
+st.subheader("Mesmo equipamento, estratégias diferentes")
+st.caption("Compare o uso do equipamento selecionado entre IQL, heurística e ausência de otimização.")
 
 if not st.session_state.comparado:
-    st.info("Rode **Comparar** na sidebar para preencher as 3 estratégias.")
+    st.info("Volte a **Executar análise** e compare as estratégias para preencher este painel.")
     st.stop()
 
 dados_estrategias: dict[str, dict] = {}
