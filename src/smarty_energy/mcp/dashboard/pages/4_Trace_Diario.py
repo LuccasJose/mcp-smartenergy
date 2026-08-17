@@ -112,9 +112,11 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
 
     # O trace vem do MCP em JSON (default=str), então flags booleanas chegam
     # como texto "True"/"False" — recoage para bool antes de usar em máscaras.
+    # Checa is_bool_dtype (não "== object"): pandas 2/3 usa dtypes de texto
+    # diferentes ("object" ou "str" nativo) conforme a versão instalada.
     for _col in ("em_pico_tarifa", "pcc_violado", "soc_violado", "teto_excedido",
                  "bomba_ligada", "bomba_agendada", "sede_eco", "pivo_em_lock"):
-        if _col in df.columns and df[_col].dtype == object:
+        if _col in df.columns and not pd.api.types.is_bool_dtype(df[_col]):
             df[_col] = df[_col].map(lambda v: str(v).strip().lower() in ("true", "1", "1.0"))
 
     c1, c2, c3, c4 = st.columns(4)

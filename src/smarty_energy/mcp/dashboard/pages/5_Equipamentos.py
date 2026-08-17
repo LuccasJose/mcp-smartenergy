@@ -168,6 +168,22 @@ else:
     fig.update_xaxes(title_text="Hora do dia", dtick=1)
     st.plotly_chart(fig, use_container_width=True)
 
+    # Piv\u00f4 roda 8h consecutivas TODOS os dias, mas o RL escolhe o horário de
+    # início dia a dia (janela solar, tarifa etc.). A média entre os 31 dias
+    # mistura esses horários diferentes e "espalha" a barra do pivô por mais
+    # de 8 posições no gráfico acima — isso não é o pivô ligando por mais
+    # tempo, é um efeito da média. O KPI abaixo (por dia individual) confirma
+    # o cumprimento da regra; para ver o bloco de 8h intacto num dia
+    # específico, use a página **Trace Diário**.
+    horas_pivo_dia = equipamentos["pivo"]["horas_ligada_media_dia"] if "aviso" not in stats else None
+    if horas_pivo_dia is not None:
+        st.info(
+            f"**Pivô: {horas_pivo_dia:.1f} h/dia em média — sempre 8h consecutivas por dia.** "
+            "A curva acima mostra a média entre os dias; como o horário de início varia "
+            "dia a dia, o pivô aparece 'espalhado' por mais de 8 horas no gráfico, mas em "
+            "cada dia individual ele roda exatamente 8h seguidas (confira em **Trace Diário**)."
+        )
+
     with st.expander("Bateria e rede (médias por hora)"):
         fig_b = go.Figure()
         fig_b.add_trace(go.Bar(x=horas, y=[_h(h, "bat_descarga") for h in horas],
