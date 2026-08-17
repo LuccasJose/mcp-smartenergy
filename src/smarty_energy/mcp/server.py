@@ -240,7 +240,11 @@ def train_agents(n_episodios: int = 0) -> str:
     episódios (continuidade real). Use n_episodios=0 para usar o configurado.
     """
     try:
+        # Um novo treino invalida resultados e snapshots da política anterior.
+        _snapshots.clear()
         tracker.limpar("iql_treino")
+        for chave in ("iql_eval", "iql_eval_cmp", "iql_puro", "heuristico", "sem_agente"):
+            tracker.limpar(chave)
         if n_episodios > 0:
             iql.n_episodios = n_episodios
         sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
@@ -845,6 +849,41 @@ def snapshot_policy(nome: str = "iql_puro") -> str:
             "estados_por_agente": {n: len(qt) for n, qt in snap.items()},
             "uso": "compare_strategies agora inclui o braço 'IQL_puro'"
                    if nome == "iql_puro" else None,
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def get_analysis_status() -> str:
+    """Estado operacional da análise para interfaces: etapas concluídas e próxima ação."""
+    try:
+        treino = tracker.get_training_metrics("iql_treino")
+        avaliacao = tracker.get_eval_metrics("iql_eval")
+        comparacao = tracker.get_eval_metrics("iql_eval_cmp")
+
+        treinado = "n_episodios" in treino
+        avaliado = "custo_medio_dia_rs" in avaliacao
+        comparado = "custo_medio_dia_rs" in comparacao
+        rl_puro_congelado = "iql_puro" in _snapshots
+
+        if not treinado:
+            proxima_etapa = "treinar"
+        elif not avaliado:
+            proxima_etapa = "avaliar"
+        elif not comparado:
+            proxima_etapa = "comparar"
+        else:
+            proxima_etapa = "investigar"
+
+        return json.dumps({
+            "treinado": treinado,
+            "avaliado": avaliado,
+            "comparado": comparado,
+            "rl_puro_congelado": rl_puro_congelado,
+            "proxima_etapa": proxima_etapa,
+            "n_episodios": treino.get("n_episodios"),
+            "n_dias_avaliados": avaliacao.get("n_dias"),
         }, indent=2)
     except Exception as e:
         return _err(e)

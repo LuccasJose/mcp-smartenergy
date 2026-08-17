@@ -41,11 +41,24 @@ soc_min_pct = schema["parametros_fisicos"]["soc_min_pct"]
 
 # ── Seletor de dia ────────────────────────────────────────────────────────
 st.subheader("Escolha o cenário para investigar")
-st.caption("Use um dia extremo para diagnóstico rápido ou percorra os índices para comparar condições diferentes.")
+st.caption("Comece por um cenário extremo para diagnóstico rápido ou escolha outro dia do dataset manualmente.")
 n_dias = dataset["n_dias"]
 
+opcoes_cenario = {"Escolher outro dia": None}
+for nome, dados in cen.items():
+    rotulo = nome.replace("_", " ").capitalize()
+    opcoes_cenario[f"{rotulo} - {dados['data']}"] = dados["dia_idx"]
+
+cenario_escolhido = st.selectbox(
+    "Atalho de cenário",
+    options=list(opcoes_cenario),
+    help="Seleciona automaticamente um dos dias extremos identificados no dataset.",
+)
+dia_sugerido = opcoes_cenario[cenario_escolhido]
+
 col_a, col_b, col_c = st.columns([3, 1, 1])
-dia_idx = col_a.slider("Dia (índice)", 0, n_dias - 1, 0)
+dia_idx = col_a.slider("Dia do dataset", 0, n_dias - 1, dia_sugerido or 0,
+                       help="Use este controle para investigar uma data fora dos cenários sugeridos.")
 mode_label = col_b.selectbox("Comportamento", ["decisão aprendida", "exploração"],
                              help="A decisão aprendida usa a melhor ação conhecida; exploração mantém escolhas experimentais.")
 mode = "eval" if mode_label == "decisão aprendida" else "train"
@@ -57,10 +70,8 @@ except MCPServerError as e:
     col_c.error("erro")
 
 st.caption(
-    f"Dias extremos do dataset — "
-    f"nublado: idx={cen['nublado']['dia_idx']}, "
-    f"ensolarado: idx={cen['ensolarado']['dia_idx']}, "
-    f"alto_consumo: idx={cen['alto_consumo']['dia_idx']}"
+    f"Data selecionada: **{dia_sel.get('data', '-') }**. "
+    f"Cenário classificado como **{dia_sel.get('categoria', '-')}**."
 )
 
 if not st.session_state.treinado:
@@ -78,7 +89,7 @@ if col_run.button("Rodar dia", type="primary"):
     try:
         with st.spinner("Executando episódio via MCP..."):
             resultado = run_episode(mode=mode, dia_idx=dia_idx,
-                                     continuar_soc=True)
+                                     continuar_soc=continuar_soc)
         st.session_state.trace_dia = {
             "passos": resultado["trace"],
             "reward_total": resultado["reward_total"],

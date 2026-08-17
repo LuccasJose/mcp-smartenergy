@@ -64,13 +64,14 @@ ORIGENS = {
     "sem_agente":   "Sem otimização",
 }
 
-# ── 1. KPIs estilo BI por equipamento ──────────────────────────────────────
-st.subheader("Consumo por equipamento")
-st.caption("Comece aqui para identificar os maiores consumidores e o custo associado a cada máquina.")
+# ── 1. Impacto por equipamento ────────────────────────────────────────────
+st.subheader("Onde está o maior impacto?")
+st.caption("Comece pelos equipamentos que mais consomem, mais custam ou mais operam no horário de pico.")
 
 origem = st.selectbox("Origem dos dados",
                        options=list(ORIGENS.keys()),
-                       format_func=lambda k: ORIGENS[k])
+                       format_func=lambda k: ORIGENS[k],
+                       help="Escolha qual resultado da análise será usado neste diagnóstico.")
 
 try:
     stats = get_equipment_stats(origem)
@@ -80,30 +81,56 @@ except MCPServerError as e:
 if "aviso" in stats:
     st.info(f"{stats['aviso']} — volte a **Executar análise** para avaliar ou comparar.")
 else:
-    c1, c2 = st.columns(2)
-    c1.metric("Dias avaliados", stats["n_dias"])
+    equipamentos = stats["equipamentos"]
+    maior_consumo = max(equipamentos, key=lambda nome: equipamentos[nome]["kwh_total"])
+    maior_custo = max(equipamentos, key=lambda nome: equipamentos[nome]["custo_energia_rs"])
+    maior_pico = max(equipamentos, key=lambda nome: equipamentos[nome]["pct_kwh_em_pico"])
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Dias analisados", stats["n_dias"])
     c2.metric("Consumo total", f"{stats['consumo_total_kwh']:.0f} kWh")
+    c3.metric("Maior consumo", EQUIP_LABELS[maior_consumo],
+              f"{equipamentos[maior_consumo]['pct_do_consumo_total']:.1f} % do total")
+    c4.metric("Maior custo", EQUIP_LABELS[maior_custo],
+              f"R${equipamentos[maior_custo]['custo_energia_rs']:.2f}")
 
-    for nome, kpi in stats["equipamentos"].items():
-        with st.container(border=True):
-            cols = st.columns(6)
-            cols[0].markdown(f"**{EQUIP_LABELS.get(nome, nome)}**")
-            cols[0].caption(f"{kpi['pct_do_consumo_total']:.1f} % do consumo")
-            cols[1].metric("kWh total", f"{kpi['kwh_total']:.0f}")
-            cols[2].metric("kWh/dia", f"{kpi['kwh_medio_dia']:.1f}")
-            cols[3].metric("Horas ligada/dia", f"{kpi['horas_ligada_media_dia']:.1f} h")
-            cols[4].metric("% kWh em pico", f"{kpi['pct_kwh_em_pico']:.1f} %")
-            cols[5].metric("Custo energia", f"R${kpi['custo_energia_rs']:.2f}")
+    ranking = pd.DataFrame([
+        {
+            "Chave": nome,
+            "Equipamento": EQUIP_LABELS[nome],
+            "Consumo total (kWh)": kpi["kwh_total"],
+            "Participação no consumo (%)": kpi["pct_do_consumo_total"],
+            "Custo de energia (R$)": kpi["custo_energia_rs"],
+            "Uso no pico (%)": kpi["pct_kwh_em_pico"],
+        }
+        for nome, kpi in equipamentos.items()
+    ]).sort_values("Custo de energia (R$)", ascending=False)
 
-    # Participação no consumo (donut)
-    kwhs = {EQUIP_LABELS[n]: k["kwh_total"] for n, k in stats["equipamentos"].items()}
-    fig_pie = go.Figure(go.Pie(
-        labels=list(kwhs.keys()), values=list(kwhs.values()), hole=0.45,
-        marker=dict(colors=[EQUIP_CORES[n] for n in stats["equipamentos"]]),
+    fig_ranking = go.Figure(go.Bar(
+        x=ranking["Custo de energia (R$)"],
+        y=ranking["Equipamento"],
+        orientation="h",
+        marker_color=[EQUIP_CORES[nome] for nome in ranking["Chave"]],
+        text=[f"R${valor:.2f}" for valor in ranking["Custo de energia (R$)"]],
+        textposition="outside",
     ))
-    fig_pie.update_layout(title="Participação no consumo total",
-                           margin=dict(t=40, b=10), height=350)
-    st.plotly_chart(fig_pie, use_container_width=True)
+    fig_ranking.update_layout(
+        title="Ranking de custo por equipamento",
+        yaxis=dict(autorange="reversed"),
+        xaxis_title="Custo de energia (R$)",
+        margin=dict(t=50, b=30),
+        height=330,
+    )
+    st.plotly_chart(fig_ranking, use_container_width=True)
+
+    if equipamentos[maior_pico]["pct_kwh_em_pico"] > 0:
+        st.warning(
+            f"Atenção ao pico tarifário: {EQUIP_LABELS[maior_pico]} concentra "
+            f"{equipamentos[maior_pico]['pct_kwh_em_pico']:.1f} % do seu consumo nesse período."
+        )
+
+    with st.expander("Detalhes por equipamento"):
+        st.dataframe(ranking.drop(columns="Chave").round(2), use_container_width=True, hide_index=True)
 
 st.divider()
 

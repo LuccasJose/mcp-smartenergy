@@ -18,6 +18,7 @@ from smarty_energy.mcp.dashboard.state import (
     avaliar,
     comparar,
     export_all_data,
+    get_analysis_status,
     require_setup,
     snapshot_policy,
     treinar,
@@ -31,6 +32,34 @@ st.caption(
 
 if not require_setup():
     st.stop()
+
+if mensagem := st.session_state.pop("analysis_feedback", None):
+    st.success(mensagem)
+
+try:
+    status = get_analysis_status()
+except MCPServerError as e:
+    st.error(str(e))
+    st.stop()
+
+MENSAGENS_ETAPA = {
+    "treinar": ("Próxima ação: treinar os agentes", "Ainda não existe uma política treinada no servidor."),
+    "avaliar": ("Próxima ação: avaliar o IQL", "O treino está pronto; agora meça o desempenho da política atual."),
+    "comparar": ("Próxima ação: comparar estratégias", "A avaliação está pronta; compare os resultados antes de investigar."),
+    "investigar": ("Análise pronta para investigação", "Abra a Visão geral para o resultado executivo e os diagnósticos."),
+}
+titulo_etapa, descricao_etapa = MENSAGENS_ETAPA[status["proxima_etapa"]]
+st.subheader(titulo_etapa)
+st.caption(descricao_etapa)
+etapas = st.columns(4)
+for coluna, rotulo, concluida in zip(
+    etapas,
+    ("Treino", "Avaliação", "Comparação", "Investigação"),
+    (status["treinado"], status["avaliado"], status["comparado"], status["comparado"]),
+):
+    coluna.metric(rotulo, "Concluída" if concluida else "Pendente")
+
+st.divider()
 
 st.header("1. Treinar os agentes")
 st.caption(
@@ -48,16 +77,21 @@ n_eps = col_a.number_input(
     step=50,
     help="Quantidade de episódios usados para treinar os três agentes IQL.",
 )
-col_b.metric("Estado atual", "Concluído" if st.session_state.treinado else "Pendente")
+col_b.metric("Estado atual", "Concluído" if status["treinado"] else "Pendente")
 
-if st.button("Treinar agentes", type="primary", disabled=not st.session_state.mcp_conectado):
+if st.button(
+    "Treinar agentes",
+    type="primary" if status["proxima_etapa"] == "treinar" else "secondary",
+    disabled=not st.session_state.mcp_conectado,
+):
     try:
         with st.spinner(f"Treinando {n_eps} episódios..."):
             sumario = treinar(int(n_eps))
-        st.success(
+        st.session_state.analysis_feedback = (
             f"Treino concluído. Custo médio recente: "
             f"R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia."
         )
+        st.rerun()
     except MCPServerError as e:
         st.error(str(e))
 
@@ -83,37 +117,61 @@ propagar_soc = col_a.checkbox(
     help="Quando ligado, o estado final da bateria de um dia é usado como início do próximo.",
     disabled=not st.session_state.treinado,
 )
-col_b.metric("Avaliação", "Concluída" if st.session_state.avaliado else "Pendente")
-col_b.metric("Comparação", "Concluída" if st.session_state.comparado else "Pendente")
+col_b.metric("Avaliação", "Concluída" if status["avaliado"] else "Pendente")
+col_b.metric("Comparação", "Concluída" if status["comparado"] else "Pendente")
 
-if st.button("Congelar política como RL puro", disabled=not st.session_state.treinado,
-             help="Salva a política atual para comparar o RL puro com a política assistida pelo LLM-juiz."):
-    try:
-        snapshot_policy("iql_puro")
-        st.success("Política congelada como RL puro. Agora execute a comparação.")
-    except MCPServerError as e:
-        st.error(str(e))
+with st.expander("Opção avançada: comparar com RL puro"):
+    st.caption(
+        "Congela a política atual antes da comparação. Use esta opção apenas quando "
+        "quiser medir o ganho adicional do LLM-juiz sobre o RL sem intervenção."
+    )
+    if status["rl_puro_congelado"]:
+        st.success("Snapshot RL puro disponível para a próxima comparação.")
+    elif st.button("Congelar política como RL puro", disabled=not status["treinado"],
+                   help="Salva a política atual para comparação posterior."):
+        try:
+            snapshot_policy("iql_puro")
+            st.session_state.analysis_feedback = "Política congelada como RL puro. Agora execute a comparação."
+            st.rerun()
+        except MCPServerError as e:
+            st.error(str(e))
 
 col_a, col_b = st.columns(2)
-if col_a.button("Avaliar o IQL", disabled=not st.session_state.treinado, use_container_width=True):
+if col_a.button(
+    "Avaliar o IQL",
+    type="primary" if status["proxima_etapa"] == "avaliar" else "secondary",
+    disabled=not status["treinado"],
+    use_container_width=True,
+):
     try:
         with st.spinner("Avaliando o desempenho..."):
             resultado = avaliar(int(n_dias), propagar_soc)
-        st.success(f"Avaliação concluída. Custo médio: R${resultado['custo_medio_dia_rs']:.2f}/dia.")
+        st.session_state.analysis_feedback = (
+            f"Avaliação concluída. Custo médio: R${resultado['custo_medio_dia_rs']:.2f}/dia."
+        )
+        st.rerun()
     except MCPServerError as e:
         st.error(str(e))
 
-if col_b.button("Comparar estratégias", disabled=not st.session_state.avaliado, use_container_width=True):
+if col_b.button(
+    "Comparar estratégias",
+    type="primary" if status["proxima_etapa"] == "comparar" else "secondary",
+    disabled=not status["avaliado"],
+    use_container_width=True,
+):
     try:
         with st.spinner("Comparando estratégias..."):
             comparar(int(n_dias), propagar_soc)
         with st.spinner("Atualizando a avaliação da política atual..."):
             avaliar(int(n_dias), propagar_soc)
-        st.success("Comparação concluída. Acesse a Visão geral para interpretar o resultado.")
+        st.session_state.analysis_feedback = (
+            "Comparação concluída. Acesse a Visão geral para interpretar o resultado."
+        )
+        st.rerun()
     except MCPServerError as e:
         st.error(str(e))
 
-if not st.session_state.avaliado:
+if not status["avaliado"]:
     st.caption("A comparação será liberada depois que a avaliação do IQL for concluída.")
 
 st.divider()
@@ -123,30 +181,29 @@ st.caption(
     "Trace diário e Equipamentos para investigar causas e detalhes."
 )
 
-if not st.session_state.avaliado:
+if not status["avaliado"]:
     st.info("A avaliação ainda está pendente.")
-elif not st.session_state.comparado:
+elif not status["comparado"]:
     st.info("A avaliação foi concluída. Execute também a comparação para liberar todos os diagnósticos.")
 else:
     st.success("A análise está pronta para investigação.")
 
 st.divider()
-st.header("4. Exportar resultados")
-st.caption("Gera um arquivo JSON com treino, avaliações, violações e indicadores de equipamentos.")
+with st.expander("Exportar resultados"):
+    st.caption("Gera um arquivo JSON com treino, avaliações, violações e indicadores de equipamentos.")
+    if st.button("Gerar arquivo de exportação", disabled=not status["treinado"]):
+        try:
+            with st.spinner("Reunindo resultados..."):
+                st.session_state.export_payload = export_all_data()
+        except MCPServerError as e:
+            st.error(str(e))
 
-if st.button("Gerar arquivo de exportação", disabled=not st.session_state.treinado):
-    try:
-        with st.spinner("Reunindo resultados..."):
-            st.session_state.export_payload = export_all_data()
-    except MCPServerError as e:
-        st.error(str(e))
-
-if st.session_state.get("export_payload"):
-    payload = st.session_state.export_payload
-    st.download_button(
-        "Baixar resultados em JSON",
-        data=json.dumps(payload, indent=2, ensure_ascii=False),
-        file_name="smartenergy_export.json",
-        mime="application/json",
-    )
-    st.caption(f"Arquivo gerado em {payload.get('gerado_em', '?')} (UTC).")
+    if st.session_state.get("export_payload"):
+        payload = st.session_state.export_payload
+        st.download_button(
+            "Baixar resultados em JSON",
+            data=json.dumps(payload, indent=2, ensure_ascii=False),
+            file_name="smartenergy_export.json",
+            mime="application/json",
+        )
+        st.caption(f"Arquivo gerado em {payload.get('gerado_em', '?')} (UTC).")

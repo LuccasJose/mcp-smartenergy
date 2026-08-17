@@ -68,6 +68,31 @@ def test_reward_weights_recria_env_global(srv):
 
 # --- health_report: detecta pesos modificados ------------------------------
 
+def test_get_analysis_status_representa_etapas(srv):
+    inicial = json.loads(srv.get_analysis_status())
+    assert inicial["proxima_etapa"] == "treinar"
+    assert not inicial["treinado"]
+
+    srv.configure_agents(n_episodios=2)
+    srv.train_agents()
+    apos_treino = json.loads(srv.get_analysis_status())
+    assert apos_treino["proxima_etapa"] == "avaliar"
+
+    srv.evaluate_agents(n_dias=2)
+    apos_avaliacao = json.loads(srv.get_analysis_status())
+    assert apos_avaliacao["proxima_etapa"] == "comparar"
+
+    srv.snapshot_policy("iql_puro")
+    apos_snapshot = json.loads(srv.get_analysis_status())
+    assert apos_snapshot["rl_puro_congelado"]
+
+    srv.train_agents(n_episodios=2)
+    apos_novo_treino = json.loads(srv.get_analysis_status())
+    assert not apos_novo_treino["avaliado"]
+    assert not apos_novo_treino["comparado"]
+    assert not apos_novo_treino["rl_puro_congelado"]
+    assert apos_novo_treino["proxima_etapa"] == "avaliar"
+
 def test_health_report_sem_pesos_modificados_nao_dispara_alerta(srv):
     out = json.loads(srv.health_report())
     assert out.get("pesos_reward_modificados") is None

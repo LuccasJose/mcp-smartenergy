@@ -56,6 +56,24 @@ custos = curva["custos"]
 custos_ma = curva["custos_ma"]
 epsilons = curva.get("epsilons", [])
 
+custos_validos = np.asarray(custos_ma, dtype=float)
+custos_validos = custos_validos[np.isfinite(custos_validos)]
+rewards_validos = np.asarray(rewards_ma, dtype=float)
+rewards_validos = rewards_validos[np.isfinite(rewards_validos)]
+
+if len(custos_validos) >= 2 and len(rewards_validos) >= 2:
+    variacao_custo = (custos_validos[-1] - custos_validos[0]) / max(abs(custos_validos[0]), 1e-9) * 100
+    variacao_retorno = (rewards_validos[-1] - rewards_validos[0]) / max(abs(rewards_validos[0]), 1e-9) * 100
+    st.subheader("Leitura rápida")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Custo recente", f"R${custos_validos[-1]:.2f}/dia", f"{variacao_custo:+.1f} % desde o início")
+    c2.metric("Retorno recente", f"{rewards_validos[-1]:.2f}", f"{variacao_retorno:+.1f} % desde o início")
+    c3.metric("Exploração final", f"{epsilons[-1]:.3f}" if epsilons else "indisponível")
+    if variacao_custo < 0 and variacao_retorno > 0:
+        st.success("O treino mostra melhora conjunta: o custo caiu enquanto o retorno aumentou.")
+    else:
+        st.warning("As tendências de custo e retorno ainda não apontam para melhora conjunta. Inspecione o gráfico e o erro TD.")
+
 # ── Plot duplo eixo: reward + custo + (opcional epsilon) ──────────────────
 fig = make_subplots(specs=[[{"secondary_y": True}]])
 
