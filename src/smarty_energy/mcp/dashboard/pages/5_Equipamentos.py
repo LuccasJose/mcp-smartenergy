@@ -4,7 +4,7 @@ Toda a página é construída a partir de chamadas MCP:
 - get_equipment_stats  → KPIs por equipamento (kWh, horas ligada, pico, custo)
 - get_equipment_hourly → uso médio hora-a-hora por equipamento
 Comparação entre estratégias usa as chaves do tracker populadas por
-compare_strategies: 'iql_eval_cmp' (RL), 'heuristico', 'sem_agente'.
+compare_strategies: 'rl_llm_mcp', 'rl_padrao', 'heuristico', 'sem_agente'.
 Nenhum cálculo de métrica acontece no dashboard.
 """
 
@@ -44,24 +44,23 @@ EQUIP_CORES = {
     "silo":     "rgb(140,86,75)",
 }
 ESTRATEGIAS = {
-    "iql_eval_cmp": "RL + LLM-juiz (política atual)",
-    "iql_puro":     "RL puro (snapshot)",
+    "rl_llm_mcp":   "RL + LLM MCP",
+    "rl_padrao":    "RL padrão",
     "heuristico":   "Heurísticas",
-    "sem_agente":   "Sem otimização",
+    "sem_agente":   "Sem agentes",
 }
 ESTRATEGIA_CORES = {
-    "iql_eval_cmp": "rgb(44,160,44)",
-    "iql_puro":     "rgb(31,119,180)",
+    "rl_llm_mcp":   "rgb(44,160,44)",
+    "rl_padrao":    "rgb(31,119,180)",
     "heuristico":   "rgb(255,127,14)",
     "sem_agente":   "rgb(214,39,40)",
 }
 
 ORIGENS = {
-    "iql_eval":     "RL — política atual (Avaliar)",
-    "iql_eval_cmp": "RL + LLM-juiz (Comparar)",
-    "iql_puro":     "RL puro — snapshot (Comparar)",
+    "rl_llm_mcp":   "RL + LLM MCP",
+    "rl_padrao":    "RL padrão",
     "heuristico":   "Heurísticas",
-    "sem_agente":   "Sem otimização",
+    "sem_agente":   "Sem agentes",
 }
 
 # ── 1. KPIs estilo BI por equipamento ──────────────────────────────────────
@@ -162,8 +161,8 @@ st.divider()
 # ── 3. Comparação entre estratégias ────────────────────────────────────────
 st.subheader("Comparação entre estratégias")
 st.caption(
-    "Compare o equipamento selecionado entre sem otimização, heurísticas, RL puro "
-    "e RL + LLM-juiz. O RL puro aparece depois de congelar a política em Executar análise."
+    "Compare o equipamento selecionado entre sem agentes, heurísticas, RL padrão "
+    "e RL + LLM MCP. Treine o RL padrão + MCP em Executar análise e compare."
 )
 
 if not st.session_state.comparado:

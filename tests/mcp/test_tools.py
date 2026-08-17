@@ -85,19 +85,20 @@ def test_health_report_com_pesos_modificados_dispara_alerta(srv):
 
 # --- compare_strategies popula 3 trackers ----------------------------------
 
-def test_compare_strategies_popula_tres_trackers(srv):
+def test_compare_strategies_popula_quatro_trackers(srv):
     # Treina minimamente pra dar inicializacao plausivel ao IQL
     srv.configure_agents(n_episodios=2)
     srv.train_agents()
 
     out = json.loads(srv.compare_strategies(n_dias=2))
-    assert "IQL" in out
+    assert "RL_LLM_MCP" in out
+    assert "RL_padrao" in out
     assert "Heuristico" in out
     assert "SemAgente" in out
     assert "tracker_keys" in out
-    assert out["tracker_keys"] == ["iql_eval_cmp", "heuristico", "sem_agente"]
+    assert out["tracker_keys"] == ["sem_agente", "heuristico", "rl_padrao", "rl_llm_mcp"]
 
-    # Os 3 trackers devem ter passos registrados
+    # Os 4 trackers devem ter passos registrados
     for key in out["tracker_keys"]:
         assert len(srv.tracker.passos[key]) > 0, f"tracker {key} vazio"
         assert len(srv.tracker.episodios[key]) > 0, f"episodios de {key} vazio"
@@ -107,7 +108,7 @@ def test_compare_strategies_calcula_reducoes(srv):
     srv.configure_agents(n_episodios=2)
     srv.train_agents()
     out = json.loads(srv.compare_strategies(n_dias=2))
-    assert "reducao_iql_vs_sem_pct" in out
+    assert "reducao_rl_llm_vs_sem_pct" in out
 
 
 # --- configure_agents -------------------------------------------------------
@@ -130,30 +131,23 @@ def test_configure_agents_aceita_validos(srv):
 
 # --- equipamentos + export --------------------------------------------------
 
-def test_snapshot_policy_habilita_braco_rl_puro(srv):
+def test_rl_padrao_sempre_presente(srv):
     srv.configure_agents(n_episodios=2)
     srv.train_agents()
 
-    # Sem snapshot: comparação com 3 braços
+    # train_agents com pesos default captura o RL padrão automaticamente.
     out = json.loads(srv.compare_strategies(n_dias=2))
-    assert "IQL_puro" not in out
+    assert "RL_padrao" in out
+    assert "rl_padrao" in out["tracker_keys"]
+    assert len(srv.tracker.passos["rl_padrao"]) == 2 * 24
+    assert "reducao_llm_vs_rl_padrao_pct" in out
+    # Sem o LLM-juiz agir, RL padrão == RL + LLM MCP.
+    assert abs(out["RL_padrao"]["custo_medio_dia_rs"]
+               - out["RL_LLM_MCP"]["custo_medio_dia_rs"]) < 1e-6
 
-    # Congela o RL puro e compara de novo: 4 braços
-    snap = json.loads(srv.snapshot_policy("iql_puro"))
-    assert snap["status"] == "política congelada"
-
-    out = json.loads(srv.compare_strategies(n_dias=2))
-    assert "IQL_puro" in out
-    assert "iql_puro" in out["tracker_keys"]
-    assert len(srv.tracker.passos["iql_puro"]) == 2 * 24
-    assert "reducao_juiz_vs_rl_puro_pct" in out
-    # Snapshot da mesma política → custo idêntico ao IQL atual
-    assert abs(out["IQL_puro"]["custo_medio_dia_rs"]
-               - out["IQL"]["custo_medio_dia_rs"]) < 1e-6
-
-    # health_report reflete o 4º braço
+    # health_report reflete o braço RL padrão.
     hr = json.loads(srv.health_report())
-    assert hr["comparacao_baselines"]["custo_rl_puro_rs_dia"] is not None
+    assert hr["comparacao_baselines"]["custo_rl_padrao_rs_dia"] is not None
 
 
 def test_equipment_tools_apos_compare(srv):
@@ -161,7 +155,7 @@ def test_equipment_tools_apos_compare(srv):
     srv.train_agents()
     srv.compare_strategies(n_dias=2)
 
-    for chave in ("iql_eval_cmp", "heuristico", "sem_agente"):
+    for chave in ("rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente"):
         stats = json.loads(srv.get_equipment_stats(chave))
         assert "equipamentos" in stats, f"stats de {chave} sem equipamentos"
         assert set(stats["equipamentos"]) == {"pivo", "captacao", "secador",
@@ -187,9 +181,9 @@ def test_export_all_data_estrutura(srv):
     assert "config" in out and "w_custo" in out["config"]
     assert out["treino"] is not None
     assert out["curva_aprendizado"] is not None
-    assert out["avaliacoes"]["iql_eval_cmp"] is not None
+    assert out["avaliacoes"]["rl_llm_mcp"] is not None
     assert out["avaliacoes"]["heuristico"] is not None
     assert out["equipamentos_kpis"]["sem_agente"] is not None
-    assert out["equipamentos_hora_a_hora"]["iql_eval_cmp"] is not None
+    assert out["equipamentos_hora_a_hora"]["rl_llm_mcp"] is not None
     # chave nunca populada fica None em vez de dict de aviso
     assert out["avaliacoes"]["iql_eval"] is None

@@ -14,8 +14,9 @@ import streamlit as st
 from smarty_energy.mcp.dashboard.mcp_client import MCPServerError, call_tool
 
 __all__ = [
-    "ensure_state", "require_setup", "conectar_mcp",
-    "treinar", "avaliar", "comparar", "snapshot_policy",
+    "ensure_state", "require_setup", "conectar_mcp", "sincronizar_status",
+    "treinar", "treinar_rl_e_mcp", "avaliar", "comparar",
+    "snapshot_policy", "carregar_rl_padrao",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
     "get_equipment_hourly", "get_equipment_stats", "export_all_data",
@@ -82,25 +83,48 @@ def treinar(n_episodios: int) -> dict:
     return sumario
 
 
-def avaliar(n_dias: int, propagar_soc: bool = True) -> dict:
+def treinar_rl_e_mcp(n_episodios: int) -> dict:
+    """Treina, num só passo, o RL padrão e o RL + LLM MCP (independentes)."""
     ss = st.session_state
-    res = call_tool("evaluate_agents", n_dias=n_dias, propagar_soc=propagar_soc)
+    sumario = call_tool("train_rl_e_mcp", n_episodios=n_episodios)
+    if "erro" not in sumario:
+        ss.treinado = True
+        ss.avaliado = False
+        ss.comparado = False
+        ss.pop("export_payload", None)
+    return sumario
+
+
+def avaliar(n_dias: int, propagar_soc: bool = True,
+            continuar_do_treino: bool = False) -> dict:
+    ss = st.session_state
+    res = call_tool("evaluate_agents", n_dias=n_dias, propagar_soc=propagar_soc,
+                    continuar_do_treino=continuar_do_treino)
     ss.avaliado = True
     return res
 
 
-def comparar(n_dias: int, propagar_soc: bool = True) -> dict:
+def comparar(n_dias: int, propagar_soc: bool = True,
+             continuar_do_treino: bool = False) -> dict:
+    """Avalia e compara as 4 estratégias num só passo (fonte única de medição)."""
     ss = st.session_state
-    res = call_tool("compare_strategies", n_dias=n_dias, propagar_soc=propagar_soc)
+    res = call_tool("compare_strategies", n_dias=n_dias, propagar_soc=propagar_soc,
+                    continuar_do_treino=continuar_do_treino)
+    ss.avaliado = True
     ss.comparado = True
     return res
 
 
-def snapshot_policy(nome: str = "iql_puro") -> dict:
+def snapshot_policy(nome: str = "rl_padrao") -> dict:
     ss = st.session_state
     res = call_tool("snapshot_policy", nome=nome)
-    ss.rl_puro_congelado = True
+    ss.rl_padrao_congelado = True
     return res
+
+
+def carregar_rl_padrao(dir_path: str = "", run_id: str = "") -> dict:
+    """Define o braço 'RL padrão' a partir de um run treinado (ex.: Smart_Energy)."""
+    return call_tool("carregar_rl_padrao", dir_path=dir_path, run_id=run_id)
 
 
 # --- leitura de métricas/diagnóstico (todas via tool MCP) ------------------
@@ -125,15 +149,15 @@ def get_td_error_series(agente: str) -> dict:
     return call_tool("get_td_error_series", agente=agente)
 
 
-def get_hourly_violations(agente: str = "iql_eval") -> dict:
+def get_hourly_violations(agente: str = "rl_llm_mcp") -> dict:
     return call_tool("get_hourly_violations", agente=agente)
 
 
-def get_equipment_hourly(agente: str = "iql_eval") -> dict:
+def get_equipment_hourly(agente: str = "rl_llm_mcp") -> dict:
     return call_tool("get_equipment_hourly", agente=agente)
 
 
-def get_equipment_stats(agente: str = "iql_eval") -> dict:
+def get_equipment_stats(agente: str = "rl_llm_mcp") -> dict:
     return call_tool("get_equipment_stats", agente=agente)
 
 

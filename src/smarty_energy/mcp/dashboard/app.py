@@ -102,15 +102,12 @@ else:
     c4.metric("Tarifa max (R$/kWh)", f"{m['tarifa_max_rs_kwh']:.4f}")
 
     st.markdown("### Progresso")
-    cs1, cs2, cs3 = st.columns(3)
+    cs1, cs2 = st.columns(2)
     cs1.metric("1. Treino", "Concluído" if st.session_state.treinado else "Pendente")
-    cs2.metric("2. Avaliação", "Concluída" if st.session_state.avaliado else "Pendente")
-    cs3.metric("3. Comparação", "Concluída" if st.session_state.comparado else "Pendente")
+    cs2.metric("2. Comparação", "Concluída" if st.session_state.comparado else "Pendente")
 
     if not st.session_state.treinado:
         st.warning("Próximo passo: abra **Executar análise** e treine os agentes.")
-    elif not st.session_state.avaliado:
-        st.warning("Próximo passo: abra **Executar análise** e avalie o desempenho do IQL.")
     elif not st.session_state.comparado:
         st.warning("Próximo passo: volte a **Executar análise** e compare as estratégias.")
     else:

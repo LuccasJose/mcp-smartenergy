@@ -99,6 +99,13 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
 
     df = pd.DataFrame(td["passos"])
 
+    # O trace vem do MCP em JSON (default=str), então flags booleanas chegam
+    # como texto "True"/"False" — recoage para bool antes de usar em máscaras.
+    for _col in ("em_pico_tarifa", "pcc_violado", "soc_violado", "teto_excedido",
+                 "bomba_ligada", "bomba_agendada", "sede_eco", "pivo_em_lock"):
+        if _col in df.columns and df[_col].dtype == object:
+            df[_col] = df[_col].map(lambda v: str(v).strip().lower() in ("true", "1", "1.0"))
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Retorno total", f"{td['reward_total']:.2f}")
     c2.metric("Custo total", f"R${td['custo_total']:.2f}")
@@ -188,11 +195,10 @@ st.subheader("Violações ao longo do dia")
 st.caption("O mapa de calor agrega a última avaliação ou comparação. Cores mais fortes mostram horários mais críticos.")
 
 opcoes_agente = {
-    "iql_eval": "RL — política atual (Avaliar)",
-    "iql_eval_cmp": "RL + LLM-juiz (Comparar)",
-    "iql_puro": "RL puro — snapshot (Comparar)",
+    "rl_llm_mcp": "RL + LLM MCP",
+    "rl_padrao": "RL padrão",
     "heuristico": "Heurísticas",
-    "sem_agente": "Sem otimização",
+    "sem_agente": "Sem agentes",
 }
 agente_sel = st.selectbox("Origem dos dados",
                             options=list(opcoes_agente.keys()),

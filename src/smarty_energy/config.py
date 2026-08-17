@@ -38,7 +38,7 @@ CONFIG = {
     "soc_max_pct": 95.0,        # acima disso  → para de carregar
     "eficiencia_carga": 0.92,   # η carga
     "eficiencia_descarga": 0.95, # η descarga
-    "bat_throughput_max_kwh": 48.0,  # ciclo máximo diário (kWh)
+    "bat_throughput_max_kwh": 30.0,  # ciclo diário máx (~1.25 ciclos p/ vida útil realista)
 
     # Limites de conexão e geração
     "pcc_max_kw": 65.8,          # limite PCC importação/exportação

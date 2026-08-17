@@ -21,7 +21,9 @@ from ..config import (
 from ..data_loader import carregar_dados, descrever_base
 from ..environment import FazendaEnergyEnv, ESPACO_ESTADOS_TOTAL as N_ESTADOS_TOTAL
 from ..evaluation import identificar_cenarios, classificar_dia
-from ..agents import IQLSystem, AgentesHeuristicos, SemAgente, avaliar_politica
+from ..agents import (
+    IQLSystem, AgentesHeuristicos, SemAgente, avaliar_politica, construir_agentes,
+)
 from .. import runs
 from .tracker import MetricsTracker
 
@@ -56,9 +58,22 @@ _dia_atual_idx = 0
 # SOC encadeado entre chamadas de run_episode (continuidade da bateria no Trace).
 _soc_trace: float | None = None
 
-# Políticas congeladas por snapshot_policy — nome -> {agente: {estado: qvalues}}.
+# Políticas congeladas (cópia das Q-tables) — nome -> {agente: {estado: qvalues}}.
+# 'rl_padrao' é capturado automaticamente ao treinar com os pesos default.
 _snapshots: dict[str, dict] = {}
+# True quando o 'RL padrão' foi carregado de um run externo (ex.: Smart_Energy):
+# nesse caso o train_agents NÃO sobrescreve o snapshot com o treino do servidor.
+_rl_padrao_travado: bool = False
 env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+
+# ── Braços da comparação — chave do tracker -> rótulo exibido ──────────
+# Fonte única dos 4 sistemas comparados; o dashboard reusa estes rótulos.
+BRACOS_COMPARACAO = {
+    "sem_agente":  "Sem agentes",
+    "heuristico":  "Heurísticas",
+    "rl_padrao":   "RL padrão",
+    "rl_llm_mcp":  "RL + LLM MCP",
+}
 
 # Host/porta do transporte HTTP — usados quando o servidor roda como
 # processo central compartilhado por múltiplos clientes MCP (dashboard
@@ -86,6 +101,19 @@ _DEFAULT_REWARD_WEIGHTS = {k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS}
 
 def _err(e: Exception) -> str:
     return json.dumps({"erro": f"{type(e).__name__}: {e}"}, indent=2, default=str)
+
+
+def _congelar_politica(nome: str) -> dict:
+    """Copia as Q-tables atuais do IQL sob `nome` em `_snapshots`."""
+    snap = {n: {s: q.copy() for s, q in ag.q_table.items()}
+            for n, ag in iql.agentes.items()}
+    _snapshots[nome] = snap
+    return snap
+
+
+def _pesos_sao_default() -> bool:
+    """True se nenhum peso do reward foi alterado (o LLM-juiz ainda não agiu)."""
+    return all(CONFIG[k] == _DEFAULT_REWARD_WEIGHTS[k] for k in _REWARD_WEIGHT_KEYS)
 
 
 # ------------------------------------------------------------------ #
@@ -245,7 +273,60 @@ def train_agents(n_episodios: int = 0) -> str:
             iql.n_episodios = n_episodios
         sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
                               tracker=tracker, log=_log)
+        # RL padrão = treino com os pesos default (sem intervenção do LLM-juiz).
+        # Capturado automaticamente para ser o braço de referência da comparação;
+        # não sobrescreve um RL padrão carregado de um run externo (travado), nem
+        # o snapshot pré-juiz se os pesos já foram alterados.
+        if _pesos_sao_default() and not _rl_padrao_travado:
+            _congelar_politica("rl_padrao")
+            sumario["rl_padrao_capturado"] = True
         return json.dumps(sumario, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def train_rl_e_mcp(n_episodios: int = 0) -> str:
+    """Treina, num só passo, DUAS políticas independentes com o mesmo nº de
+    episódios: uma vira o braço 'RL padrão' (congelado e travado) e a outra o
+    'RL + LLM MCP' (a política IQL viva que o LLM-juiz pode refinar depois).
+
+    São dois treinos separados (RNGs distintos), então as políticas diferem
+    mesmo sem o juiz agir. Use n_episodios=0 para o valor configurado.
+    """
+    global _rl_padrao_travado
+    try:
+        n = n_episodios if n_episodios > 0 else iql.n_episodios
+
+        # 1) RL padrão — IQL independente, treino próprio, congelado e travado.
+        rl = IQLSystem(ajustar_decay(CONFIG, n))
+        rl.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv, log=_log)
+        _snapshots["rl_padrao"] = {
+            nome: {s: q.copy() for s, q in ag.q_table.items()}
+            for nome, ag in rl.agentes.items()
+        }
+        _rl_padrao_travado = True
+
+        # 2) RL + LLM MCP — política viva (não recaptura rl_padrao: já travado).
+        tracker.limpar("iql_treino")
+        iql.n_episodios = n
+        sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
+                              tracker=tracker, log=_log)
+
+        return json.dumps({
+            "status": "RL padrão e RL + LLM MCP treinados (independentes)",
+            "n_episodios": n,
+            "rl_padrao": {
+                "best_ep": rl.ultimo_hist["best_ep"],
+                "best_custo_med_rs": round(rl.ultimo_hist["best_custo_med"], 2),
+                "estados_por_agente": {nm: len(qt) for nm, qt in _snapshots["rl_padrao"].items()},
+            },
+            "rl_llm_mcp": {
+                "best_ep": sumario.get("best_ep"),
+                "custo_medio_ultimos_50_rs": sumario.get("custo_medio_ultimos_50_rs"),
+                "epsilon_final": sumario.get("epsilon_final"),
+            },
+        }, indent=2)
     except Exception as e:
         return _err(e)
 
@@ -284,29 +365,52 @@ def evaluate_agents(n_dias: int = 30, propagar_soc: bool = True,
 @mcp.tool()
 def compare_strategies(n_dias: int = 30, propagar_soc: bool = True,
                        continuar_do_treino: bool = True) -> str:
-    """Compara as estratégias do projeto nos mesmos n_dias do dataset.
+    """Compara as 4 estratégias do projeto nos mesmos n_dias do dataset.
 
-    Braços: IQL atual (RL + LLM-juiz se o juiz já agiu), Heurístico,
-    SemAgente e — se snapshot_policy("iql_puro") foi chamada — o RL puro
-    congelado antes do juiz. Todos rodam sobre as mesmas datas e o MESMO
-    SOC inicial (soc_propagado do treino se continuar_do_treino, senão 50%).
-    Popula tracker com 'iql_eval_cmp', 'iql_puro', 'heuristico', 'sem_agente'.
+    Braços (sempre os 4, mesmas datas e mesmo SOC inicial):
+      - Sem agentes  (tracker 'sem_agente')
+      - Heurísticas  (tracker 'heuristico')
+      - RL padrão    (tracker 'rl_padrao') — política treinada sem o LLM-juiz,
+                     capturada automaticamente no train_agents com pesos default.
+      - RL + LLM MCP (tracker 'rl_llm_mcp') — política IQL atual (com os ajustes
+                     de reward que o LLM-juiz eventualmente aplicou).
+
+    SOC inicial = soc_propagado do treino se continuar_do_treino, senão 50%.
+    Enquanto o juiz não agir, 'RL padrão' e 'RL + LLM MCP' coincidem.
     """
     try:
-        tracker.limpar("iql_eval")
-        tracker.limpar("iql_eval_cmp")
-        tracker.limpar("iql_puro")
-        tracker.limpar("heuristico")
-        tracker.limpar("sem_agente")
+        for chave in ("iql_eval", "rl_llm_mcp", "rl_padrao",
+                      "heuristico", "sem_agente"):
+            tracker.limpar(chave)
 
         soc_ini = iql.soc_propagado if continuar_do_treino else None
-        r_iql  = iql.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
-                              n_dias=n_dias, tracker=tracker,
-                              propagar_soc=propagar_soc,
-                              soc_inicial=soc_ini)
-        # iql escreve em 'iql_eval'; renomeia para não conflitar
-        tracker.passos["iql_eval_cmp"]     = tracker.passos.pop("iql_eval", [])
-        tracker.episodios["iql_eval_cmp"]  = tracker.episodios.pop("iql_eval", [])
+
+        # RL + LLM MCP — política IQL atual
+        r_llm  = iql.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
+                             n_dias=n_dias, tracker=tracker,
+                             propagar_soc=propagar_soc, soc_inicial=soc_ini)
+        # iql escreve em 'iql_eval'; renomeia para o braço da comparação
+        tracker.passos["rl_llm_mcp"]    = tracker.passos.pop("iql_eval", [])
+        tracker.episodios["rl_llm_mcp"] = tracker.episodios.pop("iql_eval", [])
+
+        # RL padrão — snapshot pré-juiz; se ainda não houver, usa a política atual
+        # (idêntica ao RL+LLM enquanto o juiz não mexeu nos pesos).
+        snap = _snapshots.get("rl_padrao") or _congelar_politica("rl_padrao")
+
+        def escolher_padrao(env_, est):
+            s = env_.discretizar(est)
+            acoes = []
+            for nome_ag in ("armazenamento", "consumo", "gerente"):
+                q = snap[nome_ag].get(s)
+                acoes.append(int(q.argmax()) if q is not None else 0)
+            return tuple(acoes)
+
+        r_padrao = avaliar_politica(
+            escolher_padrao, DIAS, TARIFA_24H, cfg=CONFIG,
+            env_cls=FazendaEnergyEnv, n_dias=n_dias, tracker=tracker,
+            tracker_key="rl_padrao", propagar_soc=propagar_soc,
+            soc_inicial=soc_ini,
+        )
 
         r_heur = heuristico.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
                                      n_dias=n_dias, tracker=tracker,
@@ -320,44 +424,34 @@ def compare_strategies(n_dias: int = 30, propagar_soc: bool = True,
                                      soc_inicial=soc_ini)
 
         resultados = {
-            "IQL":        r_iql,
-            "Heuristico": r_heur,
             "SemAgente":  r_sem,
-            "tracker_keys": ["iql_eval_cmp", "heuristico", "sem_agente"],
+            "Heuristico": r_heur,
+            "RL_padrao":  r_padrao,
+            "RL_LLM_MCP": r_llm,
+            "tracker_keys": ["sem_agente", "heuristico", "rl_padrao", "rl_llm_mcp"],
+            "rotulos": BRACOS_COMPARACAO,
         }
 
-        # 4º braço: RL puro congelado por snapshot_policy (antes do LLM-juiz)
-        if "iql_puro" in _snapshots:
-            snap = _snapshots["iql_puro"]
+        custo_sem  = r_sem["custo_medio_dia_rs"]
+        custo_heur = r_heur["custo_medio_dia_rs"]
+        custo_pad  = r_padrao["custo_medio_dia_rs"]
+        custo_llm  = r_llm["custo_medio_dia_rs"]
 
-            def escolher_puro(env_, est):
-                s = env_.discretizar(est)
-                acoes = []
-                for nome_ag in ("armazenamento", "consumo", "gerente"):
-                    q = snap[nome_ag].get(s)
-                    acoes.append(int(q.argmax()) if q is not None else 0)
-                return tuple(acoes)
-
-            r_puro = avaliar_politica(
-                escolher_puro, DIAS, TARIFA_24H, cfg=CONFIG,
-                env_cls=FazendaEnergyEnv, n_dias=n_dias, tracker=tracker,
-                tracker_key="iql_puro", propagar_soc=propagar_soc,
-                soc_inicial=soc_ini,
-            )
-            resultados["IQL_puro"] = r_puro
-            resultados["tracker_keys"].insert(1, "iql_puro")
-            if r_puro["custo_medio_dia_rs"] > 0:
-                resultados["reducao_juiz_vs_rl_puro_pct"] = round(
-                    (r_puro["custo_medio_dia_rs"] - r_iql["custo_medio_dia_rs"])
-                    / r_puro["custo_medio_dia_rs"] * 100, 2)
-
-        custo_iql, custo_heur, custo_sem = (r["custo_medio_dia_rs"]
-                                             for r in (r_iql, r_heur, r_sem))
+        # Reduções da política final (RL + LLM MCP) frente às referências.
         if custo_sem > 0:
-            resultados["reducao_iql_vs_sem_pct"]  = round(
-                (custo_sem - custo_iql) / custo_sem * 100, 2)
-            resultados["reducao_iql_vs_heur_pct"] = round(
-                (custo_heur - custo_iql) / custo_heur * 100, 2) if custo_heur > 0 else None
+            resultados["reducao_rl_llm_vs_sem_pct"] = round(
+                (custo_sem - custo_llm) / custo_sem * 100, 2)
+        if custo_heur > 0:
+            resultados["reducao_rl_llm_vs_heur_pct"] = round(
+                (custo_heur - custo_llm) / custo_heur * 100, 2)
+        # Reduções do RL padrão (sem LLM) — mesma base, para comparar os dois RL.
+        if custo_sem > 0:
+            resultados["reducao_rl_padrao_vs_sem_pct"] = round(
+                (custo_sem - custo_pad) / custo_sem * 100, 2)
+        # Ganho do LLM-juiz sobre o RL padrão.
+        if custo_pad > 0:
+            resultados["reducao_llm_vs_rl_padrao_pct"] = round(
+                (custo_pad - custo_llm) / custo_pad * 100, 2)
 
         return json.dumps(resultados, indent=2)
     except Exception as e:
@@ -474,7 +568,7 @@ def get_learning_curve(janela_media_movel: int = 20) -> str:
 def get_eval_metrics(agente: str = "iql_eval") -> str:
     """Métricas da última avaliação.
 
-    `agente`: "iql_eval" (default), "iql_eval_cmp", "heuristico", "sem_agente".
+    `agente`: "iql_eval" (default), "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente".
     """
     return json.dumps(tracker.get_eval_metrics(agente), indent=2)
 
@@ -512,7 +606,7 @@ def get_equipment_hourly(agente: str = "iql_eval") -> str:
     Retorna pivô, captação, secador, sede, silo + bateria (carga/descarga),
     rede e geração médias por hora 0-23.
 
-    `agente`: "iql_eval", "iql_eval_cmp", "heuristico", "sem_agente", "iql_trace".
+    `agente`: "iql_eval", "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente", "iql_trace".
     """
     return json.dumps(tracker.get_equipment_hourly(agente), indent=2)
 
@@ -524,7 +618,7 @@ def get_equipment_stats(agente: str = "iql_eval") -> str:
     Por equipamento: kWh total e médio/dia, horas ligada, kWh em pico,
     % do consumo total e custo bruto da energia (kWh × tarifa da hora).
 
-    `agente`: "iql_eval", "iql_eval_cmp", "heuristico", "sem_agente", "iql_trace".
+    `agente`: "iql_eval", "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente", "iql_trace".
     """
     return json.dumps(tracker.get_equipment_stats(agente), indent=2)
 
@@ -541,7 +635,7 @@ def export_all_data() -> str:
     try:
         from datetime import datetime, timezone
 
-        chaves_eval = ("iql_eval", "iql_eval_cmp", "iql_puro",
+        chaves_eval = ("iql_eval", "rl_llm_mcp", "rl_padrao",
                        "heuristico", "sem_agente")
 
         def _se_tem(d: dict) -> dict | None:
@@ -828,26 +922,95 @@ def get_financeiro_state() -> str:
 
 
 @mcp.tool()
-def snapshot_policy(nome: str = "iql_puro") -> str:
+def snapshot_policy(nome: str = "rl_padrao") -> str:
     """Congela a política IQL atual (cópia das Q-tables) sob um nome.
 
-    Chame ao fim do treino baseline, ANTES do loop do LLM-juiz: o snapshot
-    "iql_puro" vira o braço 'RL puro' de compare_strategies, permitindo medir
-    quanto o juiz melhorou a política em relação ao RL sem intervenção.
+    O braço 'RL padrão' da comparação já é capturado automaticamente no
+    train_agents (com pesos default). Use esta tool só para sobrescrever
+    manualmente esse snapshot, ou para congelar sob outro nome.
     """
     try:
-        snap = {n: {s: q.copy() for s, q in ag.q_table.items()}
-                for n, ag in iql.agentes.items()}
-        _snapshots[nome] = snap
+        snap = _congelar_politica(nome)
         return json.dumps({
             "status": "política congelada",
             "nome": nome,
             "estados_por_agente": {n: len(qt) for n, qt in snap.items()},
-            "uso": "compare_strategies agora inclui o braço 'IQL_puro'"
-                   if nome == "iql_puro" else None,
+            "uso": "vira o braço 'RL padrão' de compare_strategies"
+                   if nome == "rl_padrao" else None,
         }, indent=2)
     except Exception as e:
         return _err(e)
+
+
+@mcp.tool()
+def carregar_rl_padrao(dir_path: str = "", run_id: str = "") -> str:
+    """Define o braço 'RL padrão' a partir de um run treinado (ex.: Smart_Energy).
+
+    Carrega as 3 Q-tables do run em agentes próprios e as congela como o
+    snapshot 'rl_padrao' — SEM tocar na política IQL viva (o braço RL + LLM
+    MCP). Assim o 'RL padrão' fica idêntico ao RL do projeto Smart_Energy.
+    O snapshot fica TRAVADO: train_agents não o sobrescreve até chamar
+    `liberar_rl_padrao()`.
+
+    Args:
+        dir_path : pasta de um run (com qtable_<agente>.pkl) OU a pasta de runs
+                   que contém vários runs — nesse caso pega o mais recente com
+                   as 3 Q-tables. Tem prioridade sobre run_id.
+        run_id   : id de um run em outputs/runs/ do próprio MCP.
+    """
+    global _rl_padrao_travado
+    try:
+        agentes = construir_agentes(CONFIG)
+        if dir_path:
+            from pathlib import Path
+            base = Path(dir_path)
+            # Se não há Q-tables direto na pasta, trata como pasta de RUNS e
+            # resolve para o run mais recente (nomes por timestamp ordenáveis).
+            if not (base / "qtable_consumo.pkl").exists():
+                candidatos = sorted(
+                    d for d in base.glob("*") if (d / "qtable_consumo.pkl").exists()
+                )
+                if not candidatos:
+                    return json.dumps(
+                        {"erro": f"nenhum run com qtable_*.pkl em {base} "
+                                 "(nem na pasta, nem em subpastas)"}, indent=2)
+                base = candidatos[-1]
+            for nome, ag in agentes.items():
+                p = base / f"qtable_{nome}.pkl"
+                if not p.exists():
+                    return json.dumps({"erro": f"não encontrei {p}"}, indent=2)
+                ag.load(p)
+            origem = str(base)
+        else:
+            rid = run_id or runs.run_mais_recente()
+            if rid is None:
+                return json.dumps({"erro": "nenhum run em outputs/runs/"}, indent=2)
+            runs.carregar_run(rid, agentes)
+            origem = rid
+
+        _snapshots["rl_padrao"] = {
+            n: {s: q.copy() for s, q in ag.q_table.items()}
+            for n, ag in agentes.items()
+        }
+        _rl_padrao_travado = True
+        return json.dumps({
+            "status": "RL padrão carregado e travado",
+            "origem": origem,
+            "estados_por_agente": {n: len(qt) for n, qt in _snapshots["rl_padrao"].items()},
+            "nota": "rode compare_strategies para incluí-lo; train_agents não o sobrescreve.",
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def liberar_rl_padrao() -> str:
+    """Destrava o 'RL padrão' — o próximo train_agents volta a capturá-lo."""
+    global _rl_padrao_travado
+    _rl_padrao_travado = False
+    return json.dumps({"status": "RL padrão destravado",
+                       "nota": "o próximo train_agents (pesos default) recaptura o snapshot."},
+                      indent=2)
 
 
 # ------------------------------------------------------------------ #
@@ -872,27 +1035,31 @@ def health_report() -> str:
         treino_resumo = {k: v for k, v in treino.items()
                          if k not in ("rewards_hist", "custos_hist", "epsilons")}
 
-        eval_iql  = tracker.get_eval_metrics("iql_eval")
-        eval_cmp  = tracker.get_eval_metrics("iql_eval_cmp")
-        eval_puro = tracker.get_eval_metrics("iql_puro")
+        # 'rl_llm_mcp' (populado por compare_strategies) é a ÚNICA fonte da
+        # avaliação da política atual — evita a duplicidade com 'iql_eval'
+        # (que exigia rodar evaluate_agents à parte para o mesmo resultado).
+        eval_cmp  = tracker.get_eval_metrics("rl_llm_mcp")
+        eval_puro = tracker.get_eval_metrics("rl_padrao")
         eval_heur = tracker.get_eval_metrics("heuristico")
         eval_sem  = tracker.get_eval_metrics("sem_agente")
 
         comparacao = None
         if all("custo_medio_dia_rs" in m for m in (eval_cmp, eval_heur, eval_sem)):
-            c_iql, c_heur, c_sem = (m["custo_medio_dia_rs"] for m in (eval_cmp, eval_heur, eval_sem))
+            c_llm, c_heur, c_sem = (m["custo_medio_dia_rs"] for m in (eval_cmp, eval_heur, eval_sem))
             comparacao = {
-                "custo_iql_rs_dia":  round(c_iql, 4),
+                "custo_rl_llm_mcp_rs_dia": round(c_llm, 4),
                 "custo_heuristico_rs_dia": round(c_heur, 4),
                 "custo_sem_agente_rs_dia": round(c_sem, 4),
-                "reducao_iql_vs_sem_pct":  round((c_sem - c_iql) / c_sem * 100, 2) if c_sem > 0 else None,
-                "reducao_iql_vs_heur_pct": round((c_heur - c_iql) / c_heur * 100, 2) if c_heur > 0 else None,
+                "reducao_rl_llm_vs_sem_pct":  round((c_sem - c_llm) / c_sem * 100, 2) if c_sem > 0 else None,
+                "reducao_rl_llm_vs_heur_pct": round((c_heur - c_llm) / c_heur * 100, 2) if c_heur > 0 else None,
             }
             if "custo_medio_dia_rs" in eval_puro:
-                c_puro = eval_puro["custo_medio_dia_rs"]
-                comparacao["custo_rl_puro_rs_dia"] = round(c_puro, 4)
-                comparacao["reducao_juiz_vs_rl_puro_pct"] = (
-                    round((c_puro - c_iql) / c_puro * 100, 2) if c_puro > 0 else None)
+                c_pad = eval_puro["custo_medio_dia_rs"]
+                comparacao["custo_rl_padrao_rs_dia"] = round(c_pad, 4)
+                comparacao["reducao_rl_padrao_vs_sem_pct"] = (
+                    round((c_sem - c_pad) / c_sem * 100, 2) if c_sem > 0 else None)
+                comparacao["reducao_llm_vs_rl_padrao_pct"] = (
+                    round((c_pad - c_llm) / c_pad * 100, 2) if c_pad > 0 else None)
 
         alertas = []
         cob_min = min(cobertura.values())
@@ -908,18 +1075,18 @@ def health_report() -> str:
             )
         if "n_episodios" not in treino:
             alertas.append("sem_treino: rode train_agents primeiro.")
-        if "custo_medio_dia_rs" not in eval_iql and "custo_medio_dia_rs" not in eval_cmp:
-            alertas.append("sem_avaliacao: rode evaluate_agents ou compare_strategies.")
-        if comparacao and comparacao.get("reducao_iql_vs_sem_pct") is not None \
-                and comparacao["reducao_iql_vs_sem_pct"] < 0:
+        if "custo_medio_dia_rs" not in eval_cmp:
+            alertas.append("sem_avaliacao: rode compare_strategies.")
+        if comparacao and comparacao.get("reducao_rl_llm_vs_sem_pct") is not None \
+                and comparacao["reducao_rl_llm_vs_sem_pct"] < 0:
             alertas.append(
-                "iql_pior_que_sem_agente: política aprendida custa mais que não fazer nada — "
+                "rl_pior_que_sem_agente: política aprendida custa mais que não fazer nada — "
                 "verifique convergência, pesos do reward ou se treino foi suficiente."
             )
-        if eval_iql.get("violacoes_pcc_total", 0) > 0:
-            alertas.append(f"violacoes_pcc: {eval_iql['violacoes_pcc_total']} horas com importação ≥ PCC.")
-        if eval_iql.get("violacoes_soc_total_h", 0) > 0:
-            alertas.append(f"violacoes_soc: {eval_iql['violacoes_soc_total_h']} horas com SOC < 15%.")
+        if eval_cmp.get("violacoes_pcc_total", 0) > 0:
+            alertas.append(f"violacoes_pcc: {eval_cmp['violacoes_pcc_total']} horas com importação ≥ PCC.")
+        if eval_cmp.get("violacoes_soc_total_h", 0) > 0:
+            alertas.append(f"violacoes_soc: {eval_cmp['violacoes_soc_total_h']} horas com SOC < 15%.")
 
         pesos_modificados = {
             k: {"atual": CONFIG[k], "default": _DEFAULT_REWARD_WEIGHTS[k]}
@@ -944,7 +1111,7 @@ def health_report() -> str:
             "n_estados_possiveis": N_ESTADOS_TOTAL,
             "soc_propagado_pct": round(float(iql.soc_propagado), 2),
             "treino": treino_resumo,
-            "avaliacao_atual": eval_iql,
+            "avaliacao_atual": eval_cmp,
             "comparacao_baselines": comparacao,
             "pesos_reward_modificados": pesos_modificados or None,
             "alertas": alertas,
@@ -1043,8 +1210,8 @@ def describe_schema() -> str:
             "max_rs_kwh": DATASET_META["tarifa_max_rs_kwh"],
             "horas_pico": DATASET_META["horas_pico"],
         },
-        "tracker_keys_validos": ["iql_treino", "iql_eval", "iql_eval_cmp",
-                                  "heuristico", "sem_agente", "iql_trace"],
+        "tracker_keys_validos": ["iql_treino", "iql_eval", "rl_llm_mcp",
+                                  "rl_padrao", "heuristico", "sem_agente", "iql_trace"],
         "info_step_campos": [
             "hora", "soc", "geracao_kw", "consumo_kw", "solar_kw", "eolico_kw",
             "rede_kwh", "excedente", "importacao", "exportacao", "custo_r",

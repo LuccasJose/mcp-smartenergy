@@ -15,12 +15,11 @@ if str(_SRC) not in sys.path:
 
 from smarty_energy.mcp.dashboard.state import (
     MCPServerError,
-    avaliar,
+    carregar_rl_padrao,
     comparar,
     export_all_data,
     require_setup,
-    snapshot_policy,
-    treinar,
+    treinar_rl_e_mcp,
 )
 
 st.title("Executar análise")
@@ -34,9 +33,9 @@ if not require_setup():
 
 st.header("1. Treinar os agentes")
 st.caption(
-    "O treinamento ensina os agentes a tomar decisões hora a hora. "
-    "Para uma primeira execução, 500 episódios costumam ser suficientes; "
-    "treinos maiores podem produzir uma política mais estável."
+    "Um clique treina DUAS políticas independentes com o mesmo número de "
+    "episódios: o RL padrão e o RL + LLM MCP. "
+    "Para uma primeira execução, 500 episódios costumam ser suficientes."
 )
 
 col_a, col_b = st.columns([2, 1])
@@ -50,22 +49,25 @@ n_eps = col_a.number_input(
 )
 col_b.metric("Estado atual", "Concluído" if st.session_state.treinado else "Pendente")
 
-if st.button("Treinar agentes", type="primary", disabled=not st.session_state.mcp_conectado):
+if st.button("Treinar RL padrão + MCP", type="primary", disabled=not st.session_state.mcp_conectado):
     try:
-        with st.spinner(f"Treinando {n_eps} episódios..."):
-            sumario = treinar(int(n_eps))
-        st.success(
-            f"Treino concluído. Custo médio recente: "
-            f"R${sumario['custo_medio_ultimos_50_rs']:.2f}/dia."
-        )
+        with st.spinner(f"Treinando RL padrão + MCP ({n_eps} episódios cada)..."):
+            sumario = treinar_rl_e_mcp(int(n_eps))
+        if "erro" in sumario:
+            st.error(sumario["erro"])
+        else:
+            st.success(
+                f"RL padrão: melhor R${sumario['rl_padrao']['best_custo_med_rs']:.2f}/dia · "
+                f"MCP: custo médio recente R${sumario['rl_llm_mcp']['custo_medio_ultimos_50_rs']:.2f}/dia."
+            )
     except MCPServerError as e:
         st.error(str(e))
 
 st.divider()
 st.header("2. Medir o desempenho")
 st.caption(
-    "A avaliação mede o IQL em vários dias. A comparação mostra o resultado contra "
-    "heurísticas, ausência de otimização e, quando congelado, o RL puro."
+    "Um só passo avalia e compara as 4 estratégias (Sem agentes, Heurísticas, "
+    "RL padrão e RL + LLM MCP) nos mesmos dias."
 )
 
 col_a, col_b = st.columns([2, 1])
@@ -74,7 +76,7 @@ n_dias = col_a.slider(
     min_value=1,
     max_value=31,
     value=10,
-    help="Quantidade de dias usados na avaliação e na comparação.",
+    help="Quantidade de dias usados na comparação.",
     disabled=not st.session_state.treinado,
 )
 propagar_soc = col_a.checkbox(
@@ -83,38 +85,36 @@ propagar_soc = col_a.checkbox(
     help="Quando ligado, o estado final da bateria de um dia é usado como início do próximo.",
     disabled=not st.session_state.treinado,
 )
-col_b.metric("Avaliação", "Concluída" if st.session_state.avaliado else "Pendente")
 col_b.metric("Comparação", "Concluída" if st.session_state.comparado else "Pendente")
 
-if st.button("Congelar política como RL puro", disabled=not st.session_state.treinado,
-             help="Salva a política atual para comparar o RL puro com a política assistida pelo LLM-juiz."):
-    try:
-        snapshot_policy("iql_puro")
-        st.success("Política congelada como RL puro. Agora execute a comparação.")
-    except MCPServerError as e:
-        st.error(str(e))
+with st.expander("Opcional: usar o RL do Smart_Energy como RL padrão"):
+    _default_runs = _SRC.parent.parent / "Smart_Energy" / "outputs" / "runs"
+    rl_dir = st.text_input(
+        "Pasta de runs do Smart_Energy", value=str(_default_runs),
+        help="Pega o run mais recente com qtable_*.pkl e o congela como 'RL padrão' "
+             "(sobrescreve o RL padrão treinado). Não toca no RL + LLM MCP.",
+    )
+    if st.button("Carregar RL padrão", disabled=not st.session_state.mcp_conectado):
+        try:
+            res = carregar_rl_padrao(dir_path=rl_dir.strip())
+            if "erro" in res:
+                st.error(res["erro"])
+            else:
+                st.success(f"RL padrão carregado ({res.get('origem', '?')}). Refaça a comparação.")
+        except MCPServerError as e:
+            st.error(str(e))
 
-col_a, col_b = st.columns(2)
-if col_a.button("Avaliar o IQL", disabled=not st.session_state.treinado, use_container_width=True):
+if st.button("Avaliar e comparar estratégias", disabled=not st.session_state.treinado,
+             use_container_width=True, type="primary"):
     try:
-        with st.spinner("Avaliando o desempenho..."):
-            resultado = avaliar(int(n_dias), propagar_soc)
-        st.success(f"Avaliação concluída. Custo médio: R${resultado['custo_medio_dia_rs']:.2f}/dia.")
-    except MCPServerError as e:
-        st.error(str(e))
-
-if col_b.button("Comparar estratégias", disabled=not st.session_state.avaliado, use_container_width=True):
-    try:
-        with st.spinner("Comparando estratégias..."):
+        with st.spinner("Avaliando e comparando estratégias..."):
             comparar(int(n_dias), propagar_soc)
-        with st.spinner("Atualizando a avaliação da política atual..."):
-            avaliar(int(n_dias), propagar_soc)
         st.success("Comparação concluída. Acesse a Visão geral para interpretar o resultado.")
     except MCPServerError as e:
         st.error(str(e))
 
-if not st.session_state.avaliado:
-    st.caption("A comparação será liberada depois que a avaliação do IQL for concluída.")
+if not st.session_state.treinado:
+    st.caption("A comparação será liberada depois que o treino for concluído.")
 
 st.divider()
 st.header("3. Continuar a investigação")
@@ -123,10 +123,8 @@ st.caption(
     "Trace diário e Equipamentos para investigar causas e detalhes."
 )
 
-if not st.session_state.avaliado:
-    st.info("A avaliação ainda está pendente.")
-elif not st.session_state.comparado:
-    st.info("A avaliação foi concluída. Execute também a comparação para liberar todos os diagnósticos.")
+if not st.session_state.comparado:
+    st.info("A comparação ainda está pendente.")
 else:
     st.success("A análise está pronta para investigação.")
 

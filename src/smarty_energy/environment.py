@@ -12,8 +12,9 @@ Estado discreto (chave Q-table): (bucket_hora, bucket_soc, bucket_solar, bucket_
 
 Ações por agente:
   Armazenamento : 0=carregar  1=manter  2=descarregar
-  Consumo       : bitmask de 3 bits — bit0=corta pivô, bit1=corta bomba,
-                  bit2=corta secador (0=nada … 7=corta tudo)
+  Consumo       : bitmask de 3 bits — bit0=corta pivô (só define o horário de
+                  início do bloco de 8h; bits 1 e 2 são ignorados, pois bomba
+                  e secador são cargas de cronograma fixo — ver R-BOMBA/R-SECADOR)
   Gerente       : 0=conservador(20kW)  1=moderado(30kW)  2=liberal(40kW)
 
 Restrições implementadas:
@@ -186,22 +187,17 @@ class FazendaEnergyEnv:
             self.bomba_total_h += 1
 
         # ╔═════════════════════════════════════════════════════════╗
-        # ║ R-SECADOR — usa Secadora real da base + meta ≥ 20 kWh   ║
-        # ║ Agente decide cortar (c_sec=True) ou permitir.          ║
-        # ║ Rescue: se adiar tornaria a meta inviável, força ON na  ║
-        # ║ potência máxima (cfg.secador_max_kw).                   ║
+        # ║ R-SECADOR — Uso constante (HARD), como R-BOMBA          ║
+        # ║ Roda sempre na potência real da base — processo de      ║
+        # ║ secagem não admite ligar/desligar por oportunismo de    ║
+        # ║ tarifa. Ação do agente (bit2) é ignorada; a meta diária ║
+        # ║ (secador_meta_kwh) é sempre superada pelo próprio       ║
+        # ║ cronograma da base, então não há rescue a fazer.        ║
         # ╚═════════════════════════════════════════════════════════╝
-        p_sec_pot   = float(r.get("secador_kw", 0.0))    # potência agendada na hora
-        p_sec_max   = cfg["secador_max_kw"]              # teto físico para rescue
-        horas_restantes = 24 - self.hora
-        kwh_faltam  = cfg["secador_meta_kwh"] - self.secador_kwh_ac
-        # Adiar essa hora torna a meta inviável? → força ON na potência máxima.
-        if kwh_faltam > 0 and (horas_restantes - 1) * p_sec_max < kwh_faltam:
-            c_sec = False
-            p_sec_pot = max(p_sec_pot, p_sec_max)
-        p_sec = 0.0 if c_sec else p_sec_pot
-        if not c_sec:
-            self.secador_kwh_ac += p_sec
+        c_sec     = False
+        p_sec_pot = float(r.get("secador_kw", 0.0))    # potência agendada na hora
+        p_sec     = p_sec_pot
+        self.secador_kwh_ac += p_sec
 
         consumo       = min(fixo + (0 if c_pivo else pivo_nom) + (0 if c_bomba else cap_nom) + p_sec, teto)
         teto_excedido = consumo >= teto * 0.99
@@ -211,7 +207,6 @@ class FazendaEnergyEnv:
         kwh_cortado = (
             (pivo_nom  if c_pivo  else 0.0)
             + (cap_nom if c_bomba else 0.0)
-            + (p_sec_pot if c_sec else 0.0)
         )
 
         # ── R5: Bateria com η carga/descarga + throughput diário ──

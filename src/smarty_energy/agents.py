@@ -445,6 +445,11 @@ class IQLSystem:
         treino curto de servidor herdaria o decay calibrado para 100k episódios
         e os agentes ficariam aleatórios até o fim. Se alguém fixou
         `epsilon_decay` via `reconfigurar`, esse valor é respeitado.
+
+        A seleção do checkpoint usa um subconjunto held-out dos dias (~1/3),
+        não o mês inteiro — assim a política escolhida não é a que melhor se
+        ajusta ao MESMO conjunto em que os resultados serão reportados
+        (evita o viés otimista de "selecionar no conjunto de teste").
         """
         from .config import ajustar_decay
         from .training import treinar as treinar_loop
@@ -455,8 +460,11 @@ class IQLSystem:
             cfg = ajustar_decay(self.cfg, self.n_episodios)
             for ag in self.agentes.values():
                 ag.eps_decay = cfg["epsilon_decay"]
+        # Held-out de seleção: 1 a cada 3 dias (treina em todos, seleciona nestes).
+        dias_selecao = dias[::3] if len(dias) >= 6 else dias
         hist = treinar_loop(dias, tarifa_24h, self.agentes, cfg,
-                            env_cls=env_cls, tracker=tracker, log=log)
+                            env_cls=env_cls, tracker=tracker, log=log,
+                            dias_selecao=dias_selecao)
 
         self.ultimo_hist = hist
         self.soc_propagado = hist["soc_final_pct"]

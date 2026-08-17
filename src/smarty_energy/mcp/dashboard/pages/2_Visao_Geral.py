@@ -36,16 +36,16 @@ st.header("Veredito da análise")
 if not hr.get("treino", {}).get("n_episodios"):
     st.info("A análise ainda não foi executada. Abra **Executar análise** para treinar os agentes.")
 elif not hr.get("avaliacao_atual", {}).get("custo_medio_dia_rs"):
-    st.info("O treino existe, mas ainda falta avaliar o IQL para obter um resultado.")
+    st.info("O treino existe, mas ainda falta avaliar para obter um resultado.")
 elif comparacao:
-    reducao = comparacao.get("reducao_iql_vs_heur_pct")
+    reducao = comparacao.get("reducao_rl_llm_vs_heur_pct")
     if reducao is not None and reducao >= 0 and not alertas:
         st.success(
-            f"O IQL apresentou custo {reducao:.1f}% menor que a heurística e não há alertas registrados."
+            f"O RL + LLM MCP apresentou custo {reducao:.1f}% menor que a heurística e não há alertas registrados."
         )
     elif reducao is not None:
         st.warning(
-            f"O IQL apresentou custo {reducao:.1f}% menor que a heurística, mas há alertas que merecem investigação."
+            f"O RL + LLM MCP apresentou custo {reducao:.1f}% menor que a heurística, mas há alertas que merecem investigação."
         )
     else:
         st.warning("A comparação foi concluída, mas não foi possível calcular a redução de custo.")
@@ -115,7 +115,7 @@ if "n_dias" in eval_m:
     c7_.metric("Retorno médio", f"{eval_m['reward_medio_dia']:.2f}")
     c8_.metric("Std custo", f"R${eval_m.get('custo_std_rs', 0):.2f}")
 else:
-    st.info("Sem avaliação registrada. Volte a **Executar análise** para avaliar o IQL.")
+    st.info("Sem avaliação registrada. Volte a **Executar análise** e compare as estratégias.")
 
 st.divider()
 
@@ -124,29 +124,29 @@ st.subheader("Comparação entre estratégias")
 st.caption("Quanto menor o custo, melhor. Compare as estratégias para entender o ganho de cada camada de decisão.")
 
 if comparacao:
-    c_iql = comparacao["custo_iql_rs_dia"]
+    c_llm = comparacao["custo_rl_llm_mcp_rs_dia"]
     c_heur = comparacao["custo_heuristico_rs_dia"]
     c_sem = comparacao["custo_sem_agente_rs_dia"]
-    c_puro = comparacao.get("custo_rl_puro_rs_dia")
+    c_padrao = comparacao.get("custo_rl_padrao_rs_dia")
 
-    # Ordem narrativa: do pior cenário (sem otimização) ao melhor (RL + juiz)
-    barras = [("Sem otimização", c_sem), ("Heurísticas", c_heur)]
-    if c_puro is not None:
-        barras.append(("RL puro", c_puro))
-    barras.append(("RL + LLM-juiz", c_iql))
+    # Ordem narrativa: do pior (sem agentes) ao melhor (RL + LLM MCP)
+    barras = [("Sem agentes", c_sem), ("Heurísticas", c_heur)]
+    if c_padrao is not None:
+        barras.append(("RL padrão", c_padrao))
+    barras.append(("RL + LLM MCP", c_llm))
 
     cols = st.columns(len(barras))
     for col, (nome, custo) in zip(cols, barras):
         col.metric(nome, f"R${custo:.2f}/dia",
-                    f"{(custo - c_sem):+.2f} vs sem otim." if nome != "Sem otimização" else None,
+                    f"{(custo - c_sem):+.2f} vs sem agentes" if nome != "Sem agentes" else None,
                     delta_color="inverse")
 
     reducoes = [
-        f"**Redução RL vs Sem otimização:** {comparacao.get('reducao_iql_vs_sem_pct', 0):.2f} %",
-        f"**vs Heurísticas:** {comparacao.get('reducao_iql_vs_heur_pct', 0):.2f} %",
+        f"**Redução RL+LLM vs Sem agentes:** {comparacao.get('reducao_rl_llm_vs_sem_pct', 0):.2f} %",
+        f"**vs Heurísticas:** {comparacao.get('reducao_rl_llm_vs_heur_pct', 0):.2f} %",
     ]
-    if comparacao.get("reducao_juiz_vs_rl_puro_pct") is not None:
-        reducoes.append(f"**Juiz vs RL puro:** {comparacao['reducao_juiz_vs_rl_puro_pct']:.2f} %")
+    if comparacao.get("reducao_llm_vs_rl_padrao_pct") is not None:
+        reducoes.append(f"**LLM vs RL padrão:** {comparacao['reducao_llm_vs_rl_padrao_pct']:.2f} %")
     st.markdown(" &nbsp;&nbsp; ".join(reducoes))
 
     import plotly.graph_objects as go
@@ -162,9 +162,9 @@ if comparacao:
                        margin=dict(t=10, b=30), height=350)
     st.plotly_chart(fig, use_container_width=True)
 
-    if c_puro is None:
-        st.caption("O braço RL puro não foi gerado. Em **Executar análise**, "
-                   "congele a política antes de comparar novamente.")
+    if c_padrao is None:
+        st.caption("O braço RL padrão não foi gerado. Em **Executar análise**, "
+                   "treine o RL padrão + MCP e compare novamente.")
 else:
     st.info("Sem comparação. Volte a **Executar análise** para comparar as estratégias.")
 

@@ -109,7 +109,7 @@ def test_compare_strategies_bate_com_o_pipeline(srv):
     mcp = json.loads(srv.compare_strategies(n_dias=len(dias), propagar_soc=True))
 
     pipeline = {
-        "IQL":        resumo_mes(rodar_rl_mes(dias, tarifa, srv.iql.agentes)),
+        "RL_LLM_MCP": resumo_mes(rodar_rl_mes(dias, tarifa, srv.iql.agentes)),
         "Heuristico": resumo_mes(rodar_heuristico_mes(dias, tarifa)),
         "SemAgente":  resumo_mes(rodar_sem_agente_mes(dias, tarifa)),
     }
