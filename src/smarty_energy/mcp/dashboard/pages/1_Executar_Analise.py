@@ -18,6 +18,7 @@ from smarty_energy.mcp.dashboard.state import (
     carregar_rl_padrao,
     comparar,
     export_all_data,
+    get_analysis_status,
     require_setup,
     treinar_rl_e_mcp,
 )
@@ -30,6 +31,34 @@ st.caption(
 
 if not require_setup():
     st.stop()
+
+if mensagem := st.session_state.pop("analysis_feedback", None):
+    st.success(mensagem)
+
+try:
+    status = get_analysis_status()
+except MCPServerError as e:
+    st.error(str(e))
+    st.stop()
+
+MENSAGENS_ETAPA = {
+    "treinar": ("Próxima ação: treinar os agentes", "Ainda não existe uma política treinada no servidor."),
+    "avaliar": ("Próxima ação: avaliar o IQL", "O treino está pronto; agora meça o desempenho da política atual."),
+    "comparar": ("Próxima ação: comparar estratégias", "A avaliação está pronta; compare os resultados antes de investigar."),
+    "investigar": ("Análise pronta para investigação", "Abra a Visão geral para o resultado executivo e os diagnósticos."),
+}
+titulo_etapa, descricao_etapa = MENSAGENS_ETAPA[status["proxima_etapa"]]
+st.subheader(titulo_etapa)
+st.caption(descricao_etapa)
+etapas = st.columns(4)
+for coluna, rotulo, concluida in zip(
+    etapas,
+    ("Treino", "Avaliação", "Comparação", "Investigação"),
+    (status["treinado"], status["avaliado"], status["comparado"], status["comparado"]),
+):
+    coluna.metric(rotulo, "Concluída" if concluida else "Pendente")
+
+st.divider()
 
 st.header("1. Treinar os agentes")
 st.caption(
@@ -47,19 +76,24 @@ n_eps = col_a.number_input(
     step=50,
     help="Quantidade de episódios usados para treinar os três agentes IQL.",
 )
-col_b.metric("Estado atual", "Concluído" if st.session_state.treinado else "Pendente")
+col_b.metric("Estado atual", "Concluído" if status["treinado"] else "Pendente")
 
-if st.button("Treinar RL padrão + MCP", type="primary", disabled=not st.session_state.mcp_conectado):
+if st.button(
+    "Treinar RL padrão + MCP",
+    type="primary" if status["proxima_etapa"] == "treinar" else "secondary",
+    disabled=not st.session_state.mcp_conectado,
+):
     try:
         with st.spinner(f"Treinando RL padrão + MCP ({n_eps} episódios cada)..."):
             sumario = treinar_rl_e_mcp(int(n_eps))
         if "erro" in sumario:
             st.error(sumario["erro"])
         else:
-            st.success(
+            st.session_state.analysis_feedback = (
                 f"RL padrão: melhor R${sumario['rl_padrao']['best_custo_med_rs']:.2f}/dia · "
                 f"MCP: custo médio recente R${sumario['rl_llm_mcp']['custo_medio_ultimos_50_rs']:.2f}/dia."
             )
+            st.rerun()
     except MCPServerError as e:
         st.error(str(e))
 
@@ -85,7 +119,7 @@ propagar_soc = col_a.checkbox(
     help="Quando ligado, o estado final da bateria de um dia é usado como início do próximo.",
     disabled=not st.session_state.treinado,
 )
-col_b.metric("Comparação", "Concluída" if st.session_state.comparado else "Pendente")
+col_b.metric("Comparação", "Concluída" if status["comparado"] else "Pendente")
 
 with st.expander("Opcional: usar o RL do Smart_Energy como RL padrão"):
     _default_runs = _SRC.parent.parent / "Smart_Energy" / "outputs" / "runs"
@@ -100,20 +134,30 @@ with st.expander("Opcional: usar o RL do Smart_Energy como RL padrão"):
             if "erro" in res:
                 st.error(res["erro"])
             else:
-                st.success(f"RL padrão carregado ({res.get('origem', '?')}). Refaça a comparação.")
+                st.session_state.analysis_feedback = (
+                    f"RL padrão carregado ({res.get('origem', '?')}). Refaça a comparação."
+                )
+                st.rerun()
         except MCPServerError as e:
             st.error(str(e))
 
-if st.button("Avaliar e comparar estratégias", disabled=not st.session_state.treinado,
-             use_container_width=True, type="primary"):
+if st.button(
+    "Avaliar e comparar estratégias",
+    type="primary" if status["proxima_etapa"] == "comparar" else "secondary",
+    disabled=not status["treinado"],
+    use_container_width=True,
+):
     try:
         with st.spinner("Avaliando e comparando estratégias..."):
             comparar(int(n_dias), propagar_soc)
-        st.success("Comparação concluída. Acesse a Visão geral para interpretar o resultado.")
+        st.session_state.analysis_feedback = (
+            "Comparação concluída. Acesse a Visão geral para interpretar o resultado."
+        )
+        st.rerun()
     except MCPServerError as e:
         st.error(str(e))
 
-if not st.session_state.treinado:
+if not status["treinado"]:
     st.caption("A comparação será liberada depois que o treino for concluído.")
 
 st.divider()
@@ -123,28 +167,27 @@ st.caption(
     "Trace diário e Equipamentos para investigar causas e detalhes."
 )
 
-if not st.session_state.comparado:
+if not status["comparado"]:
     st.info("A comparação ainda está pendente.")
 else:
     st.success("A análise está pronta para investigação.")
 
 st.divider()
-st.header("4. Exportar resultados")
-st.caption("Gera um arquivo JSON com treino, avaliações, violações e indicadores de equipamentos.")
+with st.expander("Exportar resultados"):
+    st.caption("Gera um arquivo JSON com treino, avaliações, violações e indicadores de equipamentos.")
+    if st.button("Gerar arquivo de exportação", disabled=not status["treinado"]):
+        try:
+            with st.spinner("Reunindo resultados..."):
+                st.session_state.export_payload = export_all_data()
+        except MCPServerError as e:
+            st.error(str(e))
 
-if st.button("Gerar arquivo de exportação", disabled=not st.session_state.treinado):
-    try:
-        with st.spinner("Reunindo resultados..."):
-            st.session_state.export_payload = export_all_data()
-    except MCPServerError as e:
-        st.error(str(e))
-
-if st.session_state.get("export_payload"):
-    payload = st.session_state.export_payload
-    st.download_button(
-        "Baixar resultados em JSON",
-        data=json.dumps(payload, indent=2, ensure_ascii=False),
-        file_name="smartenergy_export.json",
-        mime="application/json",
-    )
-    st.caption(f"Arquivo gerado em {payload.get('gerado_em', '?')} (UTC).")
+    if st.session_state.get("export_payload"):
+        payload = st.session_state.export_payload
+        st.download_button(
+            "Baixar resultados em JSON",
+            data=json.dumps(payload, indent=2, ensure_ascii=False),
+            file_name="smartenergy_export.json",
+            mime="application/json",
+        )
+        st.caption(f"Arquivo gerado em {payload.get('gerado_em', '?')} (UTC).")

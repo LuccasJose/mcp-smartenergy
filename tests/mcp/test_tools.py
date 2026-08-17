@@ -68,6 +68,37 @@ def test_reward_weights_recria_env_global(srv):
 
 # --- health_report: detecta pesos modificados ------------------------------
 
+def test_get_analysis_status_representa_etapas(srv):
+    inicial = json.loads(srv.get_analysis_status())
+    assert inicial["proxima_etapa"] == "treinar"
+    assert not inicial["treinado"]
+
+    srv.configure_agents(n_episodios=2)
+    srv.train_agents()
+    apos_treino = json.loads(srv.get_analysis_status())
+    # Sem passo "avaliar" separado: compare_strategies é a única medição.
+    assert apos_treino["proxima_etapa"] == "comparar"
+    assert apos_treino["treinado"]
+    assert not apos_treino["avaliado"]
+
+    srv.compare_strategies(n_dias=2)
+    apos_comparacao = json.loads(srv.get_analysis_status())
+    assert apos_comparacao["proxima_etapa"] == "investigar"
+    assert apos_comparacao["avaliado"]
+    assert apos_comparacao["comparado"]
+
+    srv.snapshot_policy("rl_padrao")
+    apos_snapshot = json.loads(srv.get_analysis_status())
+    assert apos_snapshot["rl_padrao_congelado"]
+    assert apos_snapshot["rl_padrao_travado"]
+
+    srv.liberar_rl_padrao()
+    srv.train_agents(n_episodios=2)
+    apos_novo_treino = json.loads(srv.get_analysis_status())
+    assert not apos_novo_treino["avaliado"]
+    assert not apos_novo_treino["comparado"]
+    assert apos_novo_treino["proxima_etapa"] == "comparar"
+
 def test_health_report_sem_pesos_modificados_nao_dispara_alerta(srv):
     out = json.loads(srv.health_report())
     assert out.get("pesos_reward_modificados") is None

@@ -268,7 +268,13 @@ def train_agents(n_episodios: int = 0) -> str:
     episódios (continuidade real). Use n_episodios=0 para usar o configurado.
     """
     try:
+        # Um novo treino invalida as avaliações anteriores. Não mexe em
+        # _snapshots["rl_padrao"] quando travado (carregado de um run externo
+        # ou congelado manualmente) — só o próprio fluxo de captura automática
+        # abaixo decide se recaptura.
         tracker.limpar("iql_treino")
+        for chave in ("iql_eval", "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente"):
+            tracker.limpar(chave)
         if n_episodios > 0:
             iql.n_episodios = n_episodios
         sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
@@ -927,15 +933,20 @@ def snapshot_policy(nome: str = "rl_padrao") -> str:
 
     O braço 'RL padrão' da comparação já é capturado automaticamente no
     train_agents (com pesos default). Use esta tool só para sobrescrever
-    manualmente esse snapshot, ou para congelar sob outro nome.
+    manualmente esse snapshot, ou para congelar sob outro nome. Congelar
+    sob "rl_padrao" trava o snapshot (como `carregar_rl_padrao`): só
+    `liberar_rl_padrao()` permite que train_agents volte a recapturá-lo.
     """
+    global _rl_padrao_travado
     try:
         snap = _congelar_politica(nome)
+        if nome == "rl_padrao":
+            _rl_padrao_travado = True
         return json.dumps({
             "status": "política congelada",
             "nome": nome,
             "estados_por_agente": {n: len(qt) for n, qt in snap.items()},
-            "uso": "vira o braço 'RL padrão' de compare_strategies"
+            "uso": "vira o braço 'RL padrão' de compare_strategies (travado)"
                    if nome == "rl_padrao" else None,
         }, indent=2)
     except Exception as e:
@@ -1011,6 +1022,44 @@ def liberar_rl_padrao() -> str:
     return json.dumps({"status": "RL padrão destravado",
                        "nota": "o próximo train_agents (pesos default) recaptura o snapshot."},
                       indent=2)
+
+
+@mcp.tool()
+def get_analysis_status() -> str:
+    """Estado operacional da análise para interfaces: etapas concluídas e próxima ação.
+
+    'avaliado' e 'comparado' refletem a mesma medição — desde que
+    compare_strategies passou a ser o único passo de avaliação do dashboard,
+    os dois ficam sempre iguais (fonte: braço 'rl_llm_mcp').
+    """
+    try:
+        treino = tracker.get_training_metrics("iql_treino")
+        avaliacao = tracker.get_eval_metrics("rl_llm_mcp")
+
+        treinado = "n_episodios" in treino
+        avaliado = "custo_medio_dia_rs" in avaliacao
+        comparado = avaliado
+        rl_padrao_congelado = "rl_padrao" in _snapshots
+
+        if not treinado:
+            proxima_etapa = "treinar"
+        elif not comparado:
+            proxima_etapa = "comparar"
+        else:
+            proxima_etapa = "investigar"
+
+        return json.dumps({
+            "treinado": treinado,
+            "avaliado": avaliado,
+            "comparado": comparado,
+            "rl_padrao_congelado": rl_padrao_congelado,
+            "rl_padrao_travado": _rl_padrao_travado,
+            "proxima_etapa": proxima_etapa,
+            "n_episodios": treino.get("n_episodios"),
+            "n_dias_avaliados": avaliacao.get("n_dias"),
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
 
 
 # ------------------------------------------------------------------ #

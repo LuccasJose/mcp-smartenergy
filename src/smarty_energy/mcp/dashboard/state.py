@@ -16,7 +16,7 @@ from smarty_energy.mcp.dashboard.mcp_client import MCPServerError, call_tool
 __all__ = [
     "ensure_state", "require_setup", "conectar_mcp", "sincronizar_status",
     "treinar", "treinar_rl_e_mcp", "avaliar", "comparar",
-    "snapshot_policy", "carregar_rl_padrao",
+    "snapshot_policy", "carregar_rl_padrao", "get_analysis_status",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
     "get_equipment_hourly", "get_equipment_stats", "export_all_data",
@@ -33,6 +33,8 @@ def ensure_state() -> None:
     ss.setdefault("treinado", False)
     ss.setdefault("avaliado", False)
     ss.setdefault("comparado", False)
+    ss.setdefault("rl_padrao_congelado", False)
+    ss.setdefault("analysis_status", None)
 
 
 def conectar_mcp() -> dict:
@@ -53,11 +55,13 @@ def conectar_mcp() -> dict:
 def sincronizar_status() -> dict:
     """Sincroniza os indicadores da sessão com o estado real do servidor MCP."""
     ss = st.session_state
-    relatorio = health_report()
-    ss.treinado = "n_episodios" in relatorio.get("treino", {})
-    ss.avaliado = "custo_medio_dia_rs" in relatorio.get("avaliacao_atual", {})
-    ss.comparado = relatorio.get("comparacao_baselines") is not None
-    return relatorio
+    status = get_analysis_status()
+    ss.treinado = status["treinado"]
+    ss.avaliado = status["avaliado"]
+    ss.comparado = status["comparado"]
+    ss.rl_padrao_congelado = status["rl_padrao_congelado"]
+    ss.analysis_status = status
+    return status
 
 
 def require_setup() -> bool:
@@ -79,6 +83,8 @@ def treinar(n_episodios: int) -> dict:
     ss.treinado = True
     ss.avaliado = False
     ss.comparado = False
+    ss.rl_padrao_congelado = False
+    ss.analysis_status = None
     ss.pop("export_payload", None)
     return sumario
 
@@ -125,6 +131,10 @@ def snapshot_policy(nome: str = "rl_padrao") -> dict:
 def carregar_rl_padrao(dir_path: str = "", run_id: str = "") -> dict:
     """Define o braço 'RL padrão' a partir de um run treinado (ex.: Smart_Energy)."""
     return call_tool("carregar_rl_padrao", dir_path=dir_path, run_id=run_id)
+
+
+def get_analysis_status() -> dict:
+    return call_tool("get_analysis_status")
 
 
 # --- leitura de métricas/diagnóstico (todas via tool MCP) ------------------

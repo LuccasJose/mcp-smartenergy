@@ -52,11 +52,27 @@ elif comparacao:
 else:
     st.info("A avaliação está pronta. Execute a comparação em **Executar análise** para completar o veredito.")
 
+eval_m = hr["avaliacao_atual"]
+if "custo_medio_dia_rs" in eval_m:
+    st.subheader("Resultado principal")
+    st.caption("Os quatro indicadores abaixo respondem se a política reduziu custo e operou dentro dos limites.")
+    custo_principal = comparacao["custo_rl_llm_mcp_rs_dia"] if comparacao else eval_m["custo_medio_dia_rs"]
+    rotulo_custo = "Custo RL + LLM MCP" if comparacao else "Custo avaliado"
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(rotulo_custo, f"R${custo_principal:.2f}/dia")
+    if comparacao:
+        reducao = comparacao.get("reducao_rl_llm_vs_heur_pct")
+        c2.metric("Economia vs heurísticas", f"{reducao:.1f} %" if reducao is not None else "indisponível")
+    else:
+        c2.metric("Comparação", "Pendente")
+    c3.metric("Violações de PCC", eval_m.get("violacoes_pcc_total", 0))
+    c4.metric("Violações de SOC", eval_m.get("violacoes_soc_total_h", 0))
+
 st.divider()
 
 # ── Dataset ────────────────────────────────────────────────────────────────
-st.subheader("Base analisada")
-st.caption("Identifica a fazenda, o período observado e as condições usadas nos cálculos.")
+st.subheader("Contexto da análise")
+st.caption("Informações do dataset e do estado técnico que contextualizam o resultado principal.")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Fazenda", hr["dataset"]["fazenda"])
 c2.metric("Dias", hr["dataset"]["n_dias"])
@@ -66,19 +82,19 @@ c4.metric("Horas de pico", str(dataset.get("horas_pico", "-")))
 st.divider()
 
 # ── Agentes IQL ────────────────────────────────────────────────────────────
-st.subheader("Aprendizado dos agentes")
-st.caption("Cobertura mostra os estados visitados; erro TD menor e estável sugere maior convergência.")
-for nome, info in hr["agentes"].items():
-    cob_pct = hr["cobertura_pct"][nome]
-    with st.container(border=True):
-        cols = st.columns(5)
-        cols[0].markdown(f"**{nome}**")
-        cols[1].metric("Estados visitados", info["n_estados_visitados"])
-        cols[2].metric("Cobertura", f"{cob_pct:.1f} %")
-        cols[3].metric("n_updates", info["n_updates"])
-        cols[4].metric("Erro TD médio",
-                        f"{info['td_error_recente']['td_abs_medio']:.2f}")
-        cols[0].caption(f"epsilon = {info['epsilon']:.3f}")
+with st.expander("Diagnóstico técnico do aprendizado"):
+    st.caption("Cobertura mostra os estados visitados; erro TD menor e estável sugere maior convergência.")
+    for nome, info in hr["agentes"].items():
+        cob_pct = hr["cobertura_pct"][nome]
+        with st.container(border=True):
+            cols = st.columns(5)
+            cols[0].markdown(f"**{nome}**")
+            cols[1].metric("Estados visitados", info["n_estados_visitados"])
+            cols[2].metric("Cobertura", f"{cob_pct:.1f} %")
+            cols[3].metric("Atualizações", info["n_updates"])
+            cols[4].metric("Erro TD médio",
+                            f"{info['td_error_recente']['td_abs_medio']:.2f}")
+            cols[0].caption(f"Exploração final: {info['epsilon']:.3f}")
 
 st.divider()
 
@@ -102,7 +118,6 @@ st.divider()
 # ── Avaliacao ─────────────────────────────────────────────────────────────
 st.subheader("Avaliação atual")
 st.caption("Resume o desempenho do IQL nos dias selecionados em Executar análise.")
-eval_m = hr["avaliacao_atual"]
 if "n_dias" in eval_m:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Dias", eval_m["n_dias"])
