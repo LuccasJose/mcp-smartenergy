@@ -69,6 +69,21 @@ try:
 except MCPServerError as e:
     col_c.error("erro")
 
+# Política a simular: a viva (RL + LLM MCP) ou o RL padrão congelado (sem o juiz).
+POLITICAS = {
+    "rl_llm_mcp": "RL + LLM MCP (política viva)",
+    "rl_padrao":  "RL padrão (sem o juiz)",
+}
+policy = st.radio(
+    "Política simulada", options=list(POLITICAS), format_func=lambda k: POLITICAS[k],
+    horizontal=True,
+    help="RL padrão usa o snapshot congelado ao treinar com os pesos default "
+         "(ou carregado de um run externo). É sempre greedy e tem cadeia de "
+         "SOC própria.")
+if policy == "rl_padrao":
+    st.caption("RL padrão é frozen: ignora o seletor de comportamento (roda sempre "
+               "greedy) e não é afetado pelo LLM-juiz.")
+
 st.caption(
     f"Data selecionada: **{dia_sel.get('data', '-') }**. "
     f"Cenário classificado como **{dia_sel.get('categoria', '-')}**."
@@ -89,7 +104,7 @@ if col_run.button("Rodar dia", type="primary"):
     try:
         with st.spinner("Executando episódio via MCP..."):
             resultado = run_episode(mode=mode, dia_idx=dia_idx,
-                                     continuar_soc=continuar_soc)
+                                     continuar_soc=continuar_soc, policy=policy)
         st.session_state.trace_dia = {
             "passos": resultado["trace"],
             "reward_total": resultado["reward_total"],
@@ -98,6 +113,7 @@ if col_run.button("Rodar dia", type="primary"):
             "soc_final": resultado["soc_final_pct"],
             "dia_idx": dia_idx,
             "mode": mode,
+            "policy": policy,
         }
     except MCPServerError as e:
         st.error(str(e))
@@ -105,8 +121,10 @@ if col_run.button("Rodar dia", type="primary"):
 # ── Mostra trace se existir ───────────────────────────────────────────────
 if "trace_dia" in st.session_state and st.session_state.trace_dia:
     td = st.session_state.trace_dia
-    if td["dia_idx"] != dia_idx or td["mode"] != mode:
+    if td["dia_idx"] != dia_idx or td["mode"] != mode or td.get("policy", "rl_llm_mcp") != policy:
         st.info("Trace mostrado é de outra simulação — clique em 'Rodar dia' para atualizar.")
+
+    st.caption(f"Política do trace: **{POLITICAS.get(td.get('policy', 'rl_llm_mcp'), td.get('policy'))}**")
 
     df = pd.DataFrame(td["passos"])
 

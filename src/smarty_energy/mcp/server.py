@@ -58,6 +58,11 @@ _dia_atual_idx = 0
 # SOC encadeado entre chamadas de run_episode (continuidade da bateria no Trace).
 _soc_trace: float | None = None
 
+# Cadeia de SOC separada para o trace de uma política congelada (ex.: RL padrão),
+# para não misturar a continuidade da bateria com a da política viva ao alternar
+# entre elas no dashboard.
+_soc_trace_snapshot: float | None = None
+
 # Políticas congeladas (cópia das Q-tables) — nome -> {agente: {estado: qvalues}}.
 # 'rl_padrao' é capturado automaticamente ao treinar com os pesos default.
 _snapshots: dict[str, dict] = {}
@@ -466,7 +471,7 @@ def compare_strategies(n_dias: int = 30, propagar_soc: bool = True,
 
 @mcp.tool()
 def run_episode(mode: str = "eval", dia_idx: int | None = None,
-                continuar_soc: bool = True) -> str:
+                continuar_soc: bool = True, policy: str = "rl_llm_mcp") -> str:
     """Executa 1 dia completo e retorna o trace hora-a-hora.
 
     mode: "eval" (greedy) ou "train" (ε-greedy com aprendizado online)
@@ -475,26 +480,48 @@ def run_episode(mode: str = "eval", dia_idx: int | None = None,
         final da última run_episode (continuidade da bateria); a primeira
         chamada parte do soc_propagado do IQL (50% se nunca treinou).
         False reinicia a cadeia a partir do soc_propagado.
+    policy: "rl_llm_mcp" (default) usa a política IQL viva (treinável, reflete o
+        LLM-juiz). Qualquer outro valor é tratado como nome de um snapshot
+        congelado em `_snapshots` (ex.: "rl_padrao" = RL sem o juiz): roda sempre
+        greedy, ignora `mode`, não aprende e mantém uma cadeia de SOC própria,
+        para não se misturar com a da política viva ao alternar no dashboard.
     """
     try:
-        global _soc_trace
+        global _soc_trace, _soc_trace_snapshot
         idx = _dia_atual_idx if dia_idx is None else int(dia_idx)
         if not (0 <= idx < len(DIAS)):
             return json.dumps({"erro": f"dia_idx fora do range [0, {len(DIAS)-1}]"}, indent=2)
 
+        usar_snapshot = policy not in ("rl_llm_mcp", "atual")
+        if usar_snapshot and policy not in _snapshots:
+            return json.dumps({"erro": f"snapshot '{policy}' não existe — treine "
+                               "com os pesos default (captura o 'rl_padrao') ou "
+                               "carregue-o com carregar_rl_padrao primeiro."}, indent=2)
+        snap = _snapshots.get(policy) if usar_snapshot else None
+
         tracker.limpar("iql_trace")
         e = FazendaEnergyEnv(DIAS[idx], TARIFA_24H, CONFIG)
-        soc_ini = (_soc_trace if (continuar_soc and _soc_trace is not None)
+        soc_prev = _soc_trace_snapshot if usar_snapshot else _soc_trace
+        soc_ini = (soc_prev if (continuar_soc and soc_prev is not None)
                    else iql.soc_propagado)
         est = e.reset(soc_inicial=soc_ini)
         s = e.discretizar(est)
 
-        explore = mode == "train"
+        # Snapshot é frozen: nunca explora nem aprende, mesmo em mode='train'.
+        explore = (mode == "train") and not usar_snapshot
         reward_total = 0.0
         custo_total  = 0.0
 
+        def _acoes_snapshot(s_disc):
+            acoes = []
+            for nome_ag in ("armazenamento", "consumo", "gerente"):
+                q = snap[nome_ag].get(s_disc)
+                acoes.append(int(q.argmax()) if q is not None else 0)
+            return tuple(acoes)
+
         for _ in range(24):
-            acoes = iql.agir_todos(s, explorando=explore)
+            acoes = (_acoes_snapshot(s) if usar_snapshot
+                     else iql.agir_todos(s, explorando=explore))
             prox, reward, done, info = e.step(*acoes)
             s2 = e.discretizar(prox)
             if explore:
@@ -504,9 +531,13 @@ def run_episode(mode: str = "eval", dia_idx: int | None = None,
             reward_total += reward
             custo_total  += info["custo_r"]
 
-        _soc_trace = float(e.soc)
+        if usar_snapshot:
+            _soc_trace_snapshot = float(e.soc)
+        else:
+            _soc_trace = float(e.soc)
         return json.dumps({
-            "mode": mode,
+            "mode": "eval" if usar_snapshot else mode,
+            "policy": policy,
             "dia_idx": idx,
             "data": DATASET_META.get("data_inicio") if idx == 0 else str(DIAS[idx]["data"].iloc[0])[:10],
             "cenario": classificar_dia(idx, DIAS),
@@ -745,7 +776,7 @@ def reset_environment(reset_agents: bool = False, dia_idx: int | None = None) ->
     soc_propagado mantido pelo IQLSystem.
     """
     try:
-        global env, _dia_atual_idx, _soc_trace
+        global env, _dia_atual_idx, _soc_trace, _soc_trace_snapshot
         if dia_idx is not None:
             if not (0 <= dia_idx < len(DIAS)):
                 return json.dumps({"erro": f"dia_idx fora de [0, {len(DIAS)-1}]"}, indent=2)
@@ -753,6 +784,7 @@ def reset_environment(reset_agents: bool = False, dia_idx: int | None = None) ->
         env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
         env.reset(soc_inicial=iql.soc_propagado)
         _soc_trace = None
+        _soc_trace_snapshot = None
 
         if reset_agents:
             iql.reset_qtables()
