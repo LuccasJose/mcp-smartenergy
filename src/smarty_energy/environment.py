@@ -154,24 +154,26 @@ class FazendaEnergyEnv:
         fixo       = sede_real + float(r["silo_kw"])
 
         # ╔═════════════════════════════════════════════════════════╗
-        # ║ R-PIVO — 8h consecutivas + apenas 1 ativação por dia    ║
-        # ║ Lock decrementa 7→0 forçando ON. Agente só pode iniciar ║
-        # ║ se ainda não ativou hoje E cabem 8h restantes no dia.   ║
+        # ║ R-PIVO — 8h consecutivas + exatamente 1 ativação/dia    ║
+        # ║ O agente escolhe QUANDO iniciar (não cortando); se não  ║
+        # ║ iniciar até a última janela viável, um rescue força ON: ║
+        # ║ a irrigação diária é obrigatória (como a meta do secador)║
         # ╚═════════════════════════════════════════════════════════╝
+        horas_alvo    = cfg["pivo_horas_alvo"]
+        cabe_janela   = self.hora + horas_alvo <= 24    # ainda cabem 8h a partir de agora
+        ultima_janela = self.hora + horas_alvo == 24    # última hora possível para iniciar
         pivo_em_lock = self.pivo_lock > 0
         if pivo_em_lock:
             c_pivo = False
             self.pivo_lock -= 1
-        elif not c_pivo and not self.pivo_ativado_hoje:
-            if self.hora + cfg["pivo_horas_alvo"] <= 24:
-                self.pivo_lock = cfg["pivo_horas_alvo"] - 1
-                c_pivo = False
-                self.pivo_ativado_hoje = True
-                pivo_em_lock = True
-            else:
-                c_pivo = True                       # não cabe 8h
+        elif not self.pivo_ativado_hoje and cabe_janela and (not c_pivo or ultima_janela):
+            # inicia o ciclo: por escolha do agente OU forçado no rescue da última janela
+            self.pivo_lock = horas_alvo - 1
+            c_pivo = False
+            self.pivo_ativado_hoje = True
+            pivo_em_lock = True
         else:
-            c_pivo = True                           # já ativou hoje ou agente cortou
+            c_pivo = True                           # já ativou hoje, agente cortou, ou não cabe
         if pivo_em_lock:
             pivo_nom = max(pivo_nom, cfg["pivo_nominal_kw"])
 
