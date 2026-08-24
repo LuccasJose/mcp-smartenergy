@@ -10,7 +10,7 @@ def test_heuristico_decide_acao_para_estado(cfg):
         "tarifa": 0.7, "stress": 30.0, "sec_ac": 0.0, "bomba_h": 0,
     }
     a_arm, a_cons, a_ger = h.agir(est)
-    assert a_arm in (0, 1, 2)
+    assert a_arm in (0, 1, 2, 3, 4)
     assert 0 <= a_cons <= 7
     assert a_ger in (0, 1, 2)
 
@@ -23,10 +23,10 @@ def test_heuristico_carrega_com_sol_alto_e_soc_baixo(cfg):
 
 
 def test_heuristico_descarrega_em_pico_tarifario(cfg):
-    """Tarifa > 0.9 + SOC saudavel deve disparar a_arm=2 (descarregar)."""
+    """Tarifa > 0.9 + SOC saudavel deve disparar descarga integral."""
     h = AgentesHeuristicos(cfg)
     est = {"hora": 18, "soc": 60.0, "solar_kw": 0.0, "tarifa": 1.10}
-    assert h.armazenamento(est) == 2
+    assert h.armazenamento(est) == 4
 
 
 def test_heuristico_consumo_corta_proporcional_ao_stress(cfg):

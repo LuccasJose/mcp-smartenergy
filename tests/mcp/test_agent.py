@@ -87,7 +87,7 @@ def test_save_load_preserva_qtable(cfg, tmp_path):
 
 def test_iqlsystem_cria_3_agentes(iql):
     assert set(iql.agentes.keys()) == {"armazenamento", "consumo", "gerente"}
-    assert iql.agentes["armazenamento"].n_acoes == 3
+    assert iql.agentes["armazenamento"].n_acoes == 6
     assert iql.agentes["consumo"].n_acoes == 8
     assert iql.agentes["gerente"].n_acoes == 3
 

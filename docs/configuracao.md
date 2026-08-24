@@ -37,6 +37,10 @@ o decaimento para que ε chegue perto de `epsilon_final` no fim do treino —
 | `eficiencia_carga` | 0.92 | η de carga |
 | `eficiencia_descarga` | 0.95 | η de descarga |
 
+As ações de armazenamento são `0` (carregar com excedente), `1` (manter) e
+`2`/`3`/`4` para descarregar 25 %, 50 % ou 100 % do déficit horário. Todas
+continuam limitadas por SOC mínimo, eficiência, throughput diário e PCC.
+
 ## Pesos do reward cooperativo
 
 O custo financeiro é o **sinal dominante** da recompensa, evitando que os
@@ -50,6 +54,7 @@ agentes manipulem o SOC da bateria em detrimento da economia real.
 | `pen_producao` | 5.0 | Captação cortada |
 | `bonus_excedente` | 0.5 | Incentivo à exportação de excedente |
 | `bonus_soc_ok` | 1.0 | SOC em faixa saudável |
+| `bonus_descarga_pico` | 0.5 | Reforço leve por kWh AC descarregado no pico |
 
 Os 15 pesos podem ser alterados em runtime pela tool
 `configure_reward_weights` do [servidor MCP](mcp.md) — as restrições físicas

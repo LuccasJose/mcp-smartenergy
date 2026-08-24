@@ -13,26 +13,33 @@ pipeline offline e o [servidor MCP](mcp.md) importam o mesmo
 
 | Agente | Responsabilidade | Ações |
 |---|---|---|
-| **Armazenamento** | Gestão da bateria | `0` = Carregar · `1` = Manter · `2` = Descarregar |
+| **Armazenamento** | Gestão da bateria | `0` = Carregar · `1` = Manter · `2`/`3`/`4` = Descarregar 25/50/100% do déficit |
 | **Consumo** | Corte de cargas interruptíveis | bitmask de 3 bits: `1` = corta pivô · `2` = corta bomba · `4` = corta secador (`0`…`7`) |
 | **Gerente de Carga** | Teto de consumo horário | `0` = Conservador (20 kW) · `1` = Moderado (30 kW) · `2` = Liberal (40 kW) |
 
-## Espaço de estados (2160 estados discretos)
+## Espaço de estados (3780 estados discretos)
 
 Tupla `(bucket_hora, bucket_soc, bucket_solar, bucket_stress, meta_secador, bucket_bomba)`:
 
 | Variável | Buckets |
 |---|---|
-| `hora // 6` | 4 (0-5h / 6-11h / 12-17h / 18-23h) |
+| período energético | 7 (0-5h / 6-11h / 12-15h / 16-17h / 18-19h / 20h / 21-23h) |
 | `soc // 10` | 10 (0-10 % / 10-20 % / … / 90-100 %) |
 | **solar** | 3 (<5 kW / 5-15 kW / >15 kW) |
 | **stress** | 3 (<30 / 30-70 / >70 — calculado pelo `AgenteFinanceiro`) |
 | **meta secador** | 2 (atingiu a meta diária de 20 kWh?) |
 | **bomba** | 3 (<3h / 3-5h / ≥6h operadas) |
 
-Total combinatório: 4 × 10 × 3 × 3 × 2 × 3 = **2160**
+Total combinatório: 7 × 10 × 3 × 3 × 2 × 3 = **3780**
 (`environment.ESPACO_ESTADOS_TOTAL`). É um teto — parte das combinações é
 fisicamente inalcançável, então a cobertura medida contra ele é conservadora.
+
+!!!warning Compatibilidade de runs
+Q-tables treinadas com outra codificação temporal não podem ser recarregadas:
+a versão é gravada no `meta.json` de cada run e validada no carregamento. Após
+mudar a discretização, retreine e versiona um novo run antes de comparar
+resultados.
+!!!
 
 ## Restrições HARD
 
@@ -64,6 +71,7 @@ reward = - w_custo        * custo_rede
          + w_bonus_carga  * kWh carregados com excedente
          + bonus_excedente * kWh_excedente * tarifa
          + bonus_soc_ok    * (30% < SOC < 80%)
+         + bonus_descarga_pico * kWh AC descarregados no pico
 ```
 
 Os pesos estão em [Configuração](configuracao.md) e podem ser ajustados em

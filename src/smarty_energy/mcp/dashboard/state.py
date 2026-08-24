@@ -16,10 +16,10 @@ from smarty_energy.mcp.dashboard.mcp_client import MCPServerError, call_tool
 __all__ = [
     "ensure_state", "require_setup", "conectar_mcp", "sincronizar_status",
     "treinar", "treinar_rl_e_mcp", "avaliar", "comparar",
-    "snapshot_policy", "carregar_rl_padrao", "get_analysis_status",
+    "snapshot_policy", "carregar_politica_atual", "carregar_rl_padrao", "get_analysis_status",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
-    "get_equipment_hourly", "get_equipment_stats", "export_all_data",
+    "get_battery_dispatch_stats", "get_equipment_hourly", "get_equipment_stats", "export_all_data",
     "run_episode", "select_day", "identify_scenarios", "describe_schema",
     "MCPServerError",
 ]
@@ -128,6 +128,17 @@ def snapshot_policy(nome: str = "rl_padrao") -> dict:
     return res
 
 
+def carregar_politica_atual(run_id: str = "") -> dict:
+    """Carrega um run salvo na política IQL viva usada pelo trace e avaliação."""
+    ss = st.session_state
+    res = call_tool("load_qtables", run_id=run_id)
+    ss.treinado = "erro" not in res
+    ss.avaliado = False
+    ss.comparado = False
+    ss.analysis_status = None
+    return res
+
+
 def carregar_rl_padrao(dir_path: str = "", run_id: str = "") -> dict:
     """Define o braço 'RL padrão' a partir de um run treinado (ex.: Smart_Energy)."""
     return call_tool("carregar_rl_padrao", dir_path=dir_path, run_id=run_id)
@@ -161,6 +172,10 @@ def get_td_error_series(agente: str) -> dict:
 
 def get_hourly_violations(agente: str = "rl_llm_mcp") -> dict:
     return call_tool("get_hourly_violations", agente=agente)
+
+
+def get_battery_dispatch_stats(agente: str = "rl_llm_mcp") -> dict:
+    return call_tool("get_battery_dispatch_stats", agente=agente)
 
 
 def get_equipment_hourly(agente: str = "rl_llm_mcp") -> dict:

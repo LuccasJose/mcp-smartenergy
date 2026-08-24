@@ -204,7 +204,7 @@ class AgentesHeuristicos:
         if soc < self.cfg["soc_min_pct"] + 2:
             return 1                      # crítico → não forçar descarga
         if tarifa > 0.9:
-            return 2                      # pico tarifário → descarregar
+            return 4                      # pico tarifário → descarregar tudo
         if solar > 10 and soc < 80:
             return 0                      # sol alto → carregar
         if solar > 3 and soc < 50:

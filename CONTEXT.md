@@ -26,14 +26,14 @@ Três agentes independentes (cada um com sua Q-table) compartilham o mesmo
 
 | Agente | Responsabilidade | Ações |
 |---|---|---|
-| **Armazenamento** | Gestão da bateria | 0=Carregar, 1=Manter, 2=Descarregar |
+| **Armazenamento** | Gestão da bateria | 0=Carregar, 1=Manter, 2/3/4=Descarregar 25/50/100% do déficit |
 | **Consumo** | Corte de cargas interruptíveis | bitmask 3 bits: 1=pivô, 2=bomba, 4=secador (0–7) |
 | **Gerente de Carga** | Teto de consumo horário | 0=Conservador (20kW), 1=Moderado (30kW), 2=Liberal (40kW) |
 
-### Espaço de Estados (2160 estados discretos)
+### Espaço de Estados (3780 estados discretos)
 
 Tupla `(bucket_hora, bucket_soc, bucket_solar, bucket_stress, meta_sec, bucket_bomba)`:
-- `hora // 6` → 4 valores
+- período energético → 7 valores: 0-5h / 6-11h / 12-15h / 16-17h / 18-19h / 20h / 21-23h
 - `soc // 10` → 10 valores
 - solar: low (<5kW) / med (5–15kW) / high (>15kW) → 3 valores
 - stress: <30 / 30–70 / >70 (índice do AgenteFinanceiro) → 3 valores
@@ -63,6 +63,7 @@ reward = - w_custo * custo_rede
          + w_bonus_carga * kWh carregados com excedente
          + bonus_excedente * kWh_excedente * tarifa
          + bonus_soc_ok * (30% < SOC < 80%)
+         + bonus_descarga_pico * kWh AC descarregados no pico
 ```
 
 ## Dois modos de uso

@@ -61,6 +61,8 @@ def test_describe_schema_reflete_config(srv):
                   "pivo_nominal_kw", "bomba_cap_nominal_kw", "secador_max_kw",
                   "secador_meta_kwh"):
         assert fis[chave] == pkg_config.CONFIG[chave], f"{chave} divergiu no schema"
+    assert schema["estado_discreto"]["n_total"] == pkg_env.ESPACO_ESTADOS_TOTAL
+    assert "18-19" in schema["estado_discreto"]["buckets"]["h"]
 
 
 # ── Comportamento idêntico: mesmo dia, mesmas ações → mesmo histórico ──

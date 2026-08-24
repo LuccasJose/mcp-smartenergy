@@ -20,7 +20,8 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from smarty_energy.mcp.dashboard.state import (
-    require_setup, get_equipment_stats, get_equipment_hourly, MCPServerError,
+    require_setup, get_battery_dispatch_stats, get_equipment_stats,
+    get_equipment_hourly, MCPServerError,
 )
 
 st.title("Equipamentos")
@@ -133,7 +134,46 @@ else:
 
 st.divider()
 
-# ── 2. Uso hora-a-hora dos equipamentos ────────────────────────────────────
+# ── 2. Despacho da bateria ─────────────────────────────────────────────────
+st.subheader("Despacho da bateria")
+st.caption("Os indicadores separam a descarga efetiva no pico, pedidos bloqueados e o nível de SOC ao longo da janela tarifária.")
+
+try:
+    bateria = get_battery_dispatch_stats(origem)
+except MCPServerError as e:
+    bateria = {"aviso": str(e)}
+
+if "aviso" in bateria:
+    st.info(bateria["aviso"])
+else:
+    b1, b2, b3, b4 = st.columns(4)
+    b1.metric("Descarga no pico", f"{bateria['descarga_pico_media_dia_kwh']:.2f} kWh/dia")
+    b2.metric("Parcela da descarga no pico", f"{bateria['pct_descarga_no_pico']:.1f} %")
+    b3.metric("Pedidos efetivados", f"{bateria['taxa_descarga_efetiva_pct']:.1f} %")
+    b4.metric("SOC após 20h", f"{bateria['soc_medio_apos_20h_pct']:.1f} %"
+              if bateria["soc_medio_apos_20h_pct"] is not None else "indisponível")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Carga solar", f"{bateria['carga_solar_ac_kwh']:.2f} kWh")
+    c2.metric("Carga pela rede", f"{bateria['carga_rede_ac_kwh']:.2f} kWh")
+    c3.metric("Custo da arbitragem", f"R$ {bateria['custo_carga_rede_rs']:.2f}")
+
+    bloqueios = bateria["bloqueios_descarga"]
+    niveis = bateria["pedidos_por_nivel"]
+    d1, d2 = st.columns(2)
+    d1.bar_chart(pd.DataFrame({
+        "Pedidos": [niveis["2"] if "2" in niveis else niveis[2],
+                     niveis["3"] if "3" in niveis else niveis[3],
+                     niveis["4"] if "4" in niveis else niveis[4]],
+    }, index=["25%", "50%", "100%"]))
+    d2.bar_chart(pd.DataFrame({
+        "Bloqueios": [bloqueios["sem_deficit"], bloqueios["soc_minimo"],
+                      bloqueios["throughput_esgotado"]],
+    }, index=["Sem déficit", "SOC mínimo", "Throughput"]))
+
+st.divider()
+
+# ── 3. Uso hora-a-hora dos equipamentos ────────────────────────────────────
 st.subheader("Perfil de uso ao longo do dia")
 st.caption("A média por hora mostra quando as máquinas trabalham e ajuda a localizar concentração no horário de pico.")
 

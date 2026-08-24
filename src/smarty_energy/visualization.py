@@ -17,7 +17,7 @@ _COR_H = "#e74c3c"
 _COR_R = "#27ae60"
 
 # Cores para as decisões dos agentes (reutilizadas em plot_comparacao_dia e plot_explorar_dia)
-_CORES_ARM  = ["#3498db", "#95a5a6", "#e67e22"]
+_CORES_ARM  = ["#3498db", "#95a5a6", "#f1c40f", "#e67e22", "#c0392b"]
 _CORES_CONS = ["#27ae60", "#f1c40f", "#e67e22", "#d35400", "#c0392b", "#e74c3c", "#962d22", "#2c3e50"]
 _CORES_GER  = ["#e74c3c", "#e67e22", "#27ae60"]
 
@@ -173,7 +173,7 @@ def plot_comparacao_dia(
     ax.set_yticklabels(["Gerente", "Consumo", "Armaz."])
     ax.set_xlabel("Hora"); ax.set_title("Decisões dos Agentes RL por Hora"); ax.set_xlim(0, 24)
     leg_arm = [mpatches.Patch(color=c, label=l) for c, l in
-               zip(_CORES_ARM, ["Carregar", "Manter", "Descarregar"])]
+               zip(_CORES_ARM, ["Carregar", "Manter", "Desc. 25%", "Desc. 50%", "Desc. 100%"]) ]
     ax.legend(handles=leg_arm, loc="upper left", fontsize=7, title="Armaz.", title_fontsize=7)
 
     plt.tight_layout()

@@ -39,21 +39,28 @@ config e dados:
 Os dois compartilham `outputs/runs/`, então um treino longo feito no pipeline
 pode ser carregado pelo servidor e vice-versa.
 
-## Resultados finais
+## Resultados experimentais atuais
 
-Run canônico (`outputs/runs/2026-06-19_145038`, 100 mil episódios), avaliado nos
-31 dias da base v8 com o SoC da bateria propagado entre dias:
+A arquitetura atual usa sete períodos temporais, descarga parcial de bateria e
+incentivo leve para descarga efetiva no pico. Em cinco seeds de 20 mil
+episódios, com SoC propagado nos 31 dias da base v8:
 
-| Métrica | Resultado |
-|---|---|
-| Custo médio diário (RL) | **R$ 63,25** |
-| Economia no custo diário médio | **40,8 %** |
-| Redução da dependência da rede | **40,2 %** |
-| Violações de PCC | **Zero** |
-| Violações de SOC | 0,032 h/dia |
+| Métrica | Média | Mediana | Desvio padrão |
+|---|---:|---:|---:|
+| Custo médio diário | R$ 64,56 | R$ 65,38 | R$ 1,77 |
+| Energia importada por dia | 93,52 kWh | 94,67 kWh | 2,81 kWh |
+| Descarga no pico | 38,20 kWh/mês | 38,07 kWh/mês | 14,54 kWh |
+| Parcela da descarga no pico | 13,03 % | 13,19 % | 4,52 p.p. |
 
-Referências do mesmo protocolo: sem agente R$ 106,90/dia e heurístico
-R$ 103,35/dia.
+As restrições de PCC e SoC foram respeitadas nas cinco avaliações. A variância
+entre seeds ainda é relevante, por isso o número oficial do TCC deve ser
+atualizado somente após a confirmação do protocolo experimental. Consulte
+`relatos/experimento_despacho_bateria_pico.md` para runs, parâmetros e dados
+reproduzíveis.
+
+> O run histórico `2026-06-19_145038` (R$ 63,25/dia) usava uma codificação de
+> estado e ações de bateria anterior e não é comparável diretamente ao modelo
+> atual.
 
 ## Por onde começar
 

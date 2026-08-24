@@ -7,6 +7,7 @@ O servidor real carrega o dataset no import. Para isolar, monkey-patchamos
 import json
 import sys
 
+import numpy as np
 import pytest
 
 _SERVER_MOD = "smarty_energy.mcp.server"
@@ -38,7 +39,7 @@ def srv(monkeypatch, dia_fake, tarifa_fake):
 def test_reward_weights_chamada_vazia_retorna_estado(srv):
     out = json.loads(srv.configure_reward_weights())
     assert out["status"] == "nenhum peso fornecido"
-    assert len(out["pesos_atuais"]) == 15
+    assert len(out["pesos_atuais"]) == 16
     assert "defaults" in out
 
 
@@ -64,6 +65,22 @@ def test_reward_weights_recria_env_global(srv):
     srv.configure_reward_weights(pen_pcc=42.0)
     assert srv.env is not env_antes  # nova instancia
     assert srv.env.cfg["pen_pcc"] == 42.0
+
+
+def test_load_qtables_marca_politica_viva_como_treinada(srv, monkeypatch):
+    hist = {"n_episodios": 123, "soc_final_pct": 37.5}
+    monkeypatch.setattr(srv.runs, "run_mais_recente", lambda: "run_teste")
+    monkeypatch.setattr(srv.runs, "carregar_run", lambda _rid, _agentes: hist)
+
+    out = json.loads(srv.load_qtables())
+    status = json.loads(srv.get_analysis_status())
+
+    assert out["origem"] == "run_teste"
+    assert out["n_episodios"] == 123
+    assert status["treinado"] is True
+    assert status["n_episodios"] == 123
+    assert status["run_carregado"]["origem"] == "run_teste"
+    assert srv.iql.soc_propagado == 37.5
 
 
 # --- health_report: detecta pesos modificados ------------------------------
@@ -142,6 +159,19 @@ def test_compare_strategies_calcula_reducoes(srv):
     assert "reducao_rl_llm_vs_sem_pct" in out
 
 
+def test_run_episode_greedy_usa_qtables_para_decisoes_horarias(srv):
+    """O MCP executa a política IQL; ele não consulta um LLM a cada hora."""
+    estado_inicial = srv.env.discretizar(srv.env.reset())
+    srv.iql.agentes["armazenamento"].q_table[estado_inicial] = np.array([0.0, 0.0, 0.0, 0.0, 1.0])
+    srv.iql.agentes["consumo"].q_table[estado_inicial] = np.array([1.0] + [0.0] * 7)
+    srv.iql.agentes["gerente"].q_table[estado_inicial] = np.array([0.0, 0.0, 1.0])
+
+    resultado = json.loads(srv.run_episode(mode="eval", dia_idx=0, continuar_soc=False))
+    primeiro_passo = resultado["trace"][0]
+
+    assert (primeiro_passo["a_arm"], primeiro_passo["a_cons"], primeiro_passo["a_ger"]) == (4, 0, 2)
+
+
 # --- configure_agents -------------------------------------------------------
 
 def test_configure_agents_valida_ranges(srv):
@@ -199,6 +229,26 @@ def test_equipment_tools_apos_compare(srv):
 def test_equipment_tools_sem_dados_avisa(srv):
     out = json.loads(srv.get_equipment_stats("iql_eval"))
     assert "aviso" in out
+
+
+def test_battery_dispatch_tool_apos_compare(srv):
+    srv.configure_agents(n_episodios=2)
+    srv.train_agents()
+    srv.compare_strategies(n_dias=2)
+
+    out = json.loads(srv.get_battery_dispatch_stats("rl_llm_mcp"))
+
+    assert "aviso" not in out
+    assert set(out["bloqueios_descarga"]) == {
+        "sem_deficit", "soc_minimo", "throughput_esgotado",
+    }
+    assert out["pedidos_descarga"] >= out["descargas_efetivas"]
+    assert 0.0 <= out["pct_descarga_no_pico"] <= 100.0
+    assert 0.0 <= out["taxa_descarga_efetiva_pct"] <= 100.0
+    assert out["descarga_pico_media_dia_kwh"] >= 0.0
+    assert out["carga_solar_ac_kwh"] >= 0.0
+    assert out["carga_rede_ac_kwh"] >= 0.0
+    assert out["custo_carga_rede_rs"] >= 0.0
 
 
 def test_export_all_data_estrutura(srv):

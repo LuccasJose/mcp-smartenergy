@@ -75,7 +75,7 @@ tests/mcp/             # 47 testes (sem rede)
 | Tool | Parâmetros | Descrição |
 |---|---|---|
 | `configure_agents` | hiperparâmetros opcionais | Atualiza α/β/γ/ε e o nº de episódios dos 3 agentes (sem destruir Q-tables) |
-| `configure_reward_weights` | 15 pesos opcionais (`w_*`, `pen_*`, `bonus_*`) | Ajusta a função de reward em runtime. Pesos omitidos preservam o valor atual. Restrições físicas (PCC, SOC, capacidade de bateria) permanecem imutáveis. **Após mudar pesos, retreine** — Q-tables existentes ficam parcialmente obsoletas. |
+| `configure_reward_weights` | 16 pesos opcionais (`w_*`, `pen_*`, `bonus_*`) | Ajusta a função de reward em runtime. Pesos omitidos preservam o valor atual. Restrições físicas (PCC, SOC, capacidade de bateria) permanecem imutáveis. **Após mudar pesos, retreine** — Q-tables existentes ficam parcialmente obsoletas. |
 
 ### Treino e avaliação
 | Tool | Parâmetros | Descrição |
@@ -98,6 +98,7 @@ decay calibrado para 100.000 e os agentes ficariam quase aleatórios.
 | `get_learning_curve` | janela_media_movel=20 | Reward, custo e epsilon por episódio |
 | `get_eval_metrics` | agente="iql_eval" | Métricas da última avaliação |
 | `get_peak_offpeak_stats` | agente="iql_eval" | kWh e R$ pico vs fora-pico |
+| `get_battery_dispatch_stats` | agente="iql_eval" | Carga/descarga por tarifa e motivos de bloqueio |
 | `get_stats_por_cenario` | agente="iql_eval" | Reward/custo médio por cenário |
 | `get_hourly_violations` | agente="iql_eval" | Violações SOC/PCC/teto por hora-do-dia |
 

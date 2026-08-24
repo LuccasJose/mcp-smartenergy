@@ -29,12 +29,12 @@ import time
 from dataclasses import dataclass, field
 
 from .agents import AgentesHeuristicos
-from .config import CONFIG
+from .config import CONFIG, N_ACOES_ARMAZENAMENTO
 
 # ──────────────────────────────────────────────────────────────
 # Espaço de ações (fonte única da verdade — usada no schema das tools)
 # ──────────────────────────────────────────────────────────────
-ACOES_ARM = (0, 1, 2)              # 0=carregar 1=manter 2=descarregar
+ACOES_ARM = tuple(range(N_ACOES_ARMAZENAMENTO))
 ACOES_CONS = tuple(range(8))       # bits: 1=pivo 2=bomba 4=secador (0..7)
 ACOES_GER = (0, 1, 2)              # 0=conservador(20kW) 1=moderado(30kW) 2=liberal(40kW)
 
@@ -191,7 +191,7 @@ TOOL_DECIDIR = {
         "type": "object",
         "properties": {
             "a_arm": {"type": "integer", "enum": list(ACOES_ARM),
-                      "description": "Bateria: 0=carregar, 1=manter, 2=descarregar"},
+                      "description": "Bateria: 0=solar, 1=manter, 2/3/4=descarregar 25/50/100%, 5=rede"},
             "a_cons": {"type": "integer", "enum": list(ACOES_CONS),
                        "description": "Cortes (soma de bits): 1=pivô, 2=bomba, 4=secador; 0=nenhum"},
             "a_ger": {"type": "integer", "enum": list(ACOES_GER),

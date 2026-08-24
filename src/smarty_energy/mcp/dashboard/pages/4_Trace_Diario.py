@@ -97,9 +97,9 @@ st.subheader("Execute a simulação")
 st.caption("O trace simula o dia escolhido; ele não substitui a avaliação do dataset completo.")
 col_run, col_soc = st.columns([1, 3])
 continuar_soc = col_soc.toggle(
-    "Continuidade da bateria (SOC do dia anterior)", value=True,
-    help="Ligado: o dia começa com o SOC final da última simulação "
-         "(primeira começa em 50%). Desligado: reinicia do SOC pós-treino.")
+    "Continuidade da bateria (SOC do dia anterior)", value=False,
+    help="Desligado: diagnostica o dia a partir do SOC pós-treino. Ligado: "
+         "encadeia o SOC final da última simulação para investigar sequência de dias.")
 if col_run.button("Rodar dia", type="primary"):
     try:
         with st.spinner("Executando episódio via MCP..."):
@@ -137,7 +137,7 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
         if _col in df.columns and not pd.api.types.is_bool_dtype(df[_col]):
             df[_col] = df[_col].map(lambda v: str(v).strip().lower() in ("true", "1", "1.0"))
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Retorno total", f"{td['reward_total']:.2f}")
     c2.metric("Custo total", f"R${td['custo_total']:.2f}")
     soc_ini = td.get("soc_inicial")
@@ -145,6 +145,11 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
                delta=(f"início {soc_ini:.1f} %" if soc_ini is not None else None),
                delta_color="off")
     c4.metric("Violações PCC", int(df["pcc_violado"].sum()))
+    bloqueios_descarga = (
+        df["motivo_descarga_bloqueada"].notna().sum()
+        if "motivo_descarga_bloqueada" in df else 0
+    )
+    c5.metric("Descargas bloqueadas", int(bloqueios_descarga))
 
     # ── Plot triplo: geracao/consumo, SOC, custo ──────────────────────
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
@@ -214,9 +219,12 @@ if "trace_dia" in st.session_state and st.session_state.trace_dia:
     st.plotly_chart(fig_eq, use_container_width=True)
 
     with st.expander("Decisões hora a hora"):
-        df_acoes = df[["hora", "a_arm", "a_cons", "a_ger", "tarifa",
-                         "pivo_kw_consumido", "captacao_kw_consumido",
-                         "secador_kw_consumido", "bat_carga", "bat_descarga"]].copy()
+        colunas_acoes = ["hora", "comando_bateria", "fluxo_bateria", "a_arm", "a_cons", "a_ger", "tarifa",
+                          "pivo_kw_consumido", "captacao_kw_consumido",
+                          "secador_kw_consumido", "bat_carga", "bat_descarga",
+                          "fracao_descarga_solicitada",
+                          "motivo_descarga_bloqueada"]
+        df_acoes = df[[c for c in colunas_acoes if c in df]].copy()
         st.dataframe(df_acoes.round(2), use_container_width=True, hide_index=True)
 
 st.divider()

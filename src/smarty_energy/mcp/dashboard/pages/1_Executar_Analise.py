@@ -15,6 +15,7 @@ if str(_SRC) not in sys.path:
 
 from smarty_energy.mcp.dashboard.state import (
     MCPServerError,
+    carregar_politica_atual,
     carregar_rl_padrao,
     comparar,
     export_all_data,
@@ -60,7 +61,29 @@ for coluna, rotulo, concluida in zip(
 
 st.divider()
 
-st.header("1. Treinar os agentes")
+st.header("1. Carregar ou treinar os agentes")
+st.caption("Carregue um run salvo para investigar a política persistida ou treine uma política nova no servidor.")
+
+col_run, col_btn = st.columns([3, 1])
+run_id = col_run.text_input(
+    "Run salvo para a política viva",
+    value="",
+    placeholder="vazio = run mais recente",
+    help="Carrega as Q-tables usadas por Trace Diário, avaliação e RL + LLM MCP.",
+)
+if col_btn.button("Carregar run", disabled=not st.session_state.mcp_conectado):
+    try:
+        res = carregar_politica_atual(run_id.strip())
+        st.session_state.analysis_feedback = (
+            f"Política viva carregada: {res.get('origem', '?')}. "
+            "Avalie ou compare antes de investigar."
+        )
+        st.rerun()
+    except MCPServerError as e:
+        st.error(str(e))
+
+st.divider()
+st.header("2. Treinar os agentes")
 st.caption(
     "Um clique treina DUAS políticas independentes com o mesmo número de "
     "episódios: o RL padrão e o RL + LLM MCP. "
@@ -98,7 +121,7 @@ if st.button(
         st.error(str(e))
 
 st.divider()
-st.header("2. Medir o desempenho")
+st.header("3. Medir o desempenho")
 st.caption(
     "Um só passo avalia e compara as 4 estratégias (Sem agentes, Heurísticas, "
     "RL padrão e RL + LLM MCP) nos mesmos dias."
@@ -161,7 +184,7 @@ if not status["treinado"]:
     st.caption("A comparação será liberada depois que o treino for concluído.")
 
 st.divider()
-st.header("3. Continuar a investigação")
+st.header("4. Continuar a investigação")
 st.caption(
     "Depois de avaliar, abra Visão geral para o resumo. Use Curva de aprendizado, "
     "Trace diário e Equipamentos para investigar causas e detalhes."

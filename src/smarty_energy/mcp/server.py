@@ -69,6 +69,9 @@ _snapshots: dict[str, dict] = {}
 # True quando o 'RL padrão' foi carregado de um run externo (ex.: Smart_Energy):
 # nesse caso o train_agents NÃO sobrescreve o snapshot com o treino do servidor.
 _rl_padrao_travado: bool = False
+# Metadados do run carregado na política IQL viva. Permite ao dashboard distinguir
+# uma política persistida de Q-tables recém-inicializadas em um servidor novo.
+_run_carregado: dict | None = None
 env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
 
 # ── Braços da comparação — chave do tracker -> rótulo exibido ──────────
@@ -98,7 +101,7 @@ _REWARD_WEIGHT_KEYS = (
     "pen_soc", "pen_teto", "pen_producao", "pen_pcc",
     "pen_secador_meta", "pen_sede_desvio",
     "pen_pivo_pico", "pen_secador_pico",
-    "bonus_excedente", "bonus_soc_ok",
+    "bonus_excedente", "bonus_soc_ok", "bonus_descarga_pico",
     "bonus_pivo_solar", "bonus_sec_excedente",
 )
 _DEFAULT_REWARD_WEIGHTS = {k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS}
@@ -188,6 +191,7 @@ def configure_reward_weights(
     pen_secador_pico: float | None = None,
     bonus_excedente: float | None = None,
     bonus_soc_ok: float | None = None,
+    bonus_descarga_pico: float | None = None,
     bonus_pivo_solar: float | None = None,
     bonus_sec_excedente: float | None = None,
 ) -> str:
@@ -214,6 +218,7 @@ def configure_reward_weights(
             "pen_secador_pico": pen_secador_pico,
             "bonus_excedente": bonus_excedente,
             "bonus_soc_ok": bonus_soc_ok,
+            "bonus_descarga_pico": bonus_descarga_pico,
             "bonus_pivo_solar": bonus_pivo_solar,
             "bonus_sec_excedente": bonus_sec_excedente,
         }
@@ -273,6 +278,7 @@ def train_agents(n_episodios: int = 0) -> str:
     episódios (continuidade real). Use n_episodios=0 para usar o configurado.
     """
     try:
+        global _run_carregado
         # Um novo treino invalida as avaliações anteriores. Não mexe em
         # _snapshots["rl_padrao"] quando travado (carregado de um run externo
         # ou congelado manualmente) — só o próprio fluxo de captura automática
@@ -284,6 +290,7 @@ def train_agents(n_episodios: int = 0) -> str:
             iql.n_episodios = n_episodios
         sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
                               tracker=tracker, log=_log)
+        _run_carregado = None
         # RL padrão = treino com os pesos default (sem intervenção do LLM-juiz).
         # Capturado automaticamente para ser o braço de referência da comparação;
         # não sobrescreve um RL padrão carregado de um run externo (travado), nem
@@ -617,6 +624,12 @@ def get_peak_offpeak_stats(agente: str = "iql_eval") -> str:
 
 
 @mcp.tool()
+def get_battery_dispatch_stats(agente: str = "iql_eval") -> str:
+    """Carga/descarga da bateria por tarifa e motivos de descarga bloqueada."""
+    return json.dumps(tracker.get_battery_dispatch_stats(agente), indent=2)
+
+
+@mcp.tool()
 def get_stats_por_cenario(agente: str = "iql_eval") -> str:
     """Reward/custo médio por cenário climático (NUBLADO/ENSOLARADO/ALTO CONSUMO/EQUILIBRADO).
 
@@ -826,12 +839,12 @@ def get_observation() -> str:
 def step_environment(a_arm: int, a_cons: int, a_ger: int) -> str:
     """Avança 1 hora no env atual com as 3 ações fornecidas.
 
-    a_arm: 0=carregar, 1=manter, 2=descarregar
+    a_arm: 0=solar, 1=manter, 2/3/4=descarregar 25/50/100%, 5=carregar pela rede
     a_cons: bitmask 3 bits (bit0=corta pivô, bit1=corta bomba, bit2=corta secador)
     a_ger: 0=conservador(20kW), 1=moderado(30kW), 2=liberal(40kW)
     """
     try:
-        if a_arm not in (0, 1, 2):
+        if not (0 <= a_arm < N_ACOES_ARMAZENAMENTO):
             return json.dumps({"erro": f"a_arm inválido: {a_arm}"}, indent=2)
         if not (0 <= a_cons <= 7):
             return json.dumps({"erro": f"a_cons inválido: {a_cons}"}, indent=2)
@@ -924,18 +937,28 @@ def load_qtables(dir_path: str = "", run_id: str = "") -> str:
     run específico ou `dir_path` para ler 3 pickles soltos.
     """
     try:
+        global _run_carregado
         if dir_path:
             iql.load_all(dir_path)
             origem = dir_path
+            hist = None
         else:
             rid = run_id or runs.run_mais_recente()
             if rid is None:
                 return json.dumps({"erro": "nenhum run em outputs/runs/"}, indent=2)
-            runs.carregar_run(rid, iql.agentes)
+            hist = runs.carregar_run(rid, iql.agentes)
             origem = rid
+        if hist is not None:
+            iql.ultimo_hist = hist
+            iql.soc_propagado = float(hist.get("soc_final_pct", iql.soc_propagado))
+        _run_carregado = {
+            "origem": origem,
+            "n_episodios": hist.get("n_episodios") if hist else None,
+        }
         return json.dumps({
             "status": "Q-tables carregadas",
             "origem": origem,
+            "n_episodios": _run_carregado["n_episodios"],
             "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
         }, indent=2)
     except Exception as e:
@@ -1068,7 +1091,7 @@ def get_analysis_status() -> str:
         treino = tracker.get_training_metrics("iql_treino")
         avaliacao = tracker.get_eval_metrics("rl_llm_mcp")
 
-        treinado = "n_episodios" in treino
+        treinado = "n_episodios" in treino or _run_carregado is not None
         avaliado = "custo_medio_dia_rs" in avaliacao
         comparado = avaliado
         rl_padrao_congelado = "rl_padrao" in _snapshots
@@ -1087,8 +1110,9 @@ def get_analysis_status() -> str:
             "rl_padrao_congelado": rl_padrao_congelado,
             "rl_padrao_travado": _rl_padrao_travado,
             "proxima_etapa": proxima_etapa,
-            "n_episodios": treino.get("n_episodios"),
+            "n_episodios": treino.get("n_episodios") or _run_carregado.get("n_episodios") if _run_carregado else treino.get("n_episodios"),
             "n_dias_avaliados": avaliacao.get("n_dias"),
+            "run_carregado": _run_carregado,
         }, indent=2)
     except Exception as e:
         return _err(e)
@@ -1208,7 +1232,9 @@ def describe_schema() -> str:
         "arquitetura": "IQL (Independent Q-Learning) com 3 agentes cooperativos",
         "agentes": {
             "armazenamento": {"n_acoes": N_ACOES_ARMAZENAMENTO,
-                              "valores": {0: "carregar", 1: "manter", 2: "descarregar"}},
+                              "valores": {0: "carregar", 1: "manter",
+                                           2: "descarregar 25%", 3: "descarregar 50%",
+                                           4: "descarregar 100%"}},
             "consumo":       {"n_acoes": N_ACOES_CONSUMO,
                               "valores": "bitmask 3 bits",
                               "bits": {"bit0(1)": "corta pivô",
@@ -1235,7 +1261,7 @@ def describe_schema() -> str:
         "estado_discreto": {
             "tupla": "(h, s, g, st, meta, b)",
             "buckets": {
-                "h":    "hora // 6 → 4 valores",
+                "h":    "período energético → 7 (0-5 / 6-11 / 12-15 / 16-17 / 18-19 / 20 / 21-23h)",
                 "s":    "soc // 10 → 10 valores",
                 "g":    "solar_kw → 3 (<5 / 5-15 / >15)",
                 "st":   "stress → 3 (<30 / 30-70 / >70)",
@@ -1285,6 +1311,7 @@ def describe_schema() -> str:
             "bonus_carga_bateria_solar": CONFIG["w_bonus_carga"],
             "bonus_excedente_exportado": CONFIG["bonus_excedente"],
             "bonus_soc_30_80": CONFIG["bonus_soc_ok"],
+            "bonus_descarga_bateria_pico": CONFIG["bonus_descarga_pico"],
         },
         "tarifa_tou": {
             "min_rs_kwh": DATASET_META["tarifa_min_rs_kwh"],
@@ -1297,6 +1324,10 @@ def describe_schema() -> str:
             "hora", "soc", "geracao_kw", "consumo_kw", "solar_kw", "eolico_kw",
             "rede_kwh", "excedente", "importacao", "exportacao", "custo_r",
             "tarifa", "reward", "a_arm", "a_cons", "a_ger", "bat_carga", "bat_descarga",
+            "comando_bateria", "fluxo_bateria",
+            "fracao_descarga_solicitada",
+            "bonus_descarga_pico",
+            "motivo_descarga_bloqueada",
             "pcc_violado", "soc_violado", "fonte_geracao_kwh", "fonte_bateria_kwh",
             "fonte_rede_kwh", "pivo_kw_consumido", "captacao_kw_consumido",
             "sede_kw_consumido", "silo_kw_consumido", "secador_kw_consumido",

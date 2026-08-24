@@ -1,0 +1,161 @@
+{
+  "n_episodios": 20000,
+  "seeds": [
+    11,
+    29,
+    47,
+    61,
+    83
+  ],
+  "n_dias_avaliados": 31,
+  "config": {
+    "bonus_descarga_pico": 1.0,
+    "fracoes_descarga": {
+      "2": 0.25,
+      "3": 0.5,
+      "4": 1.0
+    },
+    "soc_propagado": true
+  },
+  "resultados_por_seed": [
+    {
+      "seed": 11,
+      "best_ep": 4600,
+      "best_custo_med_rs_dia": 64.0723,
+      "custo_medio_dia_rs": 64.0723,
+      "rede_media_dia_kwh": 93.1865,
+      "violacoes_soc_media_h_dia": 0.0,
+      "descarga_pico_kwh": 57.375,
+      "descarga_fora_pico_kwh": 271.7379,
+      "pct_descarga_no_pico": 17.43,
+      "taxa_descarga_efetiva_pct": 18.11,
+      "soc_medio_apos_18h_pct": 57.2768,
+      "soc_medio_apos_20h_pct": 50.3949,
+      "bloqueios_descarga": {
+        "sem_deficit": 164,
+        "soc_minimo": 278,
+        "throughput_esgotado": 1
+      }
+    },
+    {
+      "seed": 29,
+      "best_ep": 4200,
+      "best_custo_med_rs_dia": 65.5994,
+      "custo_medio_dia_rs": 65.5994,
+      "rede_media_dia_kwh": 93.3659,
+      "violacoes_soc_media_h_dia": 0.0,
+      "descarga_pico_kwh": 49.3232,
+      "descarga_fora_pico_kwh": 117.67,
+      "pct_descarga_no_pico": 29.54,
+      "taxa_descarga_efetiva_pct": 17.81,
+      "soc_medio_apos_18h_pct": 32.437,
+      "soc_medio_apos_20h_pct": 28.3955,
+      "bloqueios_descarga": {
+        "sem_deficit": 219,
+        "soc_minimo": 104,
+        "throughput_esgotado": 0
+      }
+    },
+    {
+      "seed": 47,
+      "best_ep": 2800,
+      "best_custo_med_rs_dia": 63.8058,
+      "custo_medio_dia_rs": 63.8058,
+      "rede_media_dia_kwh": 92.566,
+      "violacoes_soc_media_h_dia": 0.0,
+      "descarga_pico_kwh": 45.3139,
+      "descarga_fora_pico_kwh": 274.5114,
+      "pct_descarga_no_pico": 14.17,
+      "taxa_descarga_efetiva_pct": 20.48,
+      "soc_medio_apos_18h_pct": 55.7019,
+      "soc_medio_apos_20h_pct": 50.5565,
+      "bloqueios_descarga": {
+        "sem_deficit": 123,
+        "soc_minimo": 271,
+        "throughput_esgotado": 2
+      }
+    },
+    {
+      "seed": 61,
+      "best_ep": 4000,
+      "best_custo_med_rs_dia": 64.4268,
+      "custo_medio_dia_rs": 64.4268,
+      "rede_media_dia_kwh": 92.1359,
+      "violacoes_soc_media_h_dia": 0.0,
+      "descarga_pico_kwh": 27.9296,
+      "descarga_fora_pico_kwh": 192.5366,
+      "pct_descarga_no_pico": 12.67,
+      "taxa_descarga_efetiva_pct": 10.9,
+      "soc_medio_apos_18h_pct": 42.3259,
+      "soc_medio_apos_20h_pct": 39.7495,
+      "bloqueios_descarga": {
+        "sem_deficit": 258,
+        "soc_minimo": 303,
+        "throughput_esgotado": 3
+      }
+    },
+    {
+      "seed": 83,
+      "best_ep": 5400,
+      "best_custo_med_rs_dia": 65.4871,
+      "custo_medio_dia_rs": 65.4871,
+      "rede_media_dia_kwh": 94.6913,
+      "violacoes_soc_media_h_dia": 0.0,
+      "descarga_pico_kwh": 27.2961,
+      "descarga_fora_pico_kwh": 181.8926,
+      "pct_descarga_no_pico": 13.05,
+      "taxa_descarga_efetiva_pct": 20.79,
+      "soc_medio_apos_18h_pct": 40.413,
+      "soc_medio_apos_20h_pct": 37.2521,
+      "bloqueios_descarga": {
+        "sem_deficit": 199,
+        "soc_minimo": 121,
+        "throughput_esgotado": 0
+      }
+    }
+  ],
+  "resumo": {
+    "custo_medio_dia_rs": {
+      "media": 64.6783,
+      "mediana": 64.4268,
+      "desvio_padrao": 0.7341,
+      "min": 63.8058,
+      "max": 65.5994
+    },
+    "rede_media_dia_kwh": {
+      "media": 93.1891,
+      "mediana": 93.1865,
+      "desvio_padrao": 0.8701,
+      "min": 92.1359,
+      "max": 94.6913
+    },
+    "descarga_pico_kwh": {
+      "media": 41.4476,
+      "mediana": 45.3139,
+      "desvio_padrao": 11.947,
+      "min": 27.2961,
+      "max": 57.375
+    },
+    "descarga_fora_pico_kwh": {
+      "media": 207.6697,
+      "mediana": 192.5366,
+      "desvio_padrao": 59.2722,
+      "min": 117.67,
+      "max": 274.5114
+    },
+    "pct_descarga_no_pico": {
+      "media": 17.372,
+      "mediana": 14.17,
+      "desvio_padrao": 6.3104,
+      "min": 12.67,
+      "max": 29.54
+    },
+    "taxa_descarga_efetiva_pct": {
+      "media": 17.618,
+      "mediana": 18.11,
+      "desvio_padrao": 3.5683,
+      "min": 10.9,
+      "max": 20.79
+    }
+  }
+}

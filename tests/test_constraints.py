@@ -20,7 +20,7 @@ Restrições verificadas:
 import numpy as np
 import pytest
 
-from smarty_energy.config import CONFIG, TETOS_KW, BOMBA_HORAS_ON
+from smarty_energy.config import CONFIG, TETOS_KW, BOMBA_HORAS_ON, N_ACOES_ARMAZENAMENTO
 from smarty_energy.environment import FazendaEnergyEnv
 from smarty_energy.evaluation import rodar_heuristico
 
@@ -42,7 +42,7 @@ def _rodar_aleatorio(dia, tarifa):
     env.reset()
     for _ in range(24):
         env.step(
-            a_arm=int(np.random.randint(3)),
+            a_arm=int(np.random.randint(N_ACOES_ARMAZENAMENTO)),
             a_cons=int(np.random.randint(8)),
             a_ger=int(np.random.randint(3)),
         )

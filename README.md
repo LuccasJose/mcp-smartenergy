@@ -71,20 +71,27 @@ servidor, em [docs/execucao-mcp.md](docs/execucao-mcp.md).
 
 ## Resultados
 
-Run canônico (`outputs/runs/2026-06-19_145038`, 100 mil episódios), avaliado nos
-31 dias da base v8 com o SoC da bateria propagado entre dias — o dia seguinte
-começa com a carga que sobrou do anterior, a mesma dinâmica em que a política
-treina:
+O modelo atual usa sete períodos temporais, três níveis de descarga parcial e
+um bônus pequeno para energia de bateria efetivamente entregue no pico. Os
+resultados abaixo usam cinco seeds, 20 mil episódios, política greedy e SoC
+propagado nos 31 dias da base v8:
 
-| Métrica (média diária) | Sem agente | Heurístico | RL (IQL) |
-|---|---|---|---|
-| Custo | R$ 106,90 | R$ 103,35 | **R$ 63,25** |
-| Energia importada da rede | 154,9 kWh | — | **92,6 kWh** |
+| Métrica | Média | Mediana | Desvio padrão |
+|---|---:|---:|---:|
+| Custo médio diário | R$ 64,56 | R$ 65,38 | R$ 1,77 |
+| Energia importada por dia | 93,52 kWh | 94,67 kWh | 2,81 kWh |
+| Descarga no pico | 38,20 kWh/mês | 38,07 kWh/mês | 14,54 kWh |
+| Parcela da descarga no pico | 13,03 % | 13,19 % | 4,52 p.p. |
 
-*   **40,8 %** de economia no custo diário médio ante a fazenda sem gestão.
-*   **40,2 %** de redução na dependência da rede elétrica.
-*   Zero violações de PCC. O SoC fica abaixo do mínimo em **0,032 h/dia** —
-    cerca de uma hora ao longo dos 31 dias.
+As restrições de PCC e SoC foram respeitadas em todas as cinco avaliações. O
+despacho no pico melhorou, mas ainda apresenta variância entre seeds; portanto
+esses valores são experimentais e não substituem automaticamente um resultado
+oficial do TCC. O protocolo, runs e dados completos estão em
+[relatos/experimento_despacho_bateria_pico.md](relatos/experimento_despacho_bateria_pico.md).
+
+> Referência histórica: o run `2026-06-19_145038` obteve R$ 63,25/dia sob a
+> codificação antiga. Ele não é comparável diretamente à arquitetura atual e
+> não pode ser recarregado após a mudança de estado e ações da bateria.
 
 ### Otimizações aplicadas
 
@@ -100,6 +107,7 @@ evitando que os agentes manipulem o SOC da bateria em detrimento da economia rea
 | Custo diário | 8.0 | Sinal dominante |
 | Bateria (SOC) | 12.0 | Barreira de segurança |
 | Excedente solar | 0.5 | Incentivo à exportação |
+| Descarga no pico | 0.5 | Reforço por kWh AC entregue no pico |
 
 ---
 
@@ -140,8 +148,8 @@ tcc-darvinposselt/
 ## Testes
 
 ```bash
-python -m pytest tests -q            # tudo (104 testes)
-python -m pytest tests/mcp -q        # só a camada MCP (47 testes, offline)
+PYTHONPATH=src .venv/bin/python -m pytest tests -q       # tudo
+PYTHONPATH=src .venv/bin/python -m pytest tests/mcp -q   # só a camada MCP
 ```
 
 A suíte do pacote cobre balanço energético, restrições HARD, convergência e

@@ -21,8 +21,8 @@ from smarty_energy.training import treinar, metricas_convergencia
 # ── T2.1 — Cobertura do espaço de estados ──────────────────────────────
 
 def test_espaco_estados_total_confere():
-    """O total combinatório deve ser 4·10·3·3·2·3 = 2160 (fonte única)."""
-    assert ESPACO_ESTADOS_TOTAL == 2160
+    """O total combinatório deve ser 7·10·3·3·2·3 = 3780 (fonte única)."""
+    assert ESPACO_ESTADOS_TOTAL == 3780
 
 
 def test_cobertura_estados_reportada(agentes_treinados):

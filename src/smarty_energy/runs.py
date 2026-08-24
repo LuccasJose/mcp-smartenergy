@@ -71,9 +71,12 @@ def salvar_run(
     with open(destino / "training_history.pkl", "wb") as f:
         pickle.dump(hist, f)
 
+    from .environment import STATE_ENCODING_VERSION
+
     meta = {
         "run_id"        : run_id,
         "criado_em"     : datetime.now().isoformat(timespec="seconds"),
+        "state_encoding_version": STATE_ENCODING_VERSION,
         "n_episodios"   : hist.get("n_episodios"),
         "best_ep"       : hist.get("best_ep"),
         "best_custo_med": hist.get("best_custo_med"),
@@ -130,7 +133,16 @@ def verificar_compatibilidade(run_id: str, agentes: dict, cfg: dict | None = Non
     a física registrada no ``meta.json`` diverge do CONFIG atual, ou quando o run
     é legado (``config_completo`` vazio) e a checagem de física não é possível.
     """
-    from .environment import BUCKETS_ESTADO   # tardio: evita ciclo de import
+    from .environment import BUCKETS_ESTADO, STATE_ENCODING_VERSION  # tardio: evita ciclo de import
+
+    meta = ler_meta(run_id)
+    versao_run = meta.get("state_encoding_version")
+    if versao_run != STATE_ENCODING_VERSION:
+        raise ValueError(
+            f"Run '{run_id}' incompatível: codificação de estado do run é "
+            f"{versao_run!r}, esperada {STATE_ENCODING_VERSION}. Foi treinado "
+            "com outra versão do espaço de estados; retreine antes de carregar."
+        )
 
     # (1) Estrutura das chaves — dimensão e faixa de cada bucket.
     for nome, ag in agentes.items():
@@ -147,7 +159,7 @@ def verificar_compatibilidade(run_id: str, agentes: dict, cfg: dict | None = Non
 
     # (2) Física registrada vs. CONFIG atual (advisory).
     cfg_atual = cfg or CONFIG
-    cfg_run = (ler_meta(run_id).get("config_completo") or {})
+    cfg_run = (meta.get("config_completo") or {})
     if not cfg_run:
         warnings.warn(
             f"Run '{run_id}' não registrou 'config_completo' (run legado); a "

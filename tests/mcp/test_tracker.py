@@ -60,6 +60,61 @@ def test_peak_offpeak_separa_por_tarifa(tracker):
     assert abs(stats["fora_pico"]["custo_rs"] - 3.0) < 1e-9
 
 
+def test_battery_dispatch_stats_separa_pico_e_motivos_de_bloqueio(tracker):
+    tracker.registrar_passo({
+        **_info_passo(18, em_pico_tarifa=True), "a_arm": 2,
+        "bat_descarga": 3.0, "bat_carga": 0.0,
+        "motivo_descarga_bloqueada": None,
+    }, agente="a")
+    tracker.registrar_passo({
+        **_info_passo(19, em_pico_tarifa=True), "a_arm": 2,
+        "bat_descarga": 0.0, "bat_carga": 0.0,
+        "motivo_descarga_bloqueada": "soc_minimo",
+    }, agente="a")
+    tracker.registrar_passo({
+        **_info_passo(12), "a_arm": 0,
+        "bat_descarga": 0.0, "bat_carga": 2.0,
+        "motivo_descarga_bloqueada": None,
+    }, agente="a")
+    tracker.registrar_passo({
+        **_info_passo(20, soc=40.0, em_pico_tarifa=True), "a_arm": 1,
+        "bat_descarga": 0.0, "bat_carga": 0.0,
+        "motivo_descarga_bloqueada": None,
+    }, agente="a")
+
+    stats = tracker.get_battery_dispatch_stats("a")
+
+    assert stats["pedidos_descarga"] == 2
+    assert stats["pedidos_por_nivel"] == {2: 2, 3: 0, 4: 0}
+    assert stats["descargas_efetivas"] == 1
+    assert stats["descarga_pico_kwh"] == 3.0
+    assert stats["carga_fora_pico_kwh"] == 2.0
+    assert stats["bloqueios_descarga"]["soc_minimo"] == 1
+    assert stats["pct_descarga_no_pico"] == 100.0
+    assert stats["taxa_descarga_efetiva_pct"] == 50.0
+    assert stats["descarga_pico_media_dia_kwh"] == 3.0
+    assert stats["soc_medio_apos_18h_pct"] == 50.0
+    assert stats["soc_medio_apos_20h_pct"] == 40.0
+
+
+def test_battery_dispatch_stats_separa_origem_e_custo_da_carga(tracker):
+    tracker.registrar_passo({
+        **_info_passo(10), "tarifa": 0.70, "carga_solar_ac": 2.0,
+        "carga_rede_ac": 3.0, "bloqueio_carga_rede": None,
+    }, agente="a")
+    tracker.registrar_passo({
+        **_info_passo(18, em_pico_tarifa=True), "tarifa": 1.10,
+        "carga_rede_ac": 0.0, "bloqueio_carga_rede": "tarifa_alta",
+    }, agente="a")
+
+    stats = tracker.get_battery_dispatch_stats("a")
+
+    assert stats["carga_solar_ac_kwh"] == 2.0
+    assert stats["carga_rede_ac_kwh"] == 3.0
+    assert stats["custo_carga_rede_rs"] == 2.1
+    assert stats["bloqueios_carga_rede"]["tarifa_alta"] == 1
+
+
 def test_equipment_hourly_agrega_medias(tracker):
     tracker.registrar_passo({**_info_passo(0), "pivo_kw_consumido": 2.0}, agente="a")
     tracker.registrar_passo({**_info_passo(0), "pivo_kw_consumido": 4.0}, agente="a")

@@ -1,7 +1,7 @@
 import numpy as np
 from collections import defaultdict
 
-from ..config import CONFIG
+from ..config import CONFIG, FRACOES_DESCARGA
 
 # Limiar de SOC crítico — em porcentagem (0-100), vindo da config do pacote.
 _SOC_MIN_PCT = CONFIG["soc_min_pct"]
@@ -200,6 +200,70 @@ class MetricsTracker:
                 "custo_rs": soma(fora, "custo_r"),
                 "n_horas": len(fora),
             },
+        }
+
+    def get_battery_dispatch_stats(self, agente: str = "ql_eval") -> dict:
+        """Resume carga, descarga e bloqueios da bateria por período tarifário."""
+        passos = self.passos.get(agente, [])
+        if not passos:
+            return {"aviso": f"Nenhum passo registrado para '{agente}'"}
+
+        def soma(campo: str, em_pico: bool) -> float:
+            return float(sum(
+                p.get(campo, 0.0) for p in passos
+                if bool(p.get("em_pico_tarifa", False)) is em_pico
+            ))
+
+        bloqueios = {motivo: sum(
+            1 for p in passos
+            if p.get("motivo_descarga_bloqueada") == motivo
+        ) for motivo in ("sem_deficit", "soc_minimo", "throughput_esgotado")}
+        pedidos_descarga = sum(1 for p in passos if p.get("a_arm") in FRACOES_DESCARGA)
+        pedidos_por_nivel = {
+            acao: sum(1 for p in passos if p.get("a_arm") == acao)
+            for acao in FRACOES_DESCARGA
+        }
+        descargas_efetivas = sum(1 for p in passos if p.get("bat_descarga", 0.0) > 0.0)
+        descarga_pico = soma("bat_descarga", True)
+        descarga_fora_pico = soma("bat_descarga", False)
+        descarga_total = descarga_pico + descarga_fora_pico
+        carga_solar = float(sum(p.get("carga_solar_ac", 0.0) for p in passos))
+        carga_rede = float(sum(p.get("carga_rede_ac", 0.0) for p in passos))
+        custo_carga_rede = float(sum(
+            p.get("carga_rede_ac", 0.0) * p.get("tarifa", 0.0)
+            for p in passos
+        ))
+        bloqueios_carga_rede = {
+            motivo: sum(1 for p in passos if p.get("bloqueio_carga_rede") == motivo)
+            for motivo in ("tarifa_alta", "soc_maximo", "throughput_esgotado",
+                           "sem_energia_disponivel")
+        }
+        n_dias = max(1, len(self.episodios.get(agente, [])) or len(passos) // 24)
+
+        def soc_medio_hora(hora: int) -> float | None:
+            valores = [p["soc"] for p in passos if p.get("hora") == hora]
+            return round(float(np.mean(valores)), 4) if valores else None
+
+        return {
+            "pedidos_descarga": pedidos_descarga,
+            "pedidos_por_nivel": pedidos_por_nivel,
+            "descargas_efetivas": descargas_efetivas,
+            "bloqueios_descarga": bloqueios,
+            "carga_pico_kwh": soma("bat_carga", True),
+            "carga_fora_pico_kwh": soma("bat_carga", False),
+            "carga_solar_ac_kwh": round(carga_solar, 4),
+            "carga_rede_ac_kwh": round(carga_rede, 4),
+            "custo_carga_rede_rs": round(custo_carga_rede, 4),
+            "bloqueios_carga_rede": bloqueios_carga_rede,
+            "descarga_pico_kwh": descarga_pico,
+            "descarga_fora_pico_kwh": descarga_fora_pico,
+            "pct_descarga_no_pico": round(descarga_pico / descarga_total * 100, 2)
+                                    if descarga_total > 0 else 0.0,
+            "taxa_descarga_efetiva_pct": round(descargas_efetivas / pedidos_descarga * 100, 2)
+                                           if pedidos_descarga > 0 else 0.0,
+            "descarga_pico_media_dia_kwh": round(descarga_pico / n_dias, 4),
+            "soc_medio_apos_18h_pct": soc_medio_hora(18),
+            "soc_medio_apos_20h_pct": soc_medio_hora(20),
         }
 
     # ------------------------------------------------------------------ #

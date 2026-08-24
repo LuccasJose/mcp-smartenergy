@@ -39,6 +39,8 @@ CONFIG = {
     "eficiencia_carga": 0.92,   # η carga
     "eficiencia_descarga": 0.95, # η descarga
     "bat_throughput_max_kwh": 30.0,  # ciclo diário máx (~1.25 ciclos p/ vida útil realista)
+    "potencia_max_carga_rede_kw": 24.0,
+    "tarifa_referencia_arbitragem": 1.10,
 
     # Limites de conexão e geração
     "pcc_max_kw": 65.8,          # limite PCC importação/exportação
@@ -67,6 +69,9 @@ CONFIG = {
     "pen_pcc": 10.0,            # ↓ era 20
     "bonus_excedente": 0.5,     # ↑ era 0.2: mais incentivo para exportar energia
     "bonus_soc_ok": 1.0,        # ↓ era 5.0: evita que agentes "gamifiquem" o SOC
+    "bonus_descarga_pico": 0.5, # reforço leve por kWh AC da bateria entregue no pico
+    "soc_reserva_pre_pico_pct": 60.0,
+    "pen_reserva_pre_pico": 0.0,  # experimento; 0 desativa ate calibracao
 
     # Penalidades Operacionais (proporcionalmente reduzidas)
     "pen_secador_meta": 20.0,   # fallback se rescue não alcançar (defensivo)
@@ -104,7 +109,9 @@ BOMBA_HORAS_ON = frozenset({3, 4, 9, 10, 15, 16, 21, 22})
 # ──────────────────────────────────────────────────────────────
 # Espaços de ação — fonte única (agentes, servidor MCP e schema das tools)
 # ──────────────────────────────────────────────────────────────
-N_ACOES_ARMAZENAMENTO = 3   # 0=carregar, 1=manter, 2=descarregar
+FRACOES_DESCARGA = {2: 0.25, 3: 0.50, 4: 1.00}
+ACAO_CARREGAR_REDE = 5
+N_ACOES_ARMAZENAMENTO = 6   # 0=solar, 1=manter, 2/3/4=25/50/100%, 5=rede
 N_ACOES_CONSUMO       = 8   # bitmask 3 bits: pivô(1), bomba(2), secador(4)
 N_ACOES_GERENTE       = 3   # 0=conservador, 1=moderado, 2=liberal
 

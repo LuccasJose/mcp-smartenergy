@@ -2,16 +2,17 @@
 FazendaEnergyEnv — Ambiente de simulação energética da fazenda.
 
 Estado discreto (chave Q-table): (bucket_hora, bucket_soc, bucket_solar, bucket_stress, meta_sec, bucket_bomba)
-  bucket_hora   : hora // 6        -> 4 valores  (0-5h / 6-11h / 12-17h / 18-23h)
+    bucket_hora   : período energético -> 7 valores (0-5h / 6-11h / 12-15h /
+                                    16-17h / 18-19h / 20h / 21-23h)
   bucket_soc    : soc // 10        -> 10 valores (0-10 / 10-20 / … / 90-100 %)
   bucket_solar  : low/med/high     -> 3 valores  (<5 kW / 5-15 / >15)
   bucket_stress : low/med/high     -> 3 valores  (<30 / 30-70 / >70)
   meta_sec      : 0/1              -> 2 valores  (meta diária do secador atingida)
   bucket_bomba  : longe/perto/ok   -> 3 valores  (h < 3 / 3 ≤ h < 6 / h ≥ 6)
-  Total: 4x10x3x3x2x3 = 2160 estados
+    Total: 7x10x3x3x2x3 = 3780 estados
 
 Ações por agente:
-  Armazenamento : 0=carregar  1=manter  2=descarregar
+    Armazenamento : 0=solar  1=manter  2/3/4=descarregar 25/50/100%  5=rede
   Consumo       : bitmask de 3 bits — bit0=corta pivô (só define o horário de
                   início do bloco de 8h; bits 1 e 2 são ignorados, pois bomba
                   e secador são cargas de cronograma fixo — ver R-BOMBA/R-SECADOR)
@@ -28,16 +29,23 @@ Restrições implementadas:
 import pandas as pd
 import numpy as np
 
-from .config import CONFIG, TETOS_KW, BOMBA_HORAS_ON
+from .config import (
+    ACAO_CARREGAR_REDE, CONFIG, TETOS_KW, BOMBA_HORAS_ON, FRACOES_DESCARGA,
+)
 from .agents import AgenteFinanceiro
+from .battery import BatteryFlow, BatteryModel
 
 # Dimensões da discretização do estado — FONTE ÚNICA (ver docstring do módulo).
 # (bucket_hora, bucket_soc, bucket_solar, bucket_stress, meta_sec, bucket_bomba)
-BUCKETS_ESTADO = (4, 10, 3, 3, 2, 3)
+BUCKETS_ESTADO = (7, 10, 3, 3, 2, 3)
 # Total combinatório de estados discretos possíveis. É um teto: parte das
 # combinações é fisicamente inalcançável (ex.: hora e progresso da bomba são
 # correlacionados), então a cobertura medida contra este total é conservadora.
-ESPACO_ESTADOS_TOTAL = int(np.prod(BUCKETS_ESTADO))  # 4·10·3·3·2·3 = 2160
+ESPACO_ESTADOS_TOTAL = int(np.prod(BUCKETS_ESTADO))  # 7·10·3·3·2·3 = 3780
+
+# Incrementado quando a semântica de uma chave de Q-table muda. A dimensão
+# sozinha não basta: chaves antigas 0..3 ainda caberiam no novo bucket temporal.
+STATE_ENCODING_VERSION = 2
 
 
 class FazendaEnergyEnv:
@@ -47,14 +55,16 @@ class FazendaEnergyEnv:
         self.tarifa = tarifa_24h
         self.cfg    = cfg
         self.fin    = AgenteFinanceiro(cfg)
+        self.battery = BatteryModel(cfg)
         self.reset()
 
     def reset(self, soc_inicial: float | None = None) -> dict:
         """Reinicia o ambiente para um novo dia."""
         self.hora      = 0
-        self.soc       = soc_inicial if soc_inicial is not None else self.cfg["soc_inicial_pct"]
+        self.battery.reset(soc_inicial)
+        self.soc       = self.battery.soc_pct
         self.historico  = []
-        self.bat_throughput_dia = 0.0
+        self.bat_throughput_dia = self.battery.throughput_kwh
         
         # Estado das restrições — contadores e travas (HARD)
         self.pivo_lock         = 0      # R-PIVO: horas ON travadas restantes (lock de 8h)
@@ -86,7 +96,21 @@ class FazendaEnergyEnv:
         return {**self._estado(), "hora_atual": self.hora, "done": self.hora >= 24}
 
     def discretizar(self, est: dict) -> tuple:
-        h = est["hora"] // 6
+        hora = est["hora"]
+        if hora < 6:
+            h = 0  # madrugada
+        elif hora < 12:
+            h = 1  # manhã
+        elif hora < 16:
+            h = 2  # tarde solar
+        elif hora < 18:
+            h = 3  # pré-pico
+        elif hora < 20:
+            h = 4  # pico inicial
+        elif hora == 20:
+            h = 5  # pico final
+        else:
+            h = 6  # pós-pico
         s = min(int(est["soc"] / 10), 9)   # 10 buckets: [0,10) [10,20) ... [90,100]
         g = 0 if est["solar_kw"] < 5 else (1 if est["solar_kw"] < 15 else 2)
         # Novo: Stress em 3 buckets
@@ -103,7 +127,7 @@ class FazendaEnergyEnv:
         """Executa um timestep (1 hora).
 
         Args:
-            a_arm  : ação do agente de armazenamento (0=carregar, 1=manter, 2=descarregar)
+            a_arm  : bateria (0=solar, 1=manter, 2/3/4=descarregar 25/50/100%, 5=rede)
             a_cons : ação do agente de consumo — bitmask (1=pivô, 2=bomba, 4=secador)
             a_ger  : ação do gerente de carga        (0=20kW, 1=30kW, 2=40kW)
 
@@ -212,36 +236,60 @@ class FazendaEnergyEnv:
         )
 
         # ── R5: Bateria com η carga/descarga + throughput diário ──
-        soc_kwh     = (self.soc / 100.0) * cap
-        soc_min_kwh = (cfg["soc_min_pct"] / 100.0) * cap
-        soc_max_kwh = (cfg["soc_max_pct"] / 100.0) * cap
-        eta_c       = cfg["eficiencia_carga"]
-        eta_d       = cfg["eficiencia_descarga"]
-        tp_restante = cfg["bat_throughput_max_kwh"] - self.bat_throughput_dia
+        fracao_descarga_solicitada = FRACOES_DESCARGA.get(a_arm)
+        comando_bateria = {
+            0: "carregar_excedente",
+            1: "manter",
+            2: "descarregar_25pct",
+            3: "descarregar_50pct",
+            4: "descarregar_100pct",
+            ACAO_CARREGAR_REDE: "carregar_rede",
+        }.get(a_arm, "desconhecido")
+        carga_solar = None
+        carga_rede = None
+        if a_arm in (0, ACAO_CARREGAR_REDE):
+            carga_solar = self.battery.charge(
+                max(0.0, geracao - consumo), "solar"
+            )
+        if a_arm == ACAO_CARREGAR_REDE:
+            eta_total = cfg["eficiencia_carga"] * cfg["eficiencia_descarga"]
+            tarifa_elegivel = est["tarifa"] < (
+                cfg["tarifa_referencia_arbitragem"] * eta_total
+            )
+            if tarifa_elegivel:
+                carga_rede = self.battery.charge(
+                    cfg["potencia_max_carga_rede_kw"], "rede"
+                )
+            else:
+                carga_rede = BatteryFlow(source="rede", blocked_reason="tarifa_alta")
 
-        bat_carga    = 0.0  # kWh entrando na bateria (lado DC)
-        bat_descarga = 0.0  # kWh saindo da bateria (lado DC)
-
-        if a_arm == 0:    # carregar
-            disponivel  = max(0.0, geracao - consumo)
-            carga_dc    = min(disponivel * eta_c, soc_max_kwh - soc_kwh, tp_restante)
-            soc_kwh    += carga_dc
-            bat_carga   = carga_dc
-        elif a_arm == 2:  # descarregar
-            falta       = max(0.0, consumo - geracao)
-            descarga_dc = min(falta / eta_d, soc_kwh - soc_min_kwh, tp_restante)
-            soc_kwh    -= descarga_dc
-            bat_descarga = descarga_dc
-
-        self.bat_throughput_dia += bat_carga + bat_descarga
-        self.soc    = max(0.0, min(100.0, (soc_kwh / cap) * 100.0))
+        descarga = None
+        if a_arm in FRACOES_DESCARGA:
+            descarga = self.battery.discharge(
+                max(0.0, consumo - geracao), FRACOES_DESCARGA[a_arm]
+            )
+        bat_carga = sum(
+            fluxo.stored_kwh for fluxo in (carga_solar, carga_rede) if fluxo
+        )
+        bat_descarga = descarga.input_kwh if descarga else 0.0
+        motivo_descarga_bloqueada = descarga.blocked_reason if descarga else None
+        self.bat_throughput_dia = self.battery.throughput_kwh
+        self.soc = self.battery.soc_pct
         soc_critico = self.soc < cfg["soc_min_pct"]
 
         # ── R1 + R4: Balanço de potência (fechamento energético) ──
         # Energia útil entregue pela bateria à carga (lado AC)
-        descarga_util = bat_descarga * eta_d
+        descarga_util = bat_descarga * cfg["eficiencia_descarga"]
         # Energia consumida da geração para carregar (lado AC)
-        carga_consumida = bat_carga / eta_c if eta_c > 0 else 0.0
+        carga_consumida = sum(
+            fluxo.input_kwh for fluxo in (carga_solar, carga_rede) if fluxo
+        )
+        carga_rede_ac = carga_rede.input_kwh if carga_rede else 0.0
+        fluxo_bateria = (
+            "carregando" if bat_carga > 0.0 else
+            "descarregando" if bat_descarga > 0.0 else
+            "sem_movimento"
+        )
 
         # Balanço: o que sobra/falta após geração atender consumo e bateria
         saldo = geracao - consumo - carga_consumida + descarga_util
@@ -312,6 +360,15 @@ class FazendaEnergyEnv:
         bonus_carga_solar = 0.0
         if a_arm == 0 and saldo >= 0: # 0 = CARREGAR e saldo positivo (excedente)
             bonus_carga_solar = bat_carga * cfg["w_bonus_carga"]
+        bonus_descarga_pico = (
+            descarga_util * cfg["bonus_descarga_pico"] if em_pico_tarifa else 0.0
+        )
+        pen_reserva_pre_pico = 0.0
+        if not em_pico_tarifa and (self.hora - 1) < 18 and bat_descarga > 0.0:
+            deficit_reserva = max(0.0, cfg["soc_reserva_pre_pico_pct"] - self.soc)
+            pen_reserva_pre_pico = (
+                cfg["pen_reserva_pre_pico"] * deficit_reserva / 100.0 * bat_descarga
+            )
 
         # ── Reward cooperativo ────────────────────────────────────
         reward = (
@@ -325,9 +382,11 @@ class FazendaEnergyEnv:
             - pen_metas
             - pen_pivo_pico
             - pen_secador_pico
+            - pen_reserva_pre_pico
             + bonus_pivo_solar
             + bonus_sec_excedente
             + bonus_carga_solar
+            + bonus_descarga_pico
             + cfg["bonus_excedente"] * excedente * est["tarifa"]
             + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
         )
@@ -354,6 +413,16 @@ class FazendaEnergyEnv:
             "custo_r": custo, "tarifa": est["tarifa"], "reward": reward,
             "a_arm": a_arm, "a_cons": a_cons, "a_ger": a_ger,
             "bat_carga": bat_carga, "bat_descarga": bat_descarga,
+            "carga_solar_ac": carga_solar.input_kwh if carga_solar else 0.0,
+            "carga_rede_ac": carga_rede_ac,
+            "importacao_carga_rede": carga_rede_ac,
+            "bloqueio_carga_rede": carga_rede.blocked_reason if carga_rede else None,
+            "comando_bateria": comando_bateria,
+            "fluxo_bateria": fluxo_bateria,
+            "fracao_descarga_solicitada": fracao_descarga_solicitada,
+            "bonus_descarga_pico": bonus_descarga_pico,
+            "pen_reserva_pre_pico": pen_reserva_pre_pico,
+            "motivo_descarga_bloqueada": motivo_descarga_bloqueada,
             "pcc_violado": pcc_violado,
             "soc_violado": soc_critico,
             "teto_excedido": teto_excedido,

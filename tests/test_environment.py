@@ -52,7 +52,7 @@ def test_env_discretizar_retorna_tupla_de_6(env):
     assert isinstance(disc, tuple)
     assert len(disc) == 6
     h, s, g, st, meta, b = disc
-    assert 0 <= h <= 3          # bucket hora
+    assert 0 <= h <= 6          # bucket temporal
     assert 0 <= s <= 9          # bucket soc (10 buckets)
     assert g in (0, 1, 2)       # bucket solar
     assert st in (0, 1, 2)      # bucket estresse
@@ -111,7 +111,7 @@ def test_heuristica_retorna_acoes_validas(dia_fake, tarifa_fake):
     estado = {"hora": 0, "soc": 50.0, "solar_kw": 8.0, "eolico_kw": 2.0, "tarifa": 0.70}
     stress = h.stress_financeiro(estado)
     assert 0.0 <= stress <= 100.0
-    assert h.armazenamento(estado) in (0, 1, 2)
+    assert h.armazenamento(estado) in (0, 1, 2, 3, 4)
     assert h.consumo(estado, stress) in range(8)
     assert h.gerente(estado, stress) in (0, 1, 2)
 

@@ -80,7 +80,7 @@ def construir_servidor():
     def decidir_controle(a_arm: int, a_cons: int, a_ger: int) -> dict:
         """Define as 3 ações de controle de energia para a hora atual.
 
-        a_arm  : bateria  — 0=carregar, 1=manter, 2=descarregar
+        a_arm  : bateria  — 0=solar, 1=manter, 2/3/4=descarregar 25/50/100%, 5=rede
         a_cons : cortes   — soma de bits 1=pivô, 2=bomba, 4=secador (0=nenhum)
         a_ger  : teto kW  — 0=20, 1=30, 2=40
         """

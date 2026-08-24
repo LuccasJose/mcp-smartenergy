@@ -22,7 +22,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "src"))
 
 from smarty_energy import data_loader
-from smarty_energy.config import CONFIG, ajustar_decay
+from smarty_energy.config import CONFIG, N_ACOES_ARMAZENAMENTO, ajustar_decay
 from smarty_energy.agents import AgenteQL
 from smarty_energy.training import treinar
 
@@ -164,7 +164,7 @@ def treinar_agentes(dias, tarifa, n_ep: int, seed: int = SEED) -> dict:
     np.random.seed(seed)
     cfg = config_teste(n_ep)
     agentes = {
-        "armazenamento": AgenteQL(3, "Armazenamento", cfg),
+        "armazenamento": AgenteQL(N_ACOES_ARMAZENAMENTO, "Armazenamento", cfg),
         "consumo"      : AgenteQL(8, "Consumo",        cfg),
         "gerente"      : AgenteQL(3, "Gerente",        cfg),
     }
