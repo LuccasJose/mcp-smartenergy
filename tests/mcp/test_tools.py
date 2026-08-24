@@ -31,7 +31,12 @@ def srv(monkeypatch, dia_fake, tarifa_fake):
     for k, v in server._DEFAULT_REWARD_WEIGHTS.items():
         CONFIG[k] = v
         server.iql.cfg[k] = v
-    return server
+    yield server
+    # Teardown: restaura defaults para nao vazar pesos p/ testes fora deste
+    # arquivo (ex.: test_treino_converge treina com o CONFIG global).
+    for k, v in server._DEFAULT_REWARD_WEIGHTS.items():
+        CONFIG[k] = v
+        server.iql.cfg[k] = v
 
 
 # --- configure_reward_weights ----------------------------------------------

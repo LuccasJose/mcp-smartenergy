@@ -70,12 +70,16 @@ def test_rl_supera_politica_aleatoria(dados_reais, agentes_treinados):
 
 @pytest.fixture(scope="session")
 def historico_treino(dados_reais):
-    """Treina um run de 2000 ep e devolve o histórico (rewards/custos por ep)."""
+    """Treina um run de 3000 ep e devolve o histórico (rewards/custos por ep).
+
+    2000 ep bastavam com 3 ações de bateria; com o espaço ampliado (6 ações)
+    e o rescue do pivô, a curva só estabiliza (<5%) a partir de ~3000 ep.
+    """
     dias, tarifa = dados_reais
     np.random.seed(42)
     cfg = copy.deepcopy(CONFIG)
-    cfg["n_episodios"] = 2000
-    cfg["epsilon_decay"] = (cfg["epsilon_final"] / cfg["epsilon_inicial"]) ** (1 / 2000)
+    cfg["n_episodios"] = 3000
+    cfg["epsilon_decay"] = (cfg["epsilon_final"] / cfg["epsilon_inicial"]) ** (1 / 3000)
     return treinar(dias, tarifa, construir_agentes(cfg), cfg)
 
 
