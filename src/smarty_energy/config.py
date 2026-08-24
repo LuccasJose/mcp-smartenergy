@@ -12,6 +12,12 @@ _ROOT = Path(__file__).resolve().parents[2]
 # Defina SHEET_ID (env) para baixar de um Google Sheets com o mesmo esquema.
 SHEET_ID = os.getenv("SHEET_ID", "")
 
+# Dataset Parquet gerado pelo FEMS (scripts/gerar_dataset.py --completo).
+# Se definido, tem prioridade sobre SHEET_ID e o Excel local.
+FEMS_DATASET_DIR = os.getenv("FEMS_DATASET_DIR", "")
+# Mês da série FEMS a usar (1-12); 0 carrega o ano inteiro (365 dias).
+FEMS_MES = int(os.getenv("FEMS_MES", "1"))
+
 # Base de dados local (contém FAZ-001 e FAZ-002)
 DATA_PATH = _ROOT / os.getenv("DATA_PATH", "dados/modelo_gestao_energia_fazenda_v8.xlsx")
 OUTPUT_DIR = _ROOT / os.getenv("OUTPUT_DIR", "outputs")
