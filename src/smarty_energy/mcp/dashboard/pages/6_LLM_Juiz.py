@@ -68,8 +68,11 @@ EXEMPLOS = {
     ),
 }
 
+# Fora do form: mudar o exemplo precisa rerodar para atualizar o textarea
+# (dentro de st.form as interações só são processadas no submit).
+exemplo = st.selectbox("Modelos de objetivo", list(EXEMPLOS.keys()))
+
 with st.form("judge_form"):
-    exemplo = st.selectbox("Modelos de objetivo", list(EXEMPLOS.keys()))
     goal = st.text_area(
         "Objetivo para o juiz",
         value=EXEMPLOS[exemplo],
