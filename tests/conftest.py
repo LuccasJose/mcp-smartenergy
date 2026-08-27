@@ -137,15 +137,17 @@ def env(dia_fake, tarifa_fake):
 def n_episodios_teste() -> int:
     """Número de episódios do treino de teste.
 
-    Padrão: 800 (rápido, mas suficiente para o RL superar 'sem agente').
+    Padrão: 1500 (rápido, mas suficiente para o RL superar 'sem agente' no
+    dataset FEMS padrão — com a base v8 800 bastavam; os perfis do FEMS
+    exigem um pouco mais para a mesma seed).
     Sobrescreva com a env var `SMARTY_TEST_EPISODIOS` para o teste completo:
 
         $env:SMARTY_TEST_EPISODIOS = "100000"; pytest -m slow
     """
     try:
-        return max(1, int(os.getenv("SMARTY_TEST_EPISODIOS", "800")))
+        return max(1, int(os.getenv("SMARTY_TEST_EPISODIOS", "1500")))
     except ValueError:
-        return 800
+        return 1500
 
 
 def config_teste(n_ep: int) -> dict:

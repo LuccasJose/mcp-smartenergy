@@ -13,8 +13,14 @@ _ROOT = Path(__file__).resolve().parents[2]
 SHEET_ID = os.getenv("SHEET_ID", "")
 
 # Dataset Parquet gerado pelo FEMS (scripts/gerar_dataset.py --completo).
-# Se definido, tem prioridade sobre SHEET_ID e o Excel local.
-FEMS_DATASET_DIR = os.getenv("FEMS_DATASET_DIR", "")
+# PADRÃO: a cópia versionada em dados/fems_faz_002 (offline, reprodutível).
+# Defina FEMS_DATASET_DIR para outra pasta, ou vazio ("") para voltar às
+# fontes legadas (Google Sheets/Excel v8).
+_FEMS_DEFAULT = _ROOT / "dados" / "fems_faz_002"
+FEMS_DATASET_DIR = os.getenv(
+    "FEMS_DATASET_DIR",
+    str(_FEMS_DEFAULT) if _FEMS_DEFAULT.is_dir() else "",
+)
 # Mês da série FEMS a usar (1-12); 0 carrega o ano inteiro (365 dias).
 FEMS_MES = int(os.getenv("FEMS_MES", "1"))
 
