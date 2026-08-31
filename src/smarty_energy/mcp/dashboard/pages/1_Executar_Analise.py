@@ -20,7 +20,11 @@ from smarty_energy.mcp.dashboard.state import (
     comparar,
     export_all_data,
     get_analysis_status,
+    list_experiments,
+    load_experiment,
+    rename_experiment,
     require_setup,
+    save_experiment,
     treinar_rl_e_mcp,
 )
 
@@ -119,6 +123,91 @@ if st.button(
             st.rerun()
     except MCPServerError as e:
         st.error(str(e))
+
+st.divider()
+st.header("Modelos salvos")
+st.caption(
+    "Salve o par treinado (RL padrão + RL + LLM MCP) como um modelo e "
+    "recarregue-o depois — pula a etapa de treino e vai direto à comparação."
+)
+
+col_sv1, col_sv2 = st.columns([3, 1])
+label_novo = col_sv1.text_input(
+    "Nome do modelo",
+    value="",
+    placeholder="vazio = usa o nº de episódios (ex.: 50000ep)",
+    help="Rótulo amigável do modelo salvo; dá para renomear depois.",
+)
+if col_sv2.button("Salvar modelo", disabled=not status["treinado"],
+                  use_container_width=True):
+    try:
+        res = save_experiment(label_novo.strip())
+        if "erro" in res:
+            st.error(res["erro"])
+        else:
+            st.session_state.analysis_feedback = (
+                f"Modelo salvo: {res['label']} ({res['exp_id']})."
+            )
+            st.rerun()
+    except MCPServerError as e:
+        st.error(str(e))
+
+try:
+    _exps = list_experiments().get("experimentos", [])
+except MCPServerError:
+    _exps = []
+
+if not _exps:
+    st.info("Nenhum modelo salvo ainda. Treine e clique em **Salvar modelo**.")
+else:
+    _rotulo = {
+        f"{m['label']}  ·  {m['exp_id']}"
+        + (f"  ·  R${m['custos'].get('rl_llm_mcp', '?')}/dia" if m.get("custos") else "")
+        + ("  ·  ⚖️ pesos alterados" if m.get("pesos_alterados") else ""): m
+        for m in _exps
+    }
+    escolha = st.selectbox("Modelos disponíveis (mais recente primeiro)",
+                           list(_rotulo.keys()))
+    _sel = _rotulo[escolha]
+
+    col_ld, col_rn1, col_rn2 = st.columns([1, 2, 1])
+    if col_ld.button("Carregar modelo", type="primary",
+                     disabled=not st.session_state.mcp_conectado,
+                     use_container_width=True):
+        try:
+            res = load_experiment(_sel["exp_id"])
+            if "erro" in res:
+                st.error(res["erro"])
+            else:
+                avisos = res.get("avisos_fisica") or []
+                extra = f" Atenção — física divergente: {'; '.join(avisos)}." if avisos else ""
+                st.session_state.analysis_feedback = (
+                    f"Modelo '{res['label']}' carregado — treino dispensado. "
+                    f"Vá direto a **Medir o desempenho**.{extra}"
+                )
+                st.rerun()
+        except MCPServerError as e:
+            st.error(str(e))
+
+    label_edit = col_rn1.text_input("Renomear para", value="",
+                                    placeholder="novo nome do modelo",
+                                    label_visibility="collapsed")
+    if col_rn2.button("Renomear", disabled=not label_edit.strip(),
+                      use_container_width=True):
+        try:
+            res = rename_experiment(_sel["exp_id"], label_edit.strip())
+            if "erro" in res:
+                st.error(res["erro"])
+            else:
+                st.session_state.analysis_feedback = (
+                    f"Modelo {res['exp_id']} renomeado para '{res['label']}'."
+                )
+                st.rerun()
+        except MCPServerError as e:
+            st.error(str(e))
+
+    with st.expander("Detalhes do modelo selecionado"):
+        st.json(_sel)
 
 st.divider()
 st.header("3. Medir o desempenho")

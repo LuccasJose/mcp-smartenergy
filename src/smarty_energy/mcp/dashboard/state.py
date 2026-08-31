@@ -17,6 +17,7 @@ __all__ = [
     "ensure_state", "require_setup", "conectar_mcp", "sincronizar_status",
     "treinar", "treinar_rl_e_mcp", "avaliar", "comparar",
     "snapshot_policy", "carregar_politica_atual", "carregar_rl_padrao", "get_analysis_status",
+    "save_experiment", "load_experiment", "list_experiments", "rename_experiment",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
     "get_battery_dispatch_stats", "get_equipment_hourly", "get_equipment_stats", "export_all_data",
@@ -126,6 +127,33 @@ def snapshot_policy(nome: str = "rl_padrao") -> dict:
     res = call_tool("snapshot_policy", nome=nome)
     ss.rl_padrao_congelado = True
     return res
+
+
+# --- experimentos (modelos salvos: par RL padrão + RL + LLM MCP) ---
+
+def save_experiment(label: str = "") -> dict:
+    return call_tool("save_experiment", label=label)
+
+
+def load_experiment(exp_id: str = "") -> dict:
+    """Restaura um modelo salvo — estado volta a 'treinado' sem retreinar."""
+    ss = st.session_state
+    res = call_tool("load_experiment", exp_id=exp_id)
+    if "erro" not in res:
+        ss.treinado = True
+        ss.avaliado = False
+        ss.comparado = False
+        ss.rl_padrao_congelado = True
+        ss.pop("export_payload", None)
+    return res
+
+
+def list_experiments() -> dict:
+    return call_tool("list_experiments")
+
+
+def rename_experiment(exp_id: str, novo_label: str) -> dict:
+    return call_tool("rename_experiment", exp_id=exp_id, novo_label=novo_label)
 
 
 def carregar_politica_atual(run_id: str = "") -> dict:

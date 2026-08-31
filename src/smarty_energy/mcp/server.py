@@ -25,6 +25,7 @@ from ..agents import (
     IQLSystem, AgentesHeuristicos, SemAgente, avaliar_politica, construir_agentes,
 )
 from .. import runs
+from . import experiments
 from .tracker import MetricsTracker
 
 
@@ -72,6 +73,8 @@ _rl_padrao_travado: bool = False
 # Metadados do run carregado na política IQL viva. Permite ao dashboard distinguir
 # uma política persistida de Q-tables recém-inicializadas em um servidor novo.
 _run_carregado: dict | None = None
+# Metadados do experimento (par de braços) carregado via load_experiment.
+_experimento_carregado: dict | None = None
 env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
 
 # ── Braços da comparação — chave do tracker -> rótulo exibido ──────────
@@ -278,7 +281,7 @@ def train_agents(n_episodios: int = 0) -> str:
     episódios (continuidade real). Use n_episodios=0 para usar o configurado.
     """
     try:
-        global _run_carregado
+        global _run_carregado, _experimento_carregado
         # Um novo treino invalida as avaliações anteriores. Não mexe em
         # _snapshots["rl_padrao"] quando travado (carregado de um run externo
         # ou congelado manualmente) — só o próprio fluxo de captura automática
@@ -291,6 +294,7 @@ def train_agents(n_episodios: int = 0) -> str:
         sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
                               tracker=tracker, log=_log)
         _run_carregado = None
+        _experimento_carregado = None
         # RL padrão = treino com os pesos default (sem intervenção do LLM-juiz).
         # Capturado automaticamente para ser o braço de referência da comparação;
         # não sobrescreve um RL padrão carregado de um run externo (travado), nem
@@ -312,9 +316,10 @@ def train_rl_e_mcp(n_episodios: int = 0) -> str:
     São dois treinos separados (RNGs distintos), então as políticas diferem
     mesmo sem o juiz agir. Use n_episodios=0 para o valor configurado.
     """
-    global _rl_padrao_travado
+    global _rl_padrao_travado, _experimento_carregado
     try:
         n = n_episodios if n_episodios > 0 else iql.n_episodios
+        _experimento_carregado = None
 
         # 1) RL padrão — IQL independente, treino próprio, congelado e travado.
         rl = IQLSystem(ajustar_decay(CONFIG, n))
@@ -1079,6 +1084,145 @@ def liberar_rl_padrao() -> str:
                       indent=2)
 
 
+# ------------------------------------------------------------------ #
+# Experimentos — modelos salvos (par RL padrão + RL + LLM MCP)          #
+# ------------------------------------------------------------------ #
+
+@mcp.tool()
+def save_experiment(label: str = "") -> str:
+    """Salva o estado treinado como um 'modelo' reutilizável (experimento).
+
+    Congela em outputs/experimentos/<exp_id>/ os DOIS braços — a política
+    viva 'RL + LLM MCP' e o snapshot 'RL padrão' — com os pesos do reward
+    vigentes e metadados. Depois, load_experiment restaura tudo sem retreinar.
+
+    `label` vazio vira "<n_episodios>ep" (ex.: "50000ep"); renomeável depois
+    com rename_experiment.
+    """
+    try:
+        if not any(ag.q_table for ag in iql.agentes.values()):
+            return json.dumps({"erro": "nenhuma política treinada — rode "
+                                       "train_agents/train_rl_e_mcp antes."}, indent=2)
+        snap = _snapshots.get("rl_padrao") or _congelar_politica("rl_padrao")
+
+        custos = {}
+        for chave in ("rl_padrao", "rl_llm_mcp"):
+            m = tracker.get_eval_metrics(chave)
+            if "custo_medio_dia_rs" in m:
+                custos[chave] = round(m["custo_medio_dia_rs"], 2)
+
+        exp_id = experiments.salvar(
+            iql.agentes, snap,
+            label=label,
+            hist=iql.ultimo_hist,
+            pesos_reward={k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS},
+            fonte_dados=DATASET_META.get("fonte"),
+            soc_propagado=iql.soc_propagado,
+            rl_padrao_travado=_rl_padrao_travado,
+            custos=custos,
+        )
+        meta = experiments._ler_meta(exp_id)
+        return json.dumps({
+            "status": "experimento salvo",
+            "exp_id": exp_id,
+            "label": meta["label"],
+            "caminho": str(experiments.caminho(exp_id)),
+            "custos": custos,
+            "nota": "load_experiment restaura os 2 braços sem retreinar.",
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def load_experiment(exp_id: str = "") -> str:
+    """Restaura um experimento salvo — pula a etapa de treino.
+
+    Recarrega a política viva (RL + LLM MCP), o snapshot 'RL padrão'
+    (travado), os pesos do reward e o SOC propagado. Depois disso basta
+    compare_strategies para medir — sem retreinar. `exp_id` vazio usa o
+    mais recente. Avaliações anteriores são descartadas (eram de outra
+    política).
+    """
+    global _rl_padrao_travado, _run_carregado, _experimento_carregado, env
+    try:
+        eid = exp_id or experiments.mais_recente()
+        if eid is None:
+            return json.dumps({"erro": "nenhum experimento salvo em "
+                                       f"{experiments.EXP_DIR}"}, indent=2)
+
+        snap, meta, hist = experiments.carregar(eid, iql.agentes)
+        _snapshots["rl_padrao"] = snap
+        _rl_padrao_travado = True
+
+        pesos = meta.get("pesos_reward") or {}
+        if pesos:
+            CONFIG.update(pesos)
+            iql.cfg.update(pesos)
+            env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+
+        if meta.get("soc_propagado_pct") is not None:
+            iql.soc_propagado = float(meta["soc_propagado_pct"])
+        if hist is not None:
+            iql.ultimo_hist = hist
+
+        for chave in ("iql_treino", "iql_eval", "rl_llm_mcp", "rl_padrao",
+                      "heuristico", "sem_agente"):
+            tracker.limpar(chave)
+
+        _run_carregado = {"origem": f"experimento:{eid}",
+                          "n_episodios": meta.get("n_episodios")}
+        _experimento_carregado = {"exp_id": eid, "label": meta.get("label")}
+
+        return json.dumps({
+            "status": "experimento carregado — treino dispensado",
+            "exp_id": eid,
+            "label": meta.get("label"),
+            "n_episodios": meta.get("n_episodios"),
+            "pesos_restaurados": bool(pesos),
+            "custos_salvos": meta.get("custos", {}),
+            "avisos_fisica": experiments.avisos_fisica(meta),
+            "proximo_passo": "compare_strategies para medir os 4 braços.",
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def list_experiments() -> str:
+    """Lista os modelos salvos (mais recente primeiro): id, label, episódios,
+    pesos alterados vs default e custos registrados na época."""
+    try:
+        itens = []
+        for m in experiments.listar():
+            pesos = m.get("pesos_reward") or {}
+            delta = {k: v for k, v in pesos.items()
+                     if k in _DEFAULT_REWARD_WEIGHTS and v != _DEFAULT_REWARD_WEIGHTS[k]}
+            itens.append({
+                "exp_id": m["exp_id"],
+                "label": m.get("label"),
+                "criado_em": m.get("criado_em"),
+                "n_episodios": m.get("n_episodios"),
+                "custos": m.get("custos", {}),
+                "pesos_alterados": delta,
+                "fonte_dados": m.get("fonte_dados"),
+            })
+        return json.dumps({"n": len(itens), "experimentos": itens}, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
+def rename_experiment(exp_id: str, novo_label: str) -> str:
+    """Renomeia um modelo salvo (troca o label amigável; o exp_id não muda)."""
+    try:
+        meta = experiments.renomear(exp_id, novo_label.strip())
+        return json.dumps({"status": "renomeado", "exp_id": exp_id,
+                           "label": meta["label"]}, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
 @mcp.tool()
 def get_analysis_status() -> str:
     """Estado operacional da análise para interfaces: etapas concluídas e próxima ação.
@@ -1113,6 +1257,7 @@ def get_analysis_status() -> str:
             "n_episodios": treino.get("n_episodios") or _run_carregado.get("n_episodios") if _run_carregado else treino.get("n_episodios"),
             "n_dias_avaliados": avaliacao.get("n_dias"),
             "run_carregado": _run_carregado,
+            "experimento_carregado": _experimento_carregado,
         }, indent=2)
     except Exception as e:
         return _err(e)
