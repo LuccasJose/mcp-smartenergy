@@ -753,6 +753,60 @@ def get_dataset_info() -> str:
 
 
 @mcp.tool()
+def switch_dataset(dataset_dir: str, id_fazenda: str = "", mes: int = 1) -> str:
+    """Troca a fazenda ativa do servidor por um dataset Parquet do FEMS.
+
+    Aponta o servidor para outra pasta gerada por `gerar_dataset.py --completo`
+    (outra fazenda ou outro mês/ano). É um RESET COMPLETO: políticas, snapshots,
+    tracker e avaliações são descartados — uma fazenda nova é um problema novo.
+    Modelos salvos (experimentos) NÃO são afetados; note que carregar um modelo
+    treinado em outra fazenda produz comparação inválida (o load avisa).
+
+    Args:
+        dataset_dir : pasta com consumo/geracao/consumo_fatura.parquet
+        id_fazenda  : id dentro do dataset (vazio = usa o ID_FAZENDA do config)
+        mes         : 1-12 recorta um mês; 0 usa a série inteira
+    """
+    global DIAS, TARIFA_24H, DATASET_META, env, iql, _dia_atual_idx
+    global _rl_padrao_travado, _run_carregado, _experimento_carregado
+    global _soc_trace, _soc_trace_snapshot
+    try:
+        from ..data_loader import _carregar_fems
+        from ..config import ID_FAZENDA as _ID_DEFAULT
+        fid = id_fazenda.strip() or _ID_DEFAULT
+
+        dias_novos, tarifa_nova = _carregar_fems(dataset_dir, mes=mes,
+                                                 id_fazenda=fid)
+
+        DIAS, TARIFA_24H = dias_novos, tarifa_nova
+        DATASET_META = {**descrever_base(DIAS, TARIFA_24H, id_fazenda=fid),
+                        "fonte": f"FEMS ({dataset_dir})"}
+
+        # Reset completo do estado de análise — nova fazenda, novo problema.
+        iql = IQLSystem(ajustar_decay(CONFIG, N_EPISODIOS_SERVIDOR))
+        _snapshots.clear()
+        _rl_padrao_travado = False
+        _run_carregado = None
+        _experimento_carregado = None
+        _dia_atual_idx = 0
+        _soc_trace = None
+        _soc_trace_snapshot = None
+        for chave in ("iql_treino", "iql_eval", "iql_trace", "rl_llm_mcp",
+                      "rl_padrao", "heuristico", "sem_agente"):
+            tracker.limpar(chave)
+        env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+
+        return json.dumps({
+            "status": "dataset trocado — estado de análise zerado",
+            **DATASET_META,
+            "proximo_passo": "train_rl_e_mcp (ou load_experiment de um modelo "
+                             "desta mesma fazenda).",
+        }, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+@mcp.tool()
 def select_day(dia_idx: int) -> str:
     """Seleciona um dia específico do dataset para get_current_state / step_environment."""
     try:
@@ -1174,6 +1228,15 @@ def load_experiment(exp_id: str = "") -> str:
                           "n_episodios": meta.get("n_episodios")}
         _experimento_carregado = {"exp_id": eid, "label": meta.get("label")}
 
+        avisos = experiments.avisos_fisica(meta)
+        fonte_exp = meta.get("fonte_dados")
+        if fonte_exp and fonte_exp != DATASET_META.get("fonte"):
+            avisos.append(
+                f"modelo treinado em outra fonte de dados ({fonte_exp}) — "
+                f"a fazenda ativa é {DATASET_META.get('fonte')}; a comparação "
+                "não é válida entre fazendas diferentes."
+            )
+
         return json.dumps({
             "status": "experimento carregado — treino dispensado",
             "exp_id": eid,
@@ -1181,7 +1244,7 @@ def load_experiment(exp_id: str = "") -> str:
             "n_episodios": meta.get("n_episodios"),
             "pesos_restaurados": bool(pesos),
             "custos_salvos": meta.get("custos", {}),
-            "avisos_fisica": experiments.avisos_fisica(meta),
+            "avisos_fisica": avisos,
             "proximo_passo": "compare_strategies para medir os 4 braços.",
         }, indent=2)
     except Exception as e:

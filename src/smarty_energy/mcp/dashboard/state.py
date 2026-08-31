@@ -18,6 +18,7 @@ __all__ = [
     "treinar", "treinar_rl_e_mcp", "avaliar", "comparar",
     "snapshot_policy", "carregar_politica_atual", "carregar_rl_padrao", "get_analysis_status",
     "save_experiment", "load_experiment", "list_experiments", "rename_experiment",
+    "switch_dataset",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
     "get_battery_dispatch_stats", "get_equipment_hourly", "get_equipment_stats", "export_all_data",
@@ -154,6 +155,21 @@ def list_experiments() -> dict:
 
 def rename_experiment(exp_id: str, novo_label: str) -> dict:
     return call_tool("rename_experiment", exp_id=exp_id, novo_label=novo_label)
+
+
+def switch_dataset(dataset_dir: str, id_fazenda: str = "", mes: int = 1) -> dict:
+    """Troca a fazenda ativa do servidor — reset completo do estado de análise."""
+    ss = st.session_state
+    res = call_tool("switch_dataset", dataset_dir=dataset_dir,
+                    id_fazenda=id_fazenda, mes=mes)
+    if "erro" not in res:
+        ss.meta = get_dataset_info()
+        ss.treinado = False
+        ss.avaliado = False
+        ss.comparado = False
+        ss.rl_padrao_congelado = False
+        ss.pop("export_payload", None)
+    return res
 
 
 def carregar_politica_atual(run_id: str = "") -> dict:
