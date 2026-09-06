@@ -139,6 +139,8 @@ def test_config_chaves_obrigatorias():
         # Penalidades operacionais e shaping
         "pen_secador_meta", "pen_sede_desvio", "pen_pivo_pico",
         "pen_secador_pico", "bonus_pivo_solar", "bonus_sec_excedente",
+        "bonus_descarga_pico", "bonus_carga_pico_geracao",
+        "pen_descarga_fora_pico",
     ]
     for chave in chaves:
         assert chave in CONFIG, f"Chave ausente em CONFIG: {chave}"

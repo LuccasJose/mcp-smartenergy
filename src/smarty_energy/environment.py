@@ -360,8 +360,18 @@ class FazendaEnergyEnv:
         bonus_carga_solar = 0.0
         if a_arm == 0 and saldo >= 0: # 0 = CARREGAR e saldo positivo (excedente)
             bonus_carga_solar = bat_carga * cfg["w_bonus_carga"]
+        # Extra por carregar do sol no pico de geração (janela solar forte)
+        carga_solar_kwh = carga_solar.stored_kwh if carga_solar else 0.0
+        bonus_carga_pico_geracao = (
+            carga_solar_kwh * cfg["bonus_carga_pico_geracao"] if sol_forte else 0.0
+        )
         bonus_descarga_pico = (
             descarga_util * cfg["bonus_descarga_pico"] if em_pico_tarifa else 0.0
+        )
+        # Desincentivo a gastar bateria fora do pico tarifário (reserva p/ o pico)
+        pen_descarga_fora_pico = (
+            descarga_util * cfg["pen_descarga_fora_pico"]
+            if not em_pico_tarifa else 0.0
         )
         pen_reserva_pre_pico = 0.0
         if not em_pico_tarifa and (self.hora - 1) < 18 and bat_descarga > 0.0:
@@ -383,9 +393,11 @@ class FazendaEnergyEnv:
             - pen_pivo_pico
             - pen_secador_pico
             - pen_reserva_pre_pico
+            - pen_descarga_fora_pico
             + bonus_pivo_solar
             + bonus_sec_excedente
             + bonus_carga_solar
+            + bonus_carga_pico_geracao
             + bonus_descarga_pico
             + cfg["bonus_excedente"] * excedente * est["tarifa"]
             + cfg["bonus_soc_ok"]    * float(30 < self.soc < 80)
@@ -421,6 +433,8 @@ class FazendaEnergyEnv:
             "fluxo_bateria": fluxo_bateria,
             "fracao_descarga_solicitada": fracao_descarga_solicitada,
             "bonus_descarga_pico": bonus_descarga_pico,
+            "bonus_carga_pico_geracao": bonus_carga_pico_geracao,
+            "pen_descarga_fora_pico": pen_descarga_fora_pico,
             "pen_reserva_pre_pico": pen_reserva_pre_pico,
             "motivo_descarga_bloqueada": motivo_descarga_bloqueada,
             "pcc_violado": pcc_violado,

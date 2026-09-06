@@ -74,14 +74,20 @@ CONFIG = {
     # Pesos do reward cooperativo (rebalanceados — custo como sinal dominante)
     "w_custo": 8.0,         # peso do custo monetário no reward
     "w_estresse": 0.5,      # peso do estresse financeiro
-    "w_bonus_carga": 1.2,   # bônus por carregar com excedente solar (aumentado para 1.2)
+    "w_bonus_carga": 2.0,   # bônus por carregar com excedente solar (↑ era 1.2: reforça uso da bateria)
     "pen_soc": 12.0,        # penalidade por SOC crítico (rebalanceado: era 30, dominava o sinal)
     "pen_teto": 8.0,            # ↓ era 15: idem
     "pen_producao": 5.0,        # ↓ era 10
     "pen_pcc": 10.0,            # ↓ era 20
     "bonus_excedente": 0.5,     # ↑ era 0.2: mais incentivo para exportar energia
     "bonus_soc_ok": 1.0,        # ↓ era 5.0: evita que agentes "gamifiquem" o SOC
-    "bonus_descarga_pico": 0.5, # reforço leve por kWh AC da bateria entregue no pico
+    # Despacho da bateria (calibrado no sweep de 2026-09-06, braço "pico_estrito"):
+    # fora do pico, descarregar economiza w_custo*0.681 ≈ 5.45/kWh — a penalidade
+    # 6.0 torna isso estritamente não-lucrativo, e o bônus 3.0 faz do pico o único
+    # lugar rentável p/ gastar o throughput (30 kWh/dia, compartilhado carga+descarga).
+    "bonus_descarga_pico": 3.0, # por kWh AC da bateria entregue no pico
+    "bonus_carga_pico_geracao": 1.0,  # extra por kWh carregado do sol em janela solar forte (≥15 kW)
+    "pen_descarga_fora_pico": 6.0,    # por kWh AC descarregado FORA do pico tarifário (preserva SOC p/ o pico)
     "soc_reserva_pre_pico_pct": 60.0,
     "pen_reserva_pre_pico": 0.0,  # experimento; 0 desativa ate calibracao
 

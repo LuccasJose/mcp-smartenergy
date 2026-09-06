@@ -88,6 +88,7 @@ def test_bonus_descarga_pico_recompensa_energia_util_entregue(tarifa_fake, cfg):
         "pen_producao", "pen_pcc", "pen_secador_meta", "pen_pivo_pico",
         "pen_secador_pico", "bonus_excedente", "bonus_soc_ok",
         "bonus_pivo_solar", "bonus_sec_excedente",
+        "bonus_carga_pico_geracao", "pen_descarga_fora_pico",
     ):
         cfg_bonus[chave] = 0.0
     env = FazendaEnergyEnv(_dia(0.0), tarifa_fake, cfg_bonus)
@@ -98,6 +99,66 @@ def test_bonus_descarga_pico_recompensa_energia_util_entregue(tarifa_fake, cfg):
 
     esperado = info["bat_descarga"] * cfg_bonus["eficiencia_descarga"] * 2.0
     assert reward == pytest.approx(esperado)
+
+
+def test_bonus_carga_pico_geracao_recompensa_kwh_armazenado_com_sol_forte(
+    tarifa_fake, cfg
+):
+    cfg_carga = dict(cfg, bonus_carga_pico_geracao=2.0, reward_offset=0.0)
+    for chave in (
+        "w_custo", "w_estresse", "w_bonus_carga", "pen_soc", "pen_teto",
+        "pen_producao", "pen_pcc", "pen_secador_meta", "pen_pivo_pico",
+        "pen_secador_pico", "bonus_excedente", "bonus_soc_ok",
+        "bonus_pivo_solar", "bonus_sec_excedente", "bonus_descarga_pico",
+        "pen_descarga_fora_pico",
+    ):
+        cfg_carga[chave] = 0.0
+
+    # Sol forte (20 kW >= 15): bônus proporcional ao kWh armazenado
+    env = FazendaEnergyEnv(_dia(20.0), tarifa_fake, cfg_carga)
+    env.reset(soc_inicial=30.0)
+    _, reward, _, info = env.step(a_arm=0, a_cons=0, a_ger=2)
+    esperado = info["carga_solar_ac"] * cfg_carga["eficiencia_carga"] * 2.0
+    assert info["bat_carga"] > 0.0
+    assert reward == pytest.approx(esperado)
+
+    # Sol fraco (14 kW < 15, mas ainda com excedente): bônus não dispara
+    env_fraco = FazendaEnergyEnv(_dia(14.0), tarifa_fake, cfg_carga)
+    env_fraco.reset(soc_inicial=30.0)
+    _, reward_fraco, _, info_fraco = env_fraco.step(a_arm=0, a_cons=0, a_ger=2)
+    assert info_fraco["bat_carga"] > 0.0
+    assert reward_fraco == pytest.approx(0.0)
+
+
+def test_pen_descarga_fora_pico_penaliza_kwh_util_fora_do_pico(tarifa_fake, cfg):
+    cfg_pen = dict(cfg, pen_descarga_fora_pico=2.0, reward_offset=0.0)
+    for chave in (
+        "w_custo", "w_estresse", "w_bonus_carga", "pen_soc", "pen_teto",
+        "pen_producao", "pen_pcc", "pen_secador_meta", "pen_pivo_pico",
+        "pen_secador_pico", "bonus_excedente", "bonus_soc_ok",
+        "bonus_pivo_solar", "bonus_sec_excedente", "bonus_descarga_pico",
+        "bonus_carga_pico_geracao", "pen_reserva_pre_pico",
+    ):
+        cfg_pen[chave] = 0.0
+
+    # Fora do pico (hora 12): penalidade proporcional ao kWh AC entregue
+    env = FazendaEnergyEnv(_dia(0.0), tarifa_fake, cfg_pen)
+    env.reset(soc_inicial=95.0)
+    env.hora = 12
+    _, reward, _, info = env.step(a_arm=4, a_cons=0, a_ger=2)
+    esperado = -info["bat_descarga"] * cfg_pen["eficiencia_descarga"] * 2.0
+    assert not info["em_pico_tarifa"]
+    assert info["bat_descarga"] > 0.0
+    assert reward == pytest.approx(esperado)
+
+    # No pico (hora 18): mesma descarga não é penalizada
+    env_pico = FazendaEnergyEnv(_dia(0.0), tarifa_fake, cfg_pen)
+    env_pico.reset(soc_inicial=95.0)
+    env_pico.hora = 18
+    _, reward_pico, _, info_pico = env_pico.step(a_arm=4, a_cons=0, a_ger=2)
+    assert info_pico["em_pico_tarifa"]
+    assert info_pico["bat_descarga"] > 0.0
+    assert reward_pico == pytest.approx(0.0)
 
 
 def test_reserva_pre_pico_penaliza_descarga_abaixo_do_alvo(tarifa_fake, cfg):
@@ -112,6 +173,7 @@ def test_reserva_pre_pico_penaliza_descarga_abaixo_do_alvo(tarifa_fake, cfg):
         "pen_producao", "pen_pcc", "pen_secador_meta", "pen_pivo_pico",
         "pen_secador_pico", "bonus_excedente", "bonus_soc_ok",
         "bonus_pivo_solar", "bonus_sec_excedente", "bonus_descarga_pico",
+        "bonus_carga_pico_geracao", "pen_descarga_fora_pico",
     ):
         cfg_reserva[chave] = 0.0
     env = FazendaEnergyEnv(_dia(0.0), tarifa_fake, cfg_reserva)
