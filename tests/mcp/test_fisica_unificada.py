@@ -9,6 +9,10 @@ mudar um valor físico só de um lado, algum destes testes quebra.
 import importlib
 import itertools
 import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
 import sys
 
 import numpy as np
@@ -19,6 +23,74 @@ from smarty_energy import environment as pkg_env
 from smarty_energy import agents as pkg_agents
 
 _SERVER_MOD = "smarty_energy.mcp.server"
+
+
+@pytest.fixture
+def arquitetura_isolada(tmp_path):
+    raiz = Path(__file__).resolve().parents[2]
+    origem = raiz / "src" / "smarty_energy"
+    pacote = tmp_path / "smarty_energy"
+    for arquivo in origem.rglob("*.py"):
+        destino = pacote / arquivo.relative_to(origem)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(arquivo, destino)
+    shutil.copyfile(raiz / "pyproject.toml", tmp_path / "pyproject.toml")
+    inicializador = pacote / "__init__.py"
+    inicializador.write_text(
+        'raise AssertionError("O verificador nao deve executar o produto")\n'
+        + inicializador.read_text(encoding="utf-8"), encoding="utf-8",
+    )
+    return tmp_path
+
+
+def _verificar_imports(diretorio, contrato=None):
+    argumentos = [
+        sys.executable, "-c",
+        "from importlinter.cli import lint_imports_command; lint_imports_command()",
+        "--config", "pyproject.toml", "--no-cache",
+    ]
+    if contrato is not None:
+        argumentos.extend(["--contract", contrato])
+    ambiente = dict(os.environ, PYTHONPATH=str(diretorio), PYTHON_DOTENV_DISABLED="1")
+    return subprocess.run(
+        argumentos, cwd=diretorio, env=ambiente, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=30, check=False,
+    )
+
+
+def test_contratos_arquitetura_aceitam_codigo_atual_sem_executar(arquitetura_isolada):
+    resultado = _verificar_imports(arquitetura_isolada)
+
+    assert resultado.returncode == 0, resultado.stdout + resultado.stderr
+    assert "4 kept, 0 broken" in resultado.stdout
+
+
+@pytest.mark.parametrize("indireto", [False, True], ids=["direto", "indireto"])
+@pytest.mark.parametrize("contrato, origem, proibido, regra", [
+    ("motor-sem-adaptadores", "battery.py", "smarty_energy.mcp.state", "A-DEP-001"),
+    ("estado-sem-servidor", "mcp/state.py", "smarty_energy.mcp.server", "A-DEP-002"),
+    ("backend-sem-clientes", "mcp/server.py", "smarty_energy.mcp.dashboard.state", "A-DEP-003"),
+    ("clientes-sem-motor", "mcp/dashboard/pages/4_Trace_Diario.py", "smarty_energy.environment", "A-DEP-004"),
+])
+def test_contratos_arquitetura_rejeitam_imports(arquitetura_isolada, indireto, contrato, origem, proibido, regra):
+    pacote = arquitetura_isolada / "smarty_energy"
+    destino_import = proibido
+    if indireto:
+        (pacote / "_architecture_probe.py").write_text(
+            f"import {proibido}\n", encoding="utf-8",
+        )
+        destino_import = "smarty_energy._architecture_probe"
+    arquivo = pacote / origem
+    arquivo.write_text(
+        arquivo.read_text(encoding="utf-8") + f"\nimport {destino_import}\n",
+        encoding="utf-8",
+    )
+
+    resultado = _verificar_imports(arquitetura_isolada, contrato)
+
+    assert resultado.returncode == 1, resultado.stdout + resultado.stderr
+    assert regra in resultado.stdout
+    assert "0 kept, 1 broken" in resultado.stdout
 
 
 @pytest.fixture

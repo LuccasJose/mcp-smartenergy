@@ -1,0 +1,63 @@
+name: Qualidade do kit de agentes
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verificacoes-rapidas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHON_DOTENV_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m ruff check .
+      - run: python -m pre_commit run --all-files
+      - name: Contratos de dependencias (analise estatica)
+        env:
+          PYTHONPATH: src
+        run: lint-imports --config pyproject.toml --no-cache
+      - name: Contratos do piloto com dados sinteticos
+        run: >-
+          python -m coverage run -m pytest
+          tests/test_battery.py tests/test_battery_properties.py
+          tests/test_docs.py
+          tests/test_environment.py tests/test_runs.py
+          tests/test_data_loader_fems.py
+          tests/mcp/test_tools.py tests/mcp/test_switch_dataset.py
+          tests/mcp/test_experiments.py tests/mcp/test_fisica_unificada.py
+          tests/mcp/test_transport.py
+          tests/test_training.py::test_treino_curto_propaga_soc
+          tests/test_training.py::test_treino_completa_horizonte_e_restaura_checkpoint -q
+      - name: Cobertura do recorte do piloto (sem limiar de aprovacao)
+        run: python -m coverage report
+
+  documentacao:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm --prefix docs ci --no-audit --no-fund
+      - run: npm --prefix docs run docs:test
+      - run: npm --prefix docs run docs:build
+      - run: python scripts/verificar_docs.py

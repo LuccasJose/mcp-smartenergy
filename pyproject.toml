@@ -47,3 +47,109 @@ testpaths = ["tests"]
 markers = [
     "slow: testes lentos (treino longo/reprodutibilidade). Rode com '-m slow'.",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["src/smarty_energy"]
+relative_files = true
+
+[tool.coverage.report]
+include = [
+    "src/smarty_energy/battery.py",
+    "src/smarty_energy/environment.py",
+    "src/smarty_energy/evaluation.py",
+    "src/smarty_energy/training.py",
+    "src/smarty_energy/runs.py",
+    "src/smarty_energy/data_loader.py",
+    "src/smarty_energy/mcp/server.py",
+    "src/smarty_energy/mcp/state.py",
+]
+precision = 2
+show_missing = true
+
+[tool.coverage.json]
+output = ".coverage-piloto.json"
+
+[tool.importlinter]
+root_package = "smarty_energy"
+
+[[tool.importlinter.contracts]]
+id = "motor-sem-adaptadores"
+name = "A-DEP-001 Motor nao depende de adaptadores"
+type = "forbidden"
+source_modules = [
+    "smarty_energy.config",
+    "smarty_energy.battery",
+    "smarty_energy.data_loader",
+    "smarty_energy.agents",
+    "smarty_energy.environment",
+    "smarty_energy.training",
+    "smarty_energy.evaluation",
+    "smarty_energy.metrics",
+    "smarty_energy.runs",
+]
+forbidden_modules = [
+    "smarty_energy.mcp",
+    "smarty_energy.mcp_server",
+    "smarty_energy.dashboard",
+    "smarty_energy.dashboard_web",
+    "smarty_energy.visualization",
+    "smarty_energy.llm_policy",
+    "smarty_energy.benchmark",
+]
+
+[[tool.importlinter.contracts]]
+id = "estado-sem-servidor"
+name = "A-DEP-002 Estado e auxiliares nao dependem do servidor"
+type = "forbidden"
+source_modules = [
+    "smarty_energy.mcp.state",
+    "smarty_energy.mcp.tracker",
+    "smarty_energy.mcp.experiments",
+]
+forbidden_modules = ["smarty_energy.mcp.server"]
+
+[[tool.importlinter.contracts]]
+id = "backend-sem-clientes"
+name = "A-DEP-003 Backend MCP nao depende de clientes"
+type = "forbidden"
+source_modules = [
+    "smarty_energy.mcp.server",
+    "smarty_energy.mcp.state",
+    "smarty_energy.mcp.tracker",
+    "smarty_energy.mcp.experiments",
+]
+forbidden_modules = [
+    "smarty_energy.mcp.dashboard",
+    "smarty_energy.mcp.judge_core",
+    "smarty_energy.dashboard",
+    "smarty_energy.dashboard_web",
+    "smarty_energy.visualization",
+    "smarty_energy.llm_policy",
+    "smarty_energy.mcp_server",
+    "smarty_energy.benchmark",
+]
+
+[[tool.importlinter.contracts]]
+id = "clientes-sem-motor"
+name = "A-DEP-004 Clientes MCP nao importam motor ou estado do servidor"
+type = "forbidden"
+source_modules = [
+    "smarty_energy.mcp.dashboard",
+    "smarty_energy.mcp.judge_core",
+]
+forbidden_modules = [
+    "smarty_energy.config",
+    "smarty_energy.battery",
+    "smarty_energy.data_loader",
+    "smarty_energy.agents",
+    "smarty_energy.environment",
+    "smarty_energy.training",
+    "smarty_energy.evaluation",
+    "smarty_energy.metrics",
+    "smarty_energy.runs",
+    "smarty_energy.mcp.server",
+    "smarty_energy.mcp.state",
+    "smarty_energy.mcp.tracker",
+    "smarty_energy.mcp.experiments",
+]
