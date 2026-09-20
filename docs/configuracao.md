@@ -32,14 +32,19 @@ o decaimento para que ε chegue perto de `epsilon_final` no fim do treino —
 |---|---|---|
 | `bateria_cap_kwh` | 24.0 | Capacidade da bateria |
 | `soc_inicial_pct` | 50.0 | SOC inicial |
-| `soc_min_pct` | 15.0 | SOC crítico (penalizado) |
+| `soc_min_pct` | 15.0 | Limite de descarga; abaixo disso o SOC é crítico |
 | `soc_max_pct` | 95.0 | SOC máximo (para de carregar) |
 | `eficiencia_carga` | 0.92 | η de carga |
 | `eficiencia_descarga` | 0.95 | η de descarga |
+| `potencia_max_carga_rede_kw` | 24.0 | Solicitação máxima de carga pela rede no passo de 1 h |
+| `tarifa_referencia_arbitragem` | 1.10 | Referência tarifária para elegibilidade da carga pela rede |
 
 As ações de armazenamento são `0` (carregar com excedente), `1` (manter) e
-`2`/`3`/`4` para descarregar 25 %, 50 % ou 100 % do déficit horário. Todas
-continuam limitadas por SOC mínimo, eficiência, throughput diário e PCC.
+`2`/`3`/`4` para descarregar 25 %, 50 % ou 100 % do déficit horário; `5` tenta
+excedente e depois rede elegível. SoC, eficiência e throughput são aplicados
+pela bateria; o PCC é aplicado pelo ambiente ao balanço da rede. Isso não
+substitui uma verificação conjunta de conservação ao atingir o PCC.
+Veja os [contratos técnicos](arquitetura.md) e as [regras de domínio](regras-dominio.md).
 
 ## Pesos do reward cooperativo
 
@@ -54,9 +59,9 @@ agentes manipulem o SOC da bateria em detrimento da economia real.
 | `pen_producao` | 5.0 | Captação cortada |
 | `bonus_excedente` | 0.5 | Incentivo à exportação de excedente |
 | `bonus_soc_ok` | 1.0 | SOC em faixa saudável |
-| `bonus_descarga_pico` | 0.5 | Reforço leve por kWh AC descarregado no pico |
+| `bonus_descarga_pico` | 3.0 | Bônus por kWh AC descarregado no pico |
 
-Os 15 pesos podem ser alterados em runtime pela tool
+O conjunto de pesos exposto pelo servidor pode ser alterado em runtime pela tool
 `configure_reward_weights` do [servidor MCP](mcp.md) — as restrições físicas
 (PCC, SOC, capacidade da bateria) permanecem imutáveis.
 
@@ -67,10 +72,10 @@ Os 15 pesos podem ser alterados em runtime pela tool
 | `pcc_max_kw` | 65.8 | Limite do ponto de conexão (import/export) |
 | `inversor_fv_max_kw` | 50.0 | Teto do inversor fotovoltaico |
 | `eolico_nominal_kw` | 10.0 | Potência nominal do aerogerador |
-| `bat_throughput_max_kwh` | 48.0 | Ciclo máximo diário da bateria |
+| `bat_throughput_max_kwh` | 30.0 | Energia DC diária movimentada, somando carga e descarga; não é contagem de ciclos |
 | `pivo_nominal_kw` | 8.0 | Potência do pivô durante o lock de 8h |
 | `bomba_cap_nominal_kw` | 17.6 | Potência da bomba na hora agendada |
-| `secador_max_kw` | 2.4 | Teto físico do secador (usado no rescue) |
+| `secador_max_kw` | 2.4 | Parâmetro legado; o passo atual segue a potência horária da base, sem rescue ativo |
 | `secador_meta_kwh` | 20.0 | Meta diária de energia do secador |
 
 ## Tetos do Gerente de Carga

@@ -35,7 +35,9 @@ as dependências já estão unificadas em `requirements.txt`.
 .venv\Scripts\python.exe server.py
 ```
 
-Saída esperada (o processo **fica rodando**, não feche este terminal):
+O comando inicializa o estado antes de abrir o transporte. Exemplo de saída
+com Sheets configurado (a fonte e o número de dias dependem da configuração;
+o processo **fica rodando**, não feche este terminal):
 
 ```
 Carregando dataset...
@@ -44,6 +46,32 @@ Carregando dataset...
 Servidor MCP em http://127.0.0.1:8000/mcp (transporte streamable-http)
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
+
+### Uso por código Python
+
+Quem usa o ponto de entrada acima não precisa mudar nada. Para chamar funções
+diretamente, inicialize o módulo antes de acessar dados ou tools:
+
+```python
+from smarty_energy.mcp import server
+
+server.initialize()
+informacoes = server.get_dataset_info()
+```
+
+Esse exemplo pressupõe o pacote importável, como no ponto de entrada da raiz,
+e carrega a fonte configurada. Em testes, use `initialize(loader=...)` com
+dados sintéticos. A importação não carrega o dataset. Uma segunda chamada
+de initialize não reinicia a sessão; falha de carga impede o startup.
+`server.main()` já inicializa e inicia o transporte; se usar `server.mcp.run()`
+diretamente, a inicialização prévia é responsabilidade do chamador.
+
+Código Python interno que inspecionava `server.DIAS`, `server.env` ou
+`server.iql` deve usar `server.get_state().dias`, `.env` ou `.iql` após
+inicializar. Os antigos atributos não são mantidos como aliases. `get_state()`
+retorna o objeto ativo mutável, não uma cópia nem uma sessão por cliente;
+prefira as tools para comandos e consultas normais. Nenhuma tool ou argumento
+do protocolo MCP foi renomeado nesta migração.
 
 ---
 
@@ -73,4 +101,4 @@ o run mais recente de `outputs/runs/` — inclusive um treinado por
 - **Usou `.venv\Scripts\python.exe` nos dois terminais?** (não `python` puro)
 - **O Terminal 1 (servidor) ainda está aberto e sem erro?** O dashboard depende dele — sem ele, "Conectar" falha.
 - **Porta 8000 já em uso?** Se o servidor reclamar disso, outro `server.py` já está rodando — reaproveite-o ou feche o antigo. Para trocar de porta: `$env:MCP_PORT = "8010"`.
-- **Sem internet?** O servidor baixa a base no startup. Aponte `DATA_PATH` para o Excel local e deixe `SHEET_ID` vazio no `.env`.
+- **Sem internet?** Use FEMS local ou desative `FEMS_DATASET_DIR` e `SHEET_ID` para usar o Excel definido em `DATA_PATH`. A [prioridade das fontes](dados.md) também vale no startup explícito; não há fallback automático.

@@ -4,8 +4,10 @@
   "private": true,
   "description": "Documentação Retype do projeto SmartEnergy MAS (TCC).",
   "scripts": {
-    "docs:dev": "retype start",
-    "docs:build": "retype build"
+    "docs:dev": "node node_modules/retypeapp/retype.js start",
+    "predocs:build": "node -e \"require('node:fs').rmSync('site', { recursive: true, force: true })\"",
+    "docs:build": "node ../scripts/build_docs.cjs",
+    "docs:test": "node --test ../tests/test_docs_build.cjs"
   },
   "devDependencies": {
     "retypeapp": "^4.6.0"

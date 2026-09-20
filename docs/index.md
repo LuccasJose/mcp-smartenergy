@@ -64,10 +64,17 @@ reproduzíveis.
 
 ## Por onde começar
 
+Links entre páginas navegam neste site. Referências como `src/...`, `tests/...`
+e `knowledge/...` identificam caminhos relativos à raiz do repositório; esses
+arquivos não são copiados para a documentação gerada. O [guia do kit](kit-agentes.md)
+descreve como reproduzir e verificar o build local.
+
 - [Instalação](instalacao.md) — preparar o ambiente Python e as dependências.
 - [Execução](execucao.md) — rodar o pipeline completo e abrir o dashboard.
 - [Execução do MCP](execucao-mcp.md) — subir o servidor e o dashboard Streamlit.
 - [Arquitetura](arquitetura.md) — os três agentes, o estado e o reward cooperativo.
+- [Regras de domínio](regras-dominio.md) — regras e exemplos do piloto de bateria e SoC.
+- [Reorganização](reorganizacao.md) — etapas, decisões, rastreabilidade, testes e pendências.
 - [Servidor MCP](mcp.md) — catálogo de ferramentas e o loop LLM-as-a-judge.
 - [Componentes](componentes.md) — o que faz cada módulo de `src/smarty_energy/`.
 - [Dados de entrada](dados.md) — a base Excel e o mapeamento de cargas/geração.

@@ -17,6 +17,10 @@ de manter um fork.
 
 ## Dois modos de uso
 
+Para entender e modificar o codigo com Copilot, consulte o
+[guia de desenvolvimento com IA e Graphify](docs/desenvolvimento-ia.md).
+O mapa estrutural e atualizado localmente por hooks do Git, sem indexar dados da fazenda.
+
 | | Pipeline offline | Servidor MCP |
 |---|---|---|
 | Comando | `python main.py` | `python server.py` |
