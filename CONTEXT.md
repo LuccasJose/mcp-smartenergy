@@ -88,10 +88,14 @@ reward = - w_custo * custo_rede
 
 ### Servidor MCP (`server.py`)
 
-Expõe 41 ferramentas registradas para um LLM-juiz treinar, avaliar e auditar a política
+Expõe 45 ferramentas registradas para um LLM-juiz treinar, avaliar e auditar a política
 (loop `health_report` → decidir → `configure_reward_weights`/`train_agents` →
 reavaliar). O dashboard Streamlit é um cliente puro dessas ferramentas.
 `save_qtables`/`load_qtables` usam o mesmo `outputs/runs/` do pipeline.
+
+O dashboard oferece tambem [cinco divisoes selecionaveis](docs/divisoes-dataset.md)
+em fluxo isolado: previa, treino/validacao e teste final explicito. Esse protocolo
+nao substitui a politica ativa nem altera os runs legados.
 
 ## Estrutura de Arquivos
 

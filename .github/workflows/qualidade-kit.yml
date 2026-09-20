@@ -35,12 +35,14 @@ jobs:
           tests/test_battery.py tests/test_battery_properties.py
           tests/test_docs.py
           tests/test_environment.py tests/test_runs.py
-          tests/test_data_loader_fems.py
+          tests/test_data_loader_fems.py tests/test_data_splits.py
           tests/mcp/test_tools.py tests/mcp/test_switch_dataset.py
           tests/mcp/test_experiments.py tests/mcp/test_fisica_unificada.py
-          tests/mcp/test_transport.py
+          tests/mcp/test_transport.py tests/mcp/test_data_splits.py
           tests/test_training.py::test_treino_curto_propaga_soc
-          tests/test_training.py::test_treino_completa_horizonte_e_restaura_checkpoint -q
+          tests/test_training.py::test_treino_completa_horizonte_e_restaura_checkpoint
+          tests/test_training.py::test_blocos_reiniciam_soc_sem_quebrar_dias_consecutivos
+          tests/test_training.py::test_selecao_nao_insere_estados_nas_qtables -q
       - name: Cobertura do recorte do piloto (sem limiar de aprovacao)
         run: python -m coverage report
 

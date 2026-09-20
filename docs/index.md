@@ -33,7 +33,7 @@ config e dados:
 | | Pipeline offline | Servidor MCP |
 |---|---|---|
 | Comando | `python main.py` | `python server.py` |
-| Para quê | Treinar, avaliar e analisar | Expor ~25 ferramentas a um LLM-juiz |
+| Para quê | Treinar, avaliar e analisar | Expor 45 ferramentas a um LLM-juiz |
 | Interface | Tkinter ou Dash (`--web`) | Streamlit (cliente MCP) |
 
 Os dois compartilham `outputs/runs/`, então um treino longo feito no pipeline
@@ -78,4 +78,5 @@ descreve como reproduzir e verificar o build local.
 - [Servidor MCP](mcp.md) — catálogo de ferramentas e o loop LLM-as-a-judge.
 - [Componentes](componentes.md) — o que faz cada módulo de `src/smarty_energy/`.
 - [Dados de entrada](dados.md) — a base Excel e o mapeamento de cargas/geração.
+- [Divisoes do dataset](divisoes-dataset.md) — cinco protocolos selecionaveis de treino, validacao e teste.
 - [Configuração](configuracao.md) — hiperparâmetros e pesos do reward.

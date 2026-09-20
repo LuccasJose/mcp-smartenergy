@@ -7,6 +7,7 @@ import pandas as pd
 
 from ..agents import AgentesHeuristicos, IQLSystem, SemAgente
 from ..environment import FazendaEnergyEnv
+from ..split_experiments import PlanoDivisoes
 from .tracker import MetricsTracker
 
 
@@ -29,3 +30,4 @@ class ServerState:
     rl_padrao_travado: bool = False
     run_carregado: dict | None = None
     experimento_carregado: dict | None = None
+    planos_divisoes: dict[str, PlanoDivisoes] = field(default_factory=dict)

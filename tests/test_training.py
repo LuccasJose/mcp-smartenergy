@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from smarty_energy.config import CONFIG
-from smarty_energy.agents import construir_agentes
+from smarty_energy.agents import avaliar_politica, construir_agentes
 from smarty_energy.environment import ESPACO_ESTADOS_TOTAL, FazendaEnergyEnv
 from smarty_energy.evaluation import cobertura_estados, rodar_rl, resumo_mes
 from smarty_energy.training import treinar, metricas_convergencia
@@ -81,6 +81,55 @@ def test_treino_completa_horizonte_e_restaura_checkpoint(monkeypatch, dia_fake, 
         assert set(agente.q_table) == set(snapshots[0][nome])
         for estado, esperado in snapshots[0][nome].items():
             np.testing.assert_array_equal(agente.q_table[estado], esperado)
+
+
+@pytest.mark.parametrize("modo", ["treino", "avaliacao"])
+def test_blocos_reiniciam_soc_sem_quebrar_dias_consecutivos(dia_fake, tarifa_fake, modo):
+    cfg = dict(CONFIG, n_episodios=5, epsilon_inicial=0.0, epsilon_final=0.0)
+    dias = [dia_fake.assign(solar_kw=50.0) for _ in range(4)]
+    ambientes, inicios = [], []
+
+    class AmbienteObservado(FazendaEnergyEnv):
+        def reset(self, soc_inicial=None):
+            estado = super().reset(soc_inicial)
+            if soc_inicial is not None:
+                ambientes.append(self)
+                inicios.append(estado["soc"])
+            return estado
+
+    if modo == "treino":
+        treinar(dias, tarifa_fake, construir_agentes(cfg), cfg,
+                env_cls=AmbienteObservado, eval_greedy_cada=0,
+                reiniciar_soc_treino_em=frozenset({0, 2}))
+    else:
+        avaliar_politica(lambda env, estado: (0, 0, 0), dias, tarifa_fake,
+                         cfg=cfg, env_cls=AmbienteObservado, n_dias=5,
+                         reiniciar_soc_em=frozenset({0, 2}))
+    assert ambientes[0].soc > cfg["soc_inicial_pct"]
+    assert inicios == pytest.approx([
+        cfg["soc_inicial_pct"], ambientes[0].soc, cfg["soc_inicial_pct"],
+        ambientes[2].soc, cfg["soc_inicial_pct"],
+    ])
+
+
+def test_selecao_nao_insere_estados_nas_qtables(monkeypatch, dia_fake, tarifa_fake):
+    cfg = dict(CONFIG, n_episodios=1)
+    agentes = construir_agentes(cfg)
+    estado_inedito = (999,)
+
+    class AmbienteSelecao:
+        def discretizar(self, estado):
+            return estado_inedito
+
+    def avaliar_sintetico(escolher, dias, tarifa, **kwargs):
+        assert kwargs["reiniciar_soc_em"] == {0, 2}
+        assert escolher(AmbienteSelecao(), {}) == (0, 0, 0)
+        return {"custo_medio_dia_rs": 1.0}
+
+    monkeypatch.setattr("smarty_energy.training.avaliar_politica", avaliar_sintetico)
+    treinar([dia_fake], tarifa_fake, agentes, cfg, eval_greedy_cada=1,
+            reiniciar_soc_selecao_em=frozenset({0, 2}))
+    assert all(estado_inedito not in agente.q_table for agente in agentes.values())
 
 
 def test_cobertura_estados_reportada(agentes_treinados):

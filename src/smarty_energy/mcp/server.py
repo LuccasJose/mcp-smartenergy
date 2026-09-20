@@ -26,6 +26,7 @@ from ..agents import (
     IQLSystem, AgentesHeuristicos, SemAgente, avaliar_politica, construir_agentes,
 )
 from .. import runs
+from ..split_experiments import PlanoDivisoes
 from . import experiments
 from .state import ServerState
 from .tracker import MetricsTracker
@@ -291,6 +292,97 @@ def configure_reward_weights(
 # ------------------------------------------------------------------ #
 # Treino                                                                #
 # ------------------------------------------------------------------ #
+
+@mcp.tool()
+def plan_dataset_splits(
+    metodos: list[str], n_episodios: int = 500, seed_treino: int = 42,
+    seed_divisao: int = 42, fracao_treino: float = 0.7,
+    fracao_validacao: float = 0.15, bloco_dias: int = 7, n_janelas: int = 3,
+    intervalo_avaliacao: int = 100, dataset_dir: str = "",
+    id_fazenda: str = "", ano: int = 0,
+    dia_fim_treino: int = 24, dia_fim_validacao: int = 27,
+) -> str:
+    """Planeja sem treinar; exige escolha de 1 a 5 metodos.
+
+    Metodos: cronologico, aleatorio (dias), sazonal (blocos por trimestre),
+    progressivo (janelas crescentes com teste final comum) e mensal_fixo.
+    Mensal fixo usa dias 1..dia_fim_treino para treino, os seguintes ate
+    dia_fim_validacao para validacao e o restante do mes para teste, sem
+    proporcoes ou sorteio. Cada mes/ano deve ter os tres conjuntos nao vazios.
+    Cada janela progressiva requer
+    um treino IQL independente, com mesmo orcamento de episodios e seed.
+    dataset_dir vazio usa a base ativa; informado carrega FEMS com mes=0,
+    sem alterar a base ativa. ano=0 preserva todos os anos disponiveis.
+    Planos ficam em memoria; runs e manifestos sao salvos ao executar.
+    Nao executar treinos nem abrir teste sem autorizacao do usuario.
+    """
+    try:
+        state = get_state()
+        dias, tarifa = state.dias, state.tarifa_24h
+        fonte = dict(state.dataset_meta)
+        if dataset_dir:
+            from ..data_loader import _carregar_fems
+            fazenda = id_fazenda.strip() or state.dataset_meta["id_fazenda"]
+            dias, tarifa = _carregar_fems(dataset_dir, mes=0, id_fazenda=fazenda)
+            fonte = {**descrever_base(dias, tarifa, id_fazenda=fazenda),
+                     "fonte": f"FEMS ({dataset_dir})"}
+        if ano:
+            dias = [dia for dia in dias if dia["data"].iloc[0].year == ano]
+        if not dias:
+            raise ValueError("Nenhum dia disponivel para o periodo selecionado.")
+        fonte.update(n_dias=len(dias), data_inicio=str(dias[0]["data"].iloc[0])[:10],
+                     data_fim=str(dias[-1]["data"].iloc[0])[:10])
+        plano = PlanoDivisoes(
+            dias, tarifa, state.iql.cfg, fonte, metodos,
+            n_episodios=n_episodios, seed_treino=seed_treino, seed_divisao=seed_divisao,
+            fracao_treino=fracao_treino, fracao_validacao=fracao_validacao,
+            bloco_dias=bloco_dias, n_janelas=n_janelas, intervalo_avaliacao=intervalo_avaliacao,
+            dia_fim_treino=dia_fim_treino, dia_fim_validacao=dia_fim_validacao,
+        )
+        state.planos_divisoes[plano.id] = plano
+        return json.dumps(plano.resumo(), indent=2)
+    except Exception as erro:
+        return _err(erro)
+
+
+@mcp.tool()
+def get_split_experiment(plano_id: str) -> str:
+    """Consulta previa/resultados do plano sem executar treino ou teste."""
+    try:
+        return json.dumps(get_state().planos_divisoes[plano_id].resumo(), indent=2)
+    except Exception as erro:
+        return _err(erro)
+
+
+@mcp.tool()
+def train_split_experiment(plano_id: str, divisao_id: str) -> str:
+    """Treina e valida uma divisao escolhida; nao abre o teste final.
+
+    Repetir a mesma chamada retorna o resultado existente, sem retreinar.
+    Para executar os metodos selecionados, chamar uma vez por divisao do plano.
+    Nao executa LLM nem substitui a politica ativa; nao usar concorrentemente
+    com outros treinos que utilizem o RNG global.
+    """
+    try:
+        plano = get_state().planos_divisoes[plano_id]
+        return json.dumps(plano.treinar_divisao(divisao_id, log=_log), indent=2)
+    except Exception as erro:
+        return _err(erro)
+
+
+@mcp.tool()
+def evaluate_split_test(plano_id: str, divisao_id: str, confirmar: bool = False) -> str:
+    """Abre o teste final somente com confirmacao e todos os treinos concluidos.
+
+    Nao usar o resultado para escolher o protocolo. Resultados existentes sao
+    devolvidos sem reexecutar; todas as politicas do plano permanecem congeladas.
+    """
+    try:
+        plano = get_state().planos_divisoes[plano_id]
+        return json.dumps(plano.avaliar_teste(divisao_id, confirmar=confirmar), indent=2)
+    except Exception as erro:
+        return _err(erro)
+
 
 @mcp.tool()
 def train_agents(n_episodios: int = 0) -> str:

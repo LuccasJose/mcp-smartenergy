@@ -25,6 +25,28 @@ from smarty_energy.mcp.dashboard.state import (
 
 st.title("Trace diário")
 st.caption("Investigue um dia específico: o que o agente decidiu em cada hora e quais limites foram atingidos?")
+with st.expander("Decisões horárias, aprendizado online e continuidade"):
+    st.markdown("""
+**Trace** é a trajetória de uma simulação diária: estado, ações solicitadas,
+fluxos efetivamente realizados, custo e restrições. Uma ação de descarga não
+garante descarga: falta de déficit, limites de SoC ou de throughput podem bloqueá-la.
+Um bloqueio pode ser uma proteção física correta, não um erro do agente.
+
+**Decisão aprendida** usa a ação de maior valor na Q-table, sem aprendizado online.
+**Exploração**, na política viva, faz escolhas epsilon-greedy **e atualiza as
+Q-tables**. Portanto, não é uma avaliação neutra de uma política congelada.
+O snapshot RL padrão sempre é greedy e não aprende, independentemente desse modo.
+
+**Continuidade** encadeia o SoC final do último trace da mesma política. Isso
+não verifica se as datas são consecutivas: saltar de janeiro para dezembro
+também transporta a bateria. Sem encadeamento, o início usa o SoC propagado
+do IQL, que pode ser o deixado pelo treino, não obrigatoriamente 50%.
+
+Geração e consumo são potências em kW; energia acumulada é medida em kWh.
+O custo total pertence ao dia simulado. Já as violações agregadas por hora
+pertencem ao histórico da estratégia selecionada, não necessariamente ao trace
+exibido. Um dia extremo é útil para diagnóstico, mas não representa o ano inteiro.
+""")
 
 if not require_setup():
     st.stop()
@@ -52,15 +74,18 @@ for nome, dados in cen.items():
 cenario_escolhido = st.selectbox(
     "Atalho de cenário",
     options=list(opcoes_cenario),
-    help="Seleciona automaticamente um dos dias extremos identificados no dataset.",
+        help="Aponta para dias de geração solar baixa/alta ou consumo elevado na base. "
+            "São exemplos diagnósticos, não amostras aleatórias nem uma divisão de teste.",
 )
 dia_sugerido = opcoes_cenario[cenario_escolhido]
 
 col_a, col_b, col_c = st.columns([3, 1, 1])
 dia_idx = col_a.slider("Dia do dataset", 0, n_dias - 1, dia_sugerido or 0,
-                       help="Use este controle para investigar uma data fora dos cenários sugeridos.")
+                   help="Índice começando em zero na base ativa. A data aparece abaixo. "
+                       "Mudar a escolha não executa o episódio, mas seleciona o dia no servidor compartilhado.")
 mode_label = col_b.selectbox("Comportamento", ["decisão aprendida", "exploração"],
-                             help="A decisão aprendida usa a melhor ação conhecida; exploração mantém escolhas experimentais.")
+                        help="Decisão aprendida: greedy, sem aprender. Exploração: escolhas aleatórias "
+                            "e aprendizado online que modifica a política viva. O RL padrão congelado ignora esse modo.")
 mode = "eval" if mode_label == "decisão aprendida" else "train"
 
 try:
@@ -98,9 +123,11 @@ st.caption("O trace simula o dia escolhido; ele não substitui a avaliação do 
 col_run, col_soc = st.columns([1, 3])
 continuar_soc = col_soc.toggle(
     "Continuidade da bateria (SOC do dia anterior)", value=False,
-    help="Desligado: diagnostica o dia a partir do SOC pós-treino. Ligado: "
-         "encadeia o SOC final da última simulação para investigar sequência de dias.")
-if col_run.button("Rodar dia", type="primary"):
+    help="Ligado: usa o SoC do último trace da mesma política, mesmo se a data não for consecutiva. "
+         "Desligado ou sem trace anterior: usa o SoC propagado do IQL, normalmente pós-treino.")
+if col_run.button("Rodar dia", type="primary",
+                   help="Simula 24 horas. No modo exploração da política viva, também atualiza suas Q-tables. "
+                        "O histórico do trace anterior é substituído."):
     try:
         with st.spinner("Executando episódio via MCP..."):
             resultado = run_episode(mode=mode, dia_idx=dia_idx,
@@ -241,7 +268,9 @@ opcoes_agente = {
 }
 agente_sel = st.selectbox("Origem dos dados",
                             options=list(opcoes_agente.keys()),
-                            format_func=lambda k: opcoes_agente[k])
+                       format_func=lambda k: opcoes_agente[k],
+                       help="Estratégia cujo histórico de avaliação alimenta o mapa de violações. "
+                           "Não troca a política usada no trace nem dispara uma nova comparação.")
 
 try:
     hv = get_hourly_violations(agente_sel)

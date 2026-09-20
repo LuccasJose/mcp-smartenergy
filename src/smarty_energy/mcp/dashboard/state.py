@@ -19,6 +19,7 @@ __all__ = [
     "snapshot_policy", "carregar_politica_atual", "carregar_rl_padrao", "get_analysis_status",
     "save_experiment", "load_experiment", "list_experiments", "rename_experiment",
     "switch_dataset",
+    "plan_dataset_splits", "get_split_experiment", "train_split_experiment", "evaluate_split_test",
     "health_report", "get_dataset_info", "get_qtables_info",
     "get_learning_curve", "get_td_error_series", "get_hourly_violations",
     "get_battery_dispatch_stats", "get_equipment_hourly", "get_equipment_stats", "export_all_data",
@@ -170,6 +171,23 @@ def switch_dataset(dataset_dir: str, id_fazenda: str = "", mes: int = 1) -> dict
         ss.rl_padrao_congelado = False
         ss.pop("export_payload", None)
     return res
+
+
+def plan_dataset_splits(metodos: list[str], **opcoes) -> dict:
+    return call_tool("plan_dataset_splits", metodos=metodos, **opcoes)
+
+
+def get_split_experiment(plano_id: str) -> dict:
+    return call_tool("get_split_experiment", plano_id=plano_id)
+
+
+def train_split_experiment(plano_id: str, divisao_id: str) -> dict:
+    return call_tool("train_split_experiment", plano_id=plano_id, divisao_id=divisao_id)
+
+
+def evaluate_split_test(plano_id: str, divisao_id: str, confirmar: bool = False) -> dict:
+    return call_tool("evaluate_split_test", plano_id=plano_id,
+                     divisao_id=divisao_id, confirmar=confirmar)
 
 
 def carregar_politica_atual(run_id: str = "") -> dict:

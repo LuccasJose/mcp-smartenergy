@@ -85,7 +85,34 @@ Abra um **segundo** terminal (o primeiro precisa continuar rodando):
 
 Abre automaticamente `http://localhost:8501` no navegador. Na sidebar, clique
 em **Conectar** — isso confirma que o dashboard achou o servidor do Terminal 1.
-Depois é só usar **Treinar IQL**, **Avaliar** e **Comparar**.
+O fluxo legado está em **Executar análise**. O protocolo com conjuntos separados
+está em [Divisões do dataset](divisoes-dataset.md); seus resultados são isolados
+da política ativa.
+
+### Descrições e ajuda contextual
+
+Todas as páginas têm uma seção expansível de conceitos e critérios, disponível
+mesmo sem conexão ao MCP. Os campos e comandos relevantes incluem ajuda contextual
+sobre valores, unidades, efeitos no estado e limites de interpretação.
+
+| Página | Conteúdo das descrições |
+| --- | --- |
+| Início | Dataset, política ativa, experimentos isolados, unidades e estado compartilhado |
+| Executar análise | Run versus par de políticas, orçamento por treino, persistência e avaliação legada |
+| Visão geral | Custo, economia, baselines, reward, cobertura e limites dos alertas |
+| Curva de aprendizado | Episódios, epsilon, média móvel, erro TD e generalização |
+| Trace diário | Ação solicitada versus fluxo, aprendizado online e SoC entre simulações |
+| Equipamentos | Potência versus energia, custo bruto por carga, médias e bloqueios da bateria |
+| LLM-juiz | Intenção de cada objetivo, autonomia das ferramentas, passos, custos e privacidade |
+| Fazendas FEMS | Cadastro, geração, seed dos dados, período e efeitos de ativar outra base |
+| Divisões do dataset | Cinco protocolos, proporções, cortes mensais fixos, seeds, blocos, validação e teste final |
+
+A descrição do juiz não depende de `openai` ou de Ollama disponíveis; a execução
+do juiz continua exigindo suas dependências e serviço. O objetivo “sem retreinar”
+é uma instrução ao modelo, não uma restrição técnica às ferramentas.
+
+As descrições não alteram o motor: exploração no trace da política viva continua
+atualizando as Q-tables, e a avaliação legada não ganha um holdout automaticamente.
 
 !!!tip Aproveitar um treino longo
 Em vez de treinar pelo dashboard, chame a tool `load_qtables()` para carregar

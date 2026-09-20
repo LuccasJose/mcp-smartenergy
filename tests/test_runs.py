@@ -25,6 +25,14 @@ def test_salvar_run_registra_versao_da_codificacao(runs_isolados):
     assert ler_meta(run_id)["state_encoding_version"] == STATE_ENCODING_VERSION
 
 
+def test_run_experimental_preserva_latest(runs_isolados):
+    agentes = construir_agentes()
+    salvar_run(agentes, {}, run_id="padrao")
+    salvar_run(agentes, {}, run_id="experimento", definir_como_latest=False)
+    assert (runs_isolados / "latest.txt").read_text(encoding="utf-8").strip() == "padrao"
+    assert ler_meta("experimento")["run_id"] == "experimento"
+
+
 def test_run_roundtrip_preserva_politica_historico_e_config(runs_isolados):
     agentes = construir_agentes()
     estado = (2, 5, 1, 0, 1, 2)

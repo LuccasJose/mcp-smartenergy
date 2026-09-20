@@ -26,6 +26,32 @@ from smarty_energy.mcp.dashboard.state import (
 
 st.title("Equipamentos")
 st.caption("Descubra quais máquinas concentram o consumo e em quais horários cada estratégia as utiliza.")
+with st.expander("Consumo, custo bruto e despacho da bateria"):
+    st.markdown("""
+**kW** mede potência em um instante ou intervalo; **kWh** mede energia acumulada.
+Consumo total soma o período avaliado, enquanto kWh/dia divide esse total pelos
+dias. Percentual no pico indica a fração da energia daquele equipamento consumida
+nas horas classificadas como ponta, não a fração de horas ligado.
+
+**Custo de energia por equipamento** é a soma do consumo multiplicado pela
+tarifa horária. É um custo bruto: não desconta a geração local nem atribui o
+benefício da bateria a cada máquina. Portanto, sua soma não equivale necessariamente
+ao custo líquido de importação da rede apresentado na visão geral.
+
+**Perfil médio horário** combina vários dias. O pivô pode aparecer em muitas
+horas porque inicia em horários diferentes; isso não significa que funcionou
+por todas essas horas em cada dia. Médias também podem ocultar picos individuais.
+
+**Descarga no pico** mede energia efetivamente fornecida, não apenas ações
+solicitadas. **Pedidos efetivados** é a fração dos pedidos de descarga com fluxo
+positivo. Bloqueios por ausência de déficit, SoC mínimo ou limite de throughput
+podem indicar proteção correta do modelo. Throughput é o limite diário de energia
+movimentada pela bateria, não sua capacidade total.
+
+**Custo da arbitragem**, neste diagnóstico, é o gasto com carga da bateria pela
+rede; isoladamente não mede o lucro líquido da arbitragem. Comparações entre
+estratégias precisam do mesmo período e do mesmo protocolo de SoC.
+""")
 
 if not require_setup():
     st.stop()
@@ -71,7 +97,8 @@ st.caption("Comece pelos equipamentos que mais consomem, mais custam ou mais ope
 origem = st.selectbox("Origem dos dados",
                        options=list(ORIGENS.keys()),
                        format_func=lambda k: ORIGENS[k],
-                       help="Escolha qual resultado da análise será usado neste diagnóstico.")
+                       help="Histórico da estratégia a consultar. Não treina nem altera a política. "
+                           "Ausência de dados significa que essa estratégia ainda não tem uma avaliação registrada.")
 
 try:
     stats = get_equipment_stats(origem)
@@ -267,7 +294,10 @@ if not dados_estrategias:
 
 equip_sel = st.selectbox("Equipamento",
                           options=list(EQUIP_LABELS.keys()),
-                          format_func=lambda k: EQUIP_LABELS[k])
+                     format_func=lambda k: EQUIP_LABELS[k],
+                     help="Seleciona a máquina no perfil horário comparativo. Pivô: irrigação; "
+                         "captação: bombeamento; secador: secagem; sede: cargas administrativas; silo: carga de fundo. "
+                         "Não modifica o funcionamento dessas cargas na simulação.")
 
 fig_cmp = go.Figure()
 for chave, h in dados_estrategias.items():

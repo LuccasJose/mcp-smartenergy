@@ -17,14 +17,6 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from smarty_energy.mcp.dashboard.state import require_setup, sincronizar_status
-from smarty_energy.mcp.judge_core import (
-    DEFAULT_MAX_STEPS,
-    DEFAULT_MODEL,
-    GOAL_DEFAULT,
-    OLLAMA_BASE_URL,
-    ollama_disponivel,
-    run_judge_sync,
-)
 
 st.title("LLM-juiz")
 st.caption(
@@ -32,8 +24,46 @@ st.caption(
     "servidor MCP por conta própria: treina, avalia, compara e emite um veredito. "
     "Cada chamada de ferramenta aparece abaixo em tempo real."
 )
+with st.expander("Objetivos, autonomia e limites do julgamento"):
+    st.markdown("""
+**LLM-juiz** é um modelo de linguagem que interpreta métricas e escolhe chamadas
+MCP. Seu veredito é uma análise textual, não uma prova estatística de superioridade,
+convergência ou segurança física.
+
+| Objetivo | Intenção |
+| --- | --- |
+| Auditoria padrão | Solicita um treino curto, comparação com baselines e diagnóstico. Pode modificar a política viva. |
+| Auditar sem retreinar | Solicita apenas inspeção das métricas existentes, preservando o aprendizado atual. |
+| Intervir na política | Solicita diagnóstico, ajuste de pesos do reward, retreino e comparação antes/depois. |
+
+**Limite importante:** objetivos são instruções em linguagem natural, não
+bloqueios técnicos de ferramentas. O juiz recebe o catálogo MCP, incluindo
+ações que alteram estado. A frase “sem retreinar” não cria um modo somente leitura.
+Intervenção no reward muda o objetivo de otimização; resultados antes/depois
+precisam de protocolo comparável e não devem usar o teste final para ajustes.
+
+**Passo** é uma rodada de resposta do modelo e pode conter várias chamadas de
+ferramentas. Não equivale a um episódio de RL nem limita os episódios pedidos
+por uma chamada de treino. Mais passos permitem investigações maiores, com mais
+tempo de inferência e possíveis simulações adicionais.
+
+O endpoint padrão é Ollama local: há consumo de CPU/GPU, memória e energia,
+sem cobrança automática por token. Um endpoint remoto configurado pode ter custos
+e regras de privacidade diferentes. Objetivos e respostas das ferramentas são
+enviados a esse endpoint. O histórico exibido é da sessão, não um registro
+experimental persistente completo.
+""")
 
 if not require_setup():
+    st.stop()
+
+try:
+    from smarty_energy.mcp.judge_core import (
+        DEFAULT_MAX_STEPS, DEFAULT_MODEL, GOAL_DEFAULT,
+        ollama_disponivel, run_judge_sync,
+    )
+except ModuleNotFoundError as erro:
+    st.error(f"Dependência do LLM-juiz indisponível: {erro.name}. A descrição permanece disponível.")
     st.stop()
 
 ss = st.session_state
@@ -70,22 +100,30 @@ EXEMPLOS = {
 
 # Fora do form: mudar o exemplo precisa rerodar para atualizar o textarea
 # (dentro de st.form as interações só são processadas no submit).
-exemplo = st.selectbox("Modelos de objetivo", list(EXEMPLOS.keys()))
+exemplo = st.selectbox("Modelos de objetivo", list(EXEMPLOS.keys()),
+                   help="Preenche uma instrução de auditoria ou intervenção. A seleção sozinha não executa "
+                       "o juiz. Nenhum desses modelos restringe tecnicamente as ferramentas disponíveis.")
 
 with st.form("judge_form"):
     goal = st.text_area(
         "Objetivo para o juiz",
         value=EXEMPLOS[exemplo],
         height=140,
-        help="Instrução em linguagem natural. O modelo decide quais tools MCP chamar.",
+           help="Solicitação enviada ao modelo. Defina o que investigar, o período e os limites de intervenção. "
+               "Não inclua segredos ou dados que não possam ser enviados ao endpoint configurado.",
     )
     col_a, col_b = st.columns(2)
     max_steps = col_a.number_input("Máximo de passos (rodadas de tool-call)", 4, 64,
-                                   DEFAULT_MAX_STEPS)
+                                DEFAULT_MAX_STEPS,
+                                help="Limite de rodadas de resposta do LLM, não de episódios de treino. "
+                                    "Uma rodada pode chamar várias ferramentas; atingir o limite pode deixar o veredito incompleto.")
     col_b.text_input("Modelo", DEFAULT_MODEL, disabled=True,
-                     help="Definido pela variável de ambiente JUDGE_MODEL.")
+                     help="Identificador escolhido por JUDGE_MODEL no ambiente do dashboard. Precisa existir "
+                         "no endpoint Ollama configurado; não é o modelo IQL nem uma Q-table.")
     submitted = st.form_submit_button("Executar o juiz", type="primary",
-                                      disabled=ss.judge_rodando)
+                                   disabled=ss.judge_rodando,
+                                   help="Inicia inferência no endpoint configurado e permite ao modelo chamar tools MCP. "
+                                       "Essas chamadas podem alterar pesos, treinar, avaliar e modificar estado.")
 
 st.warning(
     "Se o objetivo incluir retreino (`train_agents`), a execução pode levar vários "

@@ -293,7 +293,8 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
                      env_cls=None, n_dias: int = 30, tracker=None,
                      tracker_key: str = "politica",
                      propagar_soc: bool = True,
-                     soc_inicial: float | None = None) -> dict:
+                     soc_inicial: float | None = None,
+                     reiniciar_soc_em: frozenset[int] = frozenset()) -> dict:
     """Roda uma política por `n_dias` e devolve as métricas médias diárias.
 
     Fonte única do laço de avaliação — IQL, heurístico e sem-agente usam este
@@ -307,6 +308,8 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
         propagar_soc : se True, o SOC final de um dia inicia o dia seguinte.
         soc_inicial  : SOC do 1º dia; None usa `cfg['soc_inicial_pct']` (50%).
                        Permite continuar do SOC final do treino.
+        reiniciar_soc_em : indices de dias que iniciam blocos independentes;
+                   nesses indices o SOC volta ao valor inicial, inclusive no wrap.
         tracker      : `mcp.tracker.MetricsTracker` opcional, alimentado passo
                        a passo e por episódio.
     """
@@ -320,6 +323,8 @@ def avaliar_politica(escolher, dias, tarifa_24h, *, cfg: dict = CONFIG,
     soc_final    = soc_primeiro
 
     for ep in range(n_dias):
+        if ep % len(dias) in reiniciar_soc_em:
+            soc_proximo = soc_primeiro
         env = env_cls(dias[ep % len(dias)], tarifa_24h, cfg)
         est = env.reset(soc_inicial=soc_proximo)
 

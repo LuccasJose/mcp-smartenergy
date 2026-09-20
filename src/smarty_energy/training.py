@@ -66,6 +66,8 @@ def treinar(
     log=None,
     eval_greedy_cada: int | None = None,
     dias_selecao: list[pd.DataFrame] | None = None,
+    reiniciar_soc_treino_em: frozenset[int] = frozenset(),
+    reiniciar_soc_selecao_em: frozenset[int] = frozenset(),
 ) -> dict:
     """Treina os três agentes por `cfg['n_episodios']` episódios.
 
@@ -109,6 +111,9 @@ def treinar(
         dias_selecao : dias usados na avaliação de seleção. None = todos.
                       Passe um subconjunto para não selecionar no mesmo conjunto
                       em que os resultados serão reportados.
+        reiniciar_soc_treino_em : indices que iniciam blocos independentes de treino.
+        reiniciar_soc_selecao_em : indices que iniciam blocos independentes de selecao.
+                  Ambos vazios preservam a propagacao legada, inclusive no wrap.
 
     Returns:
         dict de histórico com as chaves: 'rewards', 'custos', 'epsilons'
@@ -149,17 +154,20 @@ def treinar(
         """
         def escolher(env, est):
             s = env.discretizar(est)
-            return (agentes["armazenamento"].agir(s, explorando=False),
-                    agentes["consumo"].agir(s,       explorando=False),
-                    agentes["gerente"].agir(s,       explorando=False))
+            return tuple(int(np.argmax(agentes[nome].q_table.get(
+                s, np.zeros(agentes[nome].n_acoes),
+            ))) for nome in ("armazenamento", "consumo", "gerente"))
 
         res = avaliar_politica(escolher, dias_sel, tarifa_24h, cfg=cfg,
                                env_cls=env_cls, n_dias=len(dias_sel),
-                               propagar_soc=True)
+                               propagar_soc=True,
+                               reiniciar_soc_em=reiniciar_soc_selecao_em)
         return res["custo_medio_dia_rs"]
 
     t0 = time.perf_counter()
     for ep in range(n_ep):
+        if ep % len(dias) in reiniciar_soc_treino_em:
+            soc_proximo = cfg["soc_inicial_pct"]
         dados_dia = dias[ep % len(dias)]            # sequencial, com wrap-around
         env       = env_cls(dados_dia, tarifa_24h, cfg)
         est       = env.reset(soc_inicial=soc_proximo)

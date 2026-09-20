@@ -18,6 +18,33 @@ from smarty_energy.mcp.dashboard.state import require_setup, health_report, get_
 
 st.title("Visão geral")
 st.caption("Resumo executivo: o agente aprendeu, economizou e respeitou os limites?")
+with st.expander("Critérios de custo, segurança e comparação"):
+    st.markdown("""
+**Custo médio (R$/dia)** é o custo simulado nos dias avaliados. **Economia (%)**
+é a redução em relação à baseline indicada: valor positivo significa menor
+custo; negativo significa aumento. A comparação exige mesma base, mesmos dias,
+mesmas restrições e uma condição inicial de bateria compatível.
+
+**Sem agentes** é uma baseline programada, não uma medição da operação real.
+**Heurísticas** são regras fixas. **RL padrão** é uma política congelada.
+**RL + LLM MCP** é o nome da política viva; esse nome não comprova que um LLM
+tenha intervindo. Diferenças entre treinos também podem decorrer da aleatoriedade.
+
+**PCC** é o ponto de conexão com a rede, sujeito a um limite de potência.
+**SoC** é o percentual de energia da bateria. Contagens de violações descrevem
+os registros avaliados; ausência de alertas não certifica todas as restrições
+nem a segurança de operação fora da simulação.
+
+**Cobertura** relaciona os estados registrados na Q-table ao espaço discreto
+possível; não mede a variedade de condições futuras nem garante uma política
+boa. **Erro TD** é a diferença entre o valor estimado e o alvo de aprendizado.
+**Reward/retorno** reúne incentivos e penalidades, não é lucro em reais.
+O desvio padrão do custo descreve a variação entre dias, não a incerteza entre seeds.
+
+Os resultados da política ativa não são automaticamente um teste independente.
+A separação formal treino/validação/teste pertence ao protocolo de divisões,
+que mantém seus resultados isolados da análise legada.
+""")
 
 if not require_setup():
     st.stop()
@@ -83,7 +110,8 @@ st.divider()
 
 # ── Agentes IQL ────────────────────────────────────────────────────────────
 with st.expander("Diagnóstico técnico do aprendizado"):
-    st.caption("Cobertura mostra os estados visitados; erro TD menor e estável sugere maior convergência.")
+    st.caption("Cobertura descreve os estados registrados. Erro TD menor e estável sugere "
+               "estabilização das estimativas, mas não comprova política ótima ou generalização.")
     for nome, info in hr["agentes"].items():
         cob_pct = hr["cobertura_pct"][nome]
         with st.container(border=True):
@@ -136,7 +164,8 @@ st.divider()
 
 # ── Comparacao com baselines ───────────────────────────────────────────────
 st.subheader("Comparação entre estratégias")
-st.caption("Quanto menor o custo, melhor. Compare as estratégias para entender o ganho de cada camada de decisão.")
+st.caption("Custo menor só representa ganho útil quando as restrições e o atendimento às cargas "
+           "também são preservados. Resultados isolados não demonstram o efeito causal do LLM.")
 
 if comparacao:
     c_llm = comparacao["custo_rl_llm_mcp_rs_dia"]
@@ -192,7 +221,7 @@ if alertas:
     for a in alertas:
         st.warning(a)
 else:
-    st.success("Sem alertas — politica esta dentro dos limites configurados.")
+    st.success("Nenhum alerta registrado pelo diagnóstico atual.")
 
 pesos_mod = hr.get("pesos_reward_modificados")
 if pesos_mod:

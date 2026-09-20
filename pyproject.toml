@@ -87,6 +87,8 @@ source_modules = [
     "smarty_energy.evaluation",
     "smarty_energy.metrics",
     "smarty_energy.runs",
+    "smarty_energy.data_splits",
+    "smarty_energy.split_experiments",
 ]
 forbidden_modules = [
     "smarty_energy.mcp",
@@ -148,6 +150,8 @@ forbidden_modules = [
     "smarty_energy.evaluation",
     "smarty_energy.metrics",
     "smarty_energy.runs",
+    "smarty_energy.data_splits",
+    "smarty_energy.split_experiments",
     "smarty_energy.mcp.server",
     "smarty_energy.mcp.state",
     "smarty_energy.mcp.tracker",

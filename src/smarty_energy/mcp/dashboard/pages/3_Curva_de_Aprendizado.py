@@ -21,6 +21,29 @@ from smarty_energy.mcp.dashboard.state import require_setup, get_learning_curve,
 
 st.title("Curva de aprendizado")
 st.caption("Responde a uma pergunta: o agente está aprendendo uma política melhor ao longo dos episódios?")
+with st.expander("Reward, exploração e estabilidade do aprendizado"):
+    st.markdown("""
+**Episódio** corresponde a um dia simulado, com até 24 decisões horárias. Os
+mesmos dias podem ser repetidos muitas vezes; o eixo de episódios não representa
+necessariamente datas diferentes.
+
+**Retorno** é a soma do reward do episódio. Valores maiores são preferidos
+pelo objetivo configurado, mas incluem penalidades e bônus além do custo de energia.
+Após mudar os pesos do reward, os retornos deixam de ser diretamente comparáveis.
+**Custo** permanece expresso em reais por dia, sob as condições simuladas.
+
+**Epsilon** controla a probabilidade de explorar uma ação aleatória. Epsilon
+baixo indica menos exploração, não maior precisão. As curvas de treino incluem
+essas ações exploratórias e podem diferir da avaliação greedy do checkpoint salvo.
+
+**Média móvel** reduz o ruído visual: janelas maiores deixam a tendência mais
+suave, mas podem esconder oscilações e atrasar a percepção de mudanças. Não muda
+as Q-tables, o aprendizado ou o critério de seleção do checkpoint.
+
+**Erro TD absoluto** mede o tamanho da diferença entre a estimativa atual e o
+alvo de atualização. Estabilidade é um diagnóstico local, não prova de ótimo
+global, de economia sustentada ou de desempenho em dados de teste.
+""")
 
 if not require_setup():
     st.stop()
@@ -34,9 +57,11 @@ st.subheader("Como ler o gráfico")
 st.caption("Procure por retorno crescente, custo decrescente e exploração reduzida ao longo do treino.")
 col_a, col_b = st.columns([2, 1])
 janela = col_a.slider("Tamanho da janela da média móvel", 5, 200, 20, step=5,
-                      help="Quantidade de episódios usada para suavizar a curva.")
+                  help="Número de episódios agregados na curva suavizada. Uma janela de 20 "
+                      "atenua oscilações de curto prazo; valores altos podem ocultar mudanças. Não altera o treino.")
 mostrar_eps = col_b.toggle("Mostrar exploração", value=True,
-                            help="Exibe o epsilon, que começa alto e diminui conforme o agente explora menos.")
+                       help="Exibe epsilon, a probabilidade de escolher uma ação aleatória. "
+                           "É apenas uma escolha de visualização; não liga nem desliga a exploração do agente.")
 
 # ── Dados (via MCP) ─────────────────────────────────────────────────────────
 try:
@@ -110,7 +135,8 @@ st.plotly_chart(fig, use_container_width=True)
 
 # ── Convergencia: TD-error rolante (via MCP, 1 chamada por agente) ────────
 st.subheader("Estabilidade do aprendizado")
-st.caption("O erro TD mede a diferença entre a previsão e o resultado observado. Valores menores e estáveis indicam convergência.")
+st.caption("O erro TD compara a estimativa com o alvo de atualização do Q-learning. "
+           "Valores menores e estáveis sugerem estabilização, mas não comprovam convergência ou generalização.")
 
 AGENTES = ["armazenamento", "consumo", "gerente"]
 cols = st.columns(3)

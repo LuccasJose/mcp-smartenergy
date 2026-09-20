@@ -49,6 +49,7 @@ def salvar_run(
     *,
     run_id: str | None = None,
     fonte_dados: str | None = None,
+    definir_como_latest: bool = True,
 ) -> str:
     """Persiste um treino completo em ``outputs/runs/<run_id>/``.
 
@@ -57,6 +58,7 @@ def salvar_run(
         hist        : dict de histórico (rewards/custos/epsilons/...).
         run_id      : identificador; se None, gera por timestamp.
         fonte_dados : rótulo da base usada (ex. nome do .xlsx).
+        definir_como_latest : False preserva o run padrao em experimentos isolados.
 
     Returns:
         O run_id efetivamente usado.
@@ -90,7 +92,8 @@ def salvar_run(
         "favorito"      : False,
     }
     _escrever_meta(run_id, meta)
-    definir_latest(run_id)
+    if definir_como_latest:
+        definir_latest(run_id)
     return run_id
 
 

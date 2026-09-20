@@ -81,7 +81,13 @@ async def _verificar_sessao(sessao):
     assert inicio.serverInfo.name == "mcpsmartenergy"
     ferramentas = (await sessao.list_tools()).tools
     catalogo = {ferramenta.name: ferramenta for ferramenta in ferramentas}
-    assert len(catalogo) == 41
+    assert len(catalogo) == 45
+    assert {"plan_dataset_splits", "get_split_experiment", "train_split_experiment",
+            "evaluate_split_test"} <= catalogo.keys()
+    assert catalogo["plan_dataset_splits"].inputSchema["required"] == ["metodos"]
+    assert catalogo["plan_dataset_splits"].inputSchema["properties"]["dia_fim_treino"]["default"] == 24
+    assert catalogo["plan_dataset_splits"].inputSchema["properties"]["dia_fim_validacao"]["default"] == 27
+    assert catalogo["evaluate_split_test"].inputSchema["properties"]["confirmar"]["default"] is False
     assert {"get_dataset_info", "step_environment", "get_observation", "reset_environment"} <= catalogo.keys()
     assert set(catalogo["step_environment"].inputSchema["required"]) == {"a_arm", "a_cons", "a_ger"}
     assert "initialize" not in catalogo and "get_state" not in catalogo
@@ -91,6 +97,9 @@ async def _verificar_sessao(sessao):
     assert dados["n_dias"] == 1
     assert len(dados["tarifa_horaria_rs_kwh"]) == 24
     assert (await _chamar_json(sessao, "get_observation"))["obs"]["hora"] == 0
+
+    plano_invalido = await _chamar_json(sessao, "plan_dataset_splits", {"metodos": []})
+    assert "erro" in plano_invalido
 
     erro = await _chamar_json(sessao, "step_environment", {"a_arm": 6, "a_cons": 0, "a_ger": 2})
     assert "a_arm" in erro["erro"]

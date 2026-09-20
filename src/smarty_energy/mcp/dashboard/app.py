@@ -49,7 +49,9 @@ st.sidebar.divider()
 
 st.sidebar.subheader("Conexão")
 if st.sidebar.button("Conectar ao servidor", use_container_width=True,
-                      type="primary" if not st.session_state.mcp_conectado else "secondary"):
+                  type="primary" if not st.session_state.mcp_conectado else "secondary",
+                  help="Consulta dataset e status no endpoint MCP configurado. Não treina, não carrega "
+                      "outro modelo e não muda a fonte de dados. O servidor mantém o estado compartilhado."):
     try:
         meta = conectar_mcp()
         st.sidebar.success(f"{meta['n_dias']} dias carregados ({meta['id_fazenda']})")
@@ -74,6 +76,30 @@ st.sidebar.caption(
 
 st.title("SmartEnergy IQL")
 st.caption("Gestão energética por agentes de aprendizado por reforço")
+with st.expander("Conceitos da análise energética", expanded=True):
+    st.markdown("""
+**Dataset** contém geração, cargas e tarifa. A fazenda e o período disponíveis
+definem o alcance de qualquer conclusão: um mês, um ano e outra fazenda são
+problemas de avaliação diferentes. Uma base sintética não comprova operação real.
+
+**Treinamento** atualiza estimativas de ações nas Q-tables; **avaliação** mede
+o comportamento da política. **Validação** orienta escolhas de modelo e
+**teste** mede o desempenho final reservado. Comparar estratégias nos mesmos
+dias usados no aprendizado não comprova generalização.
+
+**Análise ativa** reúne a política viva, a referência RL padrão e os históricos
+de comparação. **Experimentos de divisão** têm dados, seeds e políticas isolados;
+não substituem automaticamente os resultados da análise ativa.
+
+**Unidades:** kW é potência, kWh é energia, R$/kWh é preço por unidade de energia
+e R$/dia é custo médio diário. **SoC** é a carga percentual da bateria; **PCC**
+é o ponto de conexão com a rede. Economia só é útil se as restrições físicas
+e o atendimento das cargas também forem respeitados.
+
+O estado do MCP é compartilhado no processo, não exclusivo de cada navegador.
+Alterações de base ou política podem afetar outros clientes conectados. Resultados
+em memória e histórico da sessão não equivalem a artefatos persistidos.
+""")
 
 if not st.session_state.mcp_conectado:
     st.header("Comece por aqui")

@@ -7,7 +7,7 @@ order: 30
 # Servidor MCP (IQL)
 
 Servidor MCP (Model Context Protocol) que expõe o sistema multi-agente como
-41 ferramentas registradas para um LLM-juiz treinar, avaliar e auditar a política aprendida.
+45 ferramentas registradas para um LLM-juiz treinar, avaliar e auditar a política aprendida.
 
 O MCP é o **intermediador obrigatório** desse modo de uso: o processo do
 servidor é o único que detém o dataset, as Q-tables e o tracker de métricas.
@@ -53,7 +53,7 @@ Detalhes de estado, ações, restrições HARD e reward estão em
 
 ```text
 src/smarty_energy/mcp/
-├── server.py          # 41 tools (FastMCP) — importa o motor do pacote
+├── server.py          # 45 tools (FastMCP) — importa o motor do pacote
 ├── state.py           # ServerState — estado operacional do processo
 ├── tracker.py         # MetricsTracker: passos/episódios, violações por hora
 └── dashboard/         # UI Streamlit — CLIENTE MCP
@@ -67,7 +67,8 @@ src/smarty_energy/mcp/
         ├── 4_Trace_Diario.py
         ├── 5_Equipamentos.py
         ├── 6_LLM_Juiz.py
-        └── 7_Fazendas_FEMS.py
+        ├── 7_Fazendas_FEMS.py
+        └── 8_Divisoes_Dataset.py
 
 server.py (raiz)       # entry: python server.py [--stdio]
 tests/mcp/             # testes de integração e contratos
@@ -99,6 +100,11 @@ O decaimento de ε é reescalado automaticamente para o horizonte pedido
 decay calibrado para 100.000 e os agentes ficariam quase aleatórios.
 
 ### Métricas
+As ferramentas `plan_dataset_splits`, `get_split_experiment`,
+`train_split_experiment` e `evaluate_split_test` oferecem um fluxo isolado de
+[divisoes selecionaveis](divisoes-dataset.md), com previa, validacao e teste
+final explicito. Nao substituem a politica ativa nem executam o LLM-juiz.
+
 | Tool | Parâmetros | Descrição |
 |---|---|---|
 | `get_training_metrics` | — | Sumário do treino + info dos 3 agentes |
