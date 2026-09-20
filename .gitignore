@@ -1,11 +1,11 @@
 # Ambiente virtual
 .venv/
+.venv-dev/
 venv/
 env/
 
 # Claude caso use
 .claude/
-CLAUDE.md
 
 # Cache Python
 __pycache__/
@@ -53,9 +53,25 @@ build/
 
 # pytest
 .pytest_cache/
+.hypothesis/
+.ruff_cache/
 .coverage
+/.coverage-piloto.json
 htmlcov/
+
+# Integracoes locais: podem conter caminhos de maquina ou credenciais.
+/.mcp.json
+/.codex/config.toml
+/.agent-kit/
 
 # Pastas originais dos dois repos, mantidas so ate a validacao da juncao
 /Smart_Energy/
 /mcp-smartenergy/
+
+# Graphify: compartilhar somente o mapa e o relatorio revisados.
+# Caminhos de maquina, cache, custos, logs e memoria de consultas ficam locais.
+/graphify-out/*
+!/graphify-out/graph.json
+!/graphify-out/GRAPH_REPORT.md
+!/graphify-out/graph.html
+!/graphify-out/manifest.json

@@ -1,0 +1,29 @@
+# Escopo inicial: somente codigo Python do produto, scripts e testes.
+# Documentacao continua sendo consultada diretamente, sem extracao semantica.
+# Allowlist: arquivos novos fora deste escopo nao entram automaticamente.
+*
+!/src/
+!/src/**/
+!/src/**/*.py
+!/tests/
+!/tests/**/
+!/tests/**/*.py
+!/scripts/
+!/scripts/**/
+!/scripts/**/*.py
+!/main.py
+!/server.py
+!/judge.py
+
+# Defesa adicional: nunca indexar ambientes, dados, segredos ou artefatos.
+**/__pycache__/
+**/.env*
+**/credentials*
+**/secrets*
+/dados/
+/documentos/
+/outputs/
+/notebooks/
+/graphify-out/
+/.venv/
+/.git/
