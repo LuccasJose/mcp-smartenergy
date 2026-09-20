@@ -23,15 +23,14 @@ _SERVER_MOD = "smarty_energy.mcp.server"
 
 @pytest.fixture
 def srv(monkeypatch, dia_fake, tarifa_fake):
-    """Servidor MCP importado com o dataset trocado por fixtures sintéticas."""
-    from smarty_energy import data_loader
-
+    """Servidor MCP inicializado explicitamente com fixtures sinteticas."""
     def fake_carregar(*_a, **_k):
         return [dia_fake.copy() for _ in range(3)], tarifa_fake.copy()
 
-    monkeypatch.setattr(data_loader, "carregar_dados", fake_carregar)
     sys.modules.pop(_SERVER_MOD, None)
-    return importlib.import_module(_SERVER_MOD)
+    server = importlib.import_module(_SERVER_MOD)
+    server.initialize(loader=fake_carregar)
+    return server
 
 
 # ── Identidade dos objetos: o servidor usa o motor do pacote, não um fork ──
@@ -105,13 +104,13 @@ def test_compare_strategies_bate_com_o_pipeline(srv):
     # estado, e a comparação exercitaria um caminho só — nunca descarregaria a
     # bateria, por exemplo. Com valores pseudo-aleatórios determinísticos a
     # política varia entre estados e cobre as 3 ações de cada agente.
-    _semear_qtables(srv.iql.agentes)
+    _semear_qtables(srv.get_state().iql.agentes)
 
-    dias, tarifa = srv.DIAS, srv.TARIFA_24H
+    dias, tarifa = srv.get_state().dias, srv.get_state().tarifa_24h
     mcp = json.loads(srv.compare_strategies(n_dias=len(dias), propagar_soc=True))
 
     pipeline = {
-        "RL_LLM_MCP": resumo_mes(rodar_rl_mes(dias, tarifa, srv.iql.agentes)),
+        "RL_LLM_MCP": resumo_mes(rodar_rl_mes(dias, tarifa, srv.get_state().iql.agentes)),
         "Heuristico": resumo_mes(rodar_heuristico_mes(dias, tarifa)),
         "SemAgente":  resumo_mes(rodar_sem_agente_mes(dias, tarifa)),
     }
@@ -143,8 +142,8 @@ def test_env_do_servidor_igual_ao_do_pacote(srv, dia_fake, tarifa_fake):
     for a in acoes:
         srv.step_environment(*a)
 
-    assert len(env_pkg.historico) == len(srv.env.historico) == 24
-    for h_pkg, h_srv in zip(env_pkg.historico, srv.env.historico):
+    assert len(env_pkg.historico) == len(srv.get_state().env.historico) == 24
+    for h_pkg, h_srv in zip(env_pkg.historico, srv.get_state().env.historico):
         assert h_pkg["custo_r"] == pytest.approx(h_srv["custo_r"])
         assert h_pkg["reward"] == pytest.approx(h_srv["reward"])
         assert h_pkg["consumo_kw"] == pytest.approx(h_srv["consumo_kw"])

@@ -1,0 +1,1 @@
+"""Cliente Streamlit do MCP; importar este pacote nao inicia a interface."""

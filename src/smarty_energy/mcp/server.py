@@ -4,14 +4,15 @@ MCP Server — SmartEnergy IQL (3 agentes Q-Learning cooperativos).
 Expõe ferramentas para configurar, treinar, avaliar e diagnosticar o
 sistema multi-agente que espelha o projeto Smart_Energy (FazendaEnergyEnv).
 
-Dataset é baixado do Google Sheets na inicialização. SOC propaga entre
-episódios (default), refletindo a continuidade real entre dias.
+O dataset e carregado explicitamente por initialize(), antes do transporte.
+SOC propaga entre episodios (default), refletindo a continuidade entre dias.
 """
 
 import json
 import os
 import sys
 
+import numpy as np
 from mcp.server.fastmcp import FastMCP
 
 from ..config import (
@@ -26,6 +27,7 @@ from ..agents import (
 )
 from .. import runs
 from . import experiments
+from .state import ServerState
 from .tracker import MetricsTracker
 
 
@@ -35,7 +37,7 @@ def _log(msg: str) -> None:
 
 
 # ------------------------------------------------------------------ #
-# Estado global do servidor                                            #
+# Estado operacional do processo                                       #
 # ------------------------------------------------------------------ #
 
 # Episódios por chamada de train_agents. Bem menor que o CONFIG do pipeline
@@ -43,39 +45,7 @@ def _log(msg: str) -> None:
 # decaimento de ε é reescalado para o horizonte pedido por `ajustar_decay`.
 N_EPISODIOS_SERVIDOR = int(os.getenv("MCP_N_EPISODIOS", "1000"))
 
-_log("Carregando dataset...")
-DIAS, TARIFA_24H = carregar_dados()
-DATASET_META = descrever_base(DIAS, TARIFA_24H)
-_log(f"  {len(DIAS)} dias carregados (fazenda {DATASET_META['id_fazenda']}).")
-
-iql = IQLSystem(ajustar_decay(CONFIG, N_EPISODIOS_SERVIDOR))
-heuristico = AgentesHeuristicos(CONFIG)
-sem_agente = SemAgente(CONFIG)
-tracker = MetricsTracker()
-
-# Env "atual" usado por get_current_state e step_environment (dia 0 por default).
-_dia_atual_idx = 0
-
-# SOC encadeado entre chamadas de run_episode (continuidade da bateria no Trace).
-_soc_trace: float | None = None
-
-# Cadeia de SOC separada para o trace de uma política congelada (ex.: RL padrão),
-# para não misturar a continuidade da bateria com a da política viva ao alternar
-# entre elas no dashboard.
-_soc_trace_snapshot: float | None = None
-
-# Políticas congeladas (cópia das Q-tables) — nome -> {agente: {estado: qvalues}}.
-# 'rl_padrao' é capturado automaticamente ao treinar com os pesos default.
-_snapshots: dict[str, dict] = {}
-# True quando o 'RL padrão' foi carregado de um run externo (ex.: Smart_Energy):
-# nesse caso o train_agents NÃO sobrescreve o snapshot com o treino do servidor.
-_rl_padrao_travado: bool = False
-# Metadados do run carregado na política IQL viva. Permite ao dashboard distinguir
-# uma política persistida de Q-tables recém-inicializadas em um servidor novo.
-_run_carregado: dict | None = None
-# Metadados do experimento (par de braços) carregado via load_experiment.
-_experimento_carregado: dict | None = None
-env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+_state: ServerState | None = None
 
 # ── Braços da comparação — chave do tracker -> rótulo exibido ──────────
 # Fonte única dos 4 sistemas comparados; o dashboard reusa estes rótulos.
@@ -112,15 +82,51 @@ _REWARD_WEIGHT_KEYS = (
 _DEFAULT_REWARD_WEIGHTS = {k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS}
 
 
+def get_state() -> ServerState:
+    """Retorna o estado ativo; initialize() deve preceder o uso das tools."""
+    if _state is None:
+        raise RuntimeError("Servidor nao inicializado; chame initialize() primeiro")
+    return _state
+
+
+def initialize(*, loader=None) -> None:
+    """Prepara o estado uma vez; chamadas Python diretas devem inicializar antes.
+
+    O loader opcional fornece (dias, tarifa) sem mudar a selecao de fontes do
+    produto. Uma falha na preparacao nao publica estado parcial. Nao oferece
+    isolamento entre clientes nem sincronizacao para chamadas concorrentes.
+    """
+    global _state
+    if _state is not None:
+        return
+
+    _log("Carregando dataset...")
+    dias, tarifa = (carregar_dados if loader is None else loader)()
+    meta = descrever_base(dias, tarifa)
+    novo_iql = IQLSystem(ajustar_decay(CONFIG, N_EPISODIOS_SERVIDOR))
+    novo_heuristico = AgentesHeuristicos(CONFIG)
+    novo_sem_agente = SemAgente(CONFIG)
+    novo_tracker = MetricsTracker()
+    novo_env = FazendaEnergyEnv(dias[0], tarifa, CONFIG)
+
+    _state = ServerState(
+        dias=dias, tarifa_24h=tarifa, dataset_meta=meta,
+        iql=novo_iql, heuristico=novo_heuristico, sem_agente=novo_sem_agente,
+        tracker=novo_tracker, env=novo_env,
+    )
+    _log(f"  {len(dias)} dias carregados (fazenda {meta['id_fazenda']}).")
+
+
 def _err(e: Exception) -> str:
     return json.dumps({"erro": f"{type(e).__name__}: {e}"}, indent=2, default=str)
 
 
 def _congelar_politica(nome: str) -> dict:
-    """Copia as Q-tables atuais do IQL sob `nome` em `_snapshots`."""
+    """Copia as Q-tables atuais do IQL sob `nome` em state.snapshots."""
+    state = get_state()
     snap = {n: {s: q.copy() for s, q in ag.q_table.items()}
-            for n, ag in iql.agentes.items()}
-    _snapshots[nome] = snap
+            for n, ag in state.iql.agentes.items()}
+    state.snapshots[nome] = snap
     return snap
 
 
@@ -149,6 +155,7 @@ def configure_agents(
     Parâmetros omitidos mantêm o valor atual.
     """
     try:
+        state = get_state()
         novos = {}
         if n_episodios is not None:
             if n_episodios < 1:
@@ -170,12 +177,12 @@ def configure_agents(
         if epsilon_final is not None:   novos["epsilon_final"]   = epsilon_final
         if epsilon_decay is not None:   novos["epsilon_decay"]   = epsilon_decay
 
-        iql.reconfigurar(novos)
+        state.iql.reconfigurar(novos)
         return json.dumps({
             "status": "agentes reconfigurados",
-            "hiperparametros_atuais": {n: iql.agentes[n].get_info()
-                                        for n in iql.agentes},
-            "n_episodios": iql.n_episodios,
+            "hiperparametros_atuais": {n: state.iql.agentes[n].get_info()
+                                        for n in state.iql.agentes},
+            "n_episodios": state.iql.n_episodios,
         }, indent=2)
     except Exception as e:
         return _err(e)
@@ -217,6 +224,7 @@ def configure_reward_weights(
     fidelidade ao projeto Smart_Energy real.
     """
     try:
+        state = get_state()
         candidatos = {
             "w_custo": w_custo, "w_estresse": w_estresse,
             "w_bonus_carga": w_bonus_carga,
@@ -257,11 +265,10 @@ def configure_reward_weights(
         # O IQL trabalha sobre uma cópia do CONFIG (com o decay ajustado ao
         # horizonte do servidor), então precisa receber os pesos novos também —
         # é o cfg que ele passa ao env em treino e avaliação.
-        iql.cfg.update(novos)
-        # Recria env global para refletir mudanças em step_environment.
+        state.iql.cfg.update(novos)
+        # Recria o ambiente ativo para refletir mudancas em step_environment.
         # Treino/avaliação criam env próprio por dia e já usam o CONFIG novo.
-        global env
-        env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+        state.env = FazendaEnergyEnv(state.dias[state.dia_atual_idx], state.tarifa_24h, CONFIG)
 
         delta_vs_default = {
             k: round(CONFIG[k] - _DEFAULT_REWARD_WEIGHTS[k], 4)
@@ -293,25 +300,25 @@ def train_agents(n_episodios: int = 0) -> str:
     episódios (continuidade real). Use n_episodios=0 para usar o configurado.
     """
     try:
-        global _run_carregado, _experimento_carregado
         # Um novo treino invalida as avaliações anteriores. Não mexe em
         # _snapshots["rl_padrao"] quando travado (carregado de um run externo
         # ou congelado manualmente) — só o próprio fluxo de captura automática
         # abaixo decide se recaptura.
-        tracker.limpar("iql_treino")
+        state = get_state()
+        state.tracker.limpar("iql_treino")
         for chave in ("iql_eval", "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente"):
-            tracker.limpar(chave)
+            state.tracker.limpar(chave)
         if n_episodios > 0:
-            iql.n_episodios = n_episodios
-        sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
-                              tracker=tracker, log=_log)
-        _run_carregado = None
-        _experimento_carregado = None
+            state.iql.n_episodios = n_episodios
+        sumario = state.iql.treinar(state.dias, state.tarifa_24h, FazendaEnergyEnv,
+                              tracker=state.tracker, log=_log)
+        state.run_carregado = None
+        state.experimento_carregado = None
         # RL padrão = treino com os pesos default (sem intervenção do LLM-juiz).
         # Capturado automaticamente para ser o braço de referência da comparação;
         # não sobrescreve um RL padrão carregado de um run externo (travado), nem
         # o snapshot pré-juiz se os pesos já foram alterados.
-        if _pesos_sao_default() and not _rl_padrao_travado:
+        if _pesos_sao_default() and not state.rl_padrao_travado:
             _congelar_politica("rl_padrao")
             sumario["rl_padrao_capturado"] = True
         return json.dumps(sumario, indent=2)
@@ -328,25 +335,25 @@ def train_rl_e_mcp(n_episodios: int = 0) -> str:
     São dois treinos separados (RNGs distintos), então as políticas diferem
     mesmo sem o juiz agir. Use n_episodios=0 para o valor configurado.
     """
-    global _rl_padrao_travado, _experimento_carregado
     try:
-        n = n_episodios if n_episodios > 0 else iql.n_episodios
-        _experimento_carregado = None
+        state = get_state()
+        n = n_episodios if n_episodios > 0 else state.iql.n_episodios
+        state.experimento_carregado = None
 
         # 1) RL padrão — IQL independente, treino próprio, congelado e travado.
         rl = IQLSystem(ajustar_decay(CONFIG, n))
-        rl.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv, log=_log)
-        _snapshots["rl_padrao"] = {
+        rl.treinar(state.dias, state.tarifa_24h, FazendaEnergyEnv, log=_log)
+        state.snapshots["rl_padrao"] = {
             nome: {s: q.copy() for s, q in ag.q_table.items()}
             for nome, ag in rl.agentes.items()
         }
-        _rl_padrao_travado = True
+        state.rl_padrao_travado = True
 
         # 2) RL + LLM MCP — política viva (não recaptura rl_padrao: já travado).
-        tracker.limpar("iql_treino")
-        iql.n_episodios = n
-        sumario = iql.treinar(DIAS, TARIFA_24H, FazendaEnergyEnv,
-                              tracker=tracker, log=_log)
+        state.tracker.limpar("iql_treino")
+        state.iql.n_episodios = n
+        sumario = state.iql.treinar(state.dias, state.tarifa_24h, FazendaEnergyEnv,
+                              tracker=state.tracker, log=_log)
 
         return json.dumps({
             "status": "RL padrão e RL + LLM MCP treinados (independentes)",
@@ -354,7 +361,7 @@ def train_rl_e_mcp(n_episodios: int = 0) -> str:
             "rl_padrao": {
                 "best_ep": rl.ultimo_hist["best_ep"],
                 "best_custo_med_rs": round(rl.ultimo_hist["best_custo_med"], 2),
-                "estados_por_agente": {nm: len(qt) for nm, qt in _snapshots["rl_padrao"].items()},
+                "estados_por_agente": {nm: len(qt) for nm, qt in state.snapshots["rl_padrao"].items()},
             },
             "rl_llm_mcp": {
                 "best_ep": sumario.get("best_ep"),
@@ -383,15 +390,16 @@ def evaluate_agents(n_dias: int = 30, propagar_soc: bool = True,
     atualiza o soc_propagado.
     """
     try:
-        tracker.limpar("iql_eval")
-        soc_ini = iql.soc_propagado if continuar_do_treino else None
-        resultado = iql.avaliar(
-            DIAS, TARIFA_24H, FazendaEnergyEnv,
-            n_dias=n_dias, tracker=tracker, propagar_soc=propagar_soc,
+        state = get_state()
+        state.tracker.limpar("iql_eval")
+        soc_ini = state.iql.soc_propagado if continuar_do_treino else None
+        resultado = state.iql.avaliar(
+            state.dias, state.tarifa_24h, FazendaEnergyEnv,
+            n_dias=n_dias, tracker=state.tracker, propagar_soc=propagar_soc,
             soc_inicial=soc_ini,
         )
         if propagar_soc:
-            iql.soc_propagado = resultado["soc_final_pct"]
+            state.iql.soc_propagado = resultado["soc_final_pct"]
         return json.dumps(resultado, indent=2)
     except Exception as e:
         return _err(e)
@@ -414,23 +422,24 @@ def compare_strategies(n_dias: int = 30, propagar_soc: bool = True,
     Enquanto o juiz não agir, 'RL padrão' e 'RL + LLM MCP' coincidem.
     """
     try:
+        state = get_state()
         for chave in ("iql_eval", "rl_llm_mcp", "rl_padrao",
                       "heuristico", "sem_agente"):
-            tracker.limpar(chave)
+            state.tracker.limpar(chave)
 
-        soc_ini = iql.soc_propagado if continuar_do_treino else None
+        soc_ini = state.iql.soc_propagado if continuar_do_treino else None
 
         # RL + LLM MCP — política IQL atual
-        r_llm  = iql.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
-                             n_dias=n_dias, tracker=tracker,
+        r_llm  = state.iql.avaliar(state.dias, state.tarifa_24h, FazendaEnergyEnv,
+                             n_dias=n_dias, tracker=state.tracker,
                              propagar_soc=propagar_soc, soc_inicial=soc_ini)
         # iql escreve em 'iql_eval'; renomeia para o braço da comparação
-        tracker.passos["rl_llm_mcp"]    = tracker.passos.pop("iql_eval", [])
-        tracker.episodios["rl_llm_mcp"] = tracker.episodios.pop("iql_eval", [])
+        state.tracker.passos["rl_llm_mcp"]    = state.tracker.passos.pop("iql_eval", [])
+        state.tracker.episodios["rl_llm_mcp"] = state.tracker.episodios.pop("iql_eval", [])
 
         # RL padrão — snapshot pré-juiz; se ainda não houver, usa a política atual
         # (idêntica ao RL+LLM enquanto o juiz não mexeu nos pesos).
-        snap = _snapshots.get("rl_padrao") or _congelar_politica("rl_padrao")
+        snap = state.snapshots.get("rl_padrao") or _congelar_politica("rl_padrao")
 
         def escolher_padrao(env_, est):
             s = env_.discretizar(est)
@@ -441,19 +450,19 @@ def compare_strategies(n_dias: int = 30, propagar_soc: bool = True,
             return tuple(acoes)
 
         r_padrao = avaliar_politica(
-            escolher_padrao, DIAS, TARIFA_24H, cfg=CONFIG,
-            env_cls=FazendaEnergyEnv, n_dias=n_dias, tracker=tracker,
+            escolher_padrao, state.dias, state.tarifa_24h, cfg=CONFIG,
+            env_cls=FazendaEnergyEnv, n_dias=n_dias, tracker=state.tracker,
             tracker_key="rl_padrao", propagar_soc=propagar_soc,
             soc_inicial=soc_ini,
         )
 
-        r_heur = heuristico.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
-                                     n_dias=n_dias, tracker=tracker,
+        r_heur = state.heuristico.avaliar(state.dias, state.tarifa_24h, FazendaEnergyEnv,
+                                     n_dias=n_dias, tracker=state.tracker,
                                      tracker_key="heuristico",
                                      propagar_soc=propagar_soc,
                                      soc_inicial=soc_ini)
-        r_sem  = sem_agente.avaliar(DIAS, TARIFA_24H, FazendaEnergyEnv,
-                                     n_dias=n_dias, tracker=tracker,
+        r_sem  = state.sem_agente.avaliar(state.dias, state.tarifa_24h, FazendaEnergyEnv,
+                                     n_dias=n_dias, tracker=state.tracker,
                                      tracker_key="sem_agente",
                                      propagar_soc=propagar_soc,
                                      soc_inicial=soc_ini)
@@ -506,28 +515,28 @@ def run_episode(mode: str = "eval", dia_idx: int | None = None,
         False reinicia a cadeia a partir do soc_propagado.
     policy: "rl_llm_mcp" (default) usa a política IQL viva (treinável, reflete o
         LLM-juiz). Qualquer outro valor é tratado como nome de um snapshot
-        congelado em `_snapshots` (ex.: "rl_padrao" = RL sem o juiz): roda sempre
+        congelado em state.snapshots (ex.: "rl_padrao" = RL sem o juiz): roda sempre
         greedy, ignora `mode`, não aprende e mantém uma cadeia de SOC própria,
         para não se misturar com a da política viva ao alternar no dashboard.
     """
     try:
-        global _soc_trace, _soc_trace_snapshot
-        idx = _dia_atual_idx if dia_idx is None else int(dia_idx)
-        if not (0 <= idx < len(DIAS)):
-            return json.dumps({"erro": f"dia_idx fora do range [0, {len(DIAS)-1}]"}, indent=2)
+        state = get_state()
+        idx = state.dia_atual_idx if dia_idx is None else int(dia_idx)
+        if not (0 <= idx < len(state.dias)):
+            return json.dumps({"erro": f"dia_idx fora do range [0, {len(state.dias)-1}]"}, indent=2)
 
         usar_snapshot = policy not in ("rl_llm_mcp", "atual")
-        if usar_snapshot and policy not in _snapshots:
+        if usar_snapshot and policy not in state.snapshots:
             return json.dumps({"erro": f"snapshot '{policy}' não existe — treine "
                                "com os pesos default (captura o 'rl_padrao') ou "
                                "carregue-o com carregar_rl_padrao primeiro."}, indent=2)
-        snap = _snapshots.get(policy) if usar_snapshot else None
+        snap = state.snapshots.get(policy) if usar_snapshot else None
 
-        tracker.limpar("iql_trace")
-        e = FazendaEnergyEnv(DIAS[idx], TARIFA_24H, CONFIG)
-        soc_prev = _soc_trace_snapshot if usar_snapshot else _soc_trace
+        state.tracker.limpar("iql_trace")
+        e = FazendaEnergyEnv(state.dias[idx], state.tarifa_24h, CONFIG)
+        soc_prev = state.soc_trace_snapshot if usar_snapshot else state.soc_trace
         soc_ini = (soc_prev if (continuar_soc and soc_prev is not None)
-                   else iql.soc_propagado)
+                   else state.iql.soc_propagado)
         est = e.reset(soc_inicial=soc_ini)
         s = e.discretizar(est)
 
@@ -545,31 +554,31 @@ def run_episode(mode: str = "eval", dia_idx: int | None = None,
 
         for _ in range(24):
             acoes = (_acoes_snapshot(s) if usar_snapshot
-                     else iql.agir_todos(s, explorando=explore))
+                     else state.iql.agir_todos(s, explorando=explore))
             prox, reward, done, info = e.step(*acoes)
             s2 = e.discretizar(prox)
             if explore:
-                iql.aprender_todos(s, acoes, reward, s2, done)
+                state.iql.aprender_todos(s, acoes, reward, s2, done)
             s = s2
-            tracker.registrar_passo(info, agente="iql_trace")
+            state.tracker.registrar_passo(info, agente="iql_trace")
             reward_total += reward
             custo_total  += info["custo_r"]
 
         if usar_snapshot:
-            _soc_trace_snapshot = float(e.soc)
+            state.soc_trace_snapshot = float(e.soc)
         else:
-            _soc_trace = float(e.soc)
+            state.soc_trace = float(e.soc)
         return json.dumps({
             "mode": "eval" if usar_snapshot else mode,
             "policy": policy,
             "dia_idx": idx,
-            "data": DATASET_META.get("data_inicio") if idx == 0 else str(DIAS[idx]["data"].iloc[0])[:10],
-            "cenario": classificar_dia(idx, DIAS),
+            "data": state.dataset_meta.get("data_inicio") if idx == 0 else str(state.dias[idx]["data"].iloc[0])[:10],
+            "cenario": classificar_dia(idx, state.dias),
             "soc_inicial_pct": round(float(soc_ini), 2),
             "reward_total": round(reward_total, 4),
             "custo_total_rs": round(custo_total, 4),
             "soc_final_pct": round(e.soc, 2),
-            "trace": tracker.get_trace_ultimo_episodio("iql_trace"),
+            "trace": state.tracker.get_trace_ultimo_episodio("iql_trace"),
         }, indent=2, default=str)
     except Exception as e:
         return _err(e)
@@ -582,16 +591,18 @@ def run_episode(mode: str = "eval", dia_idx: int | None = None,
 @mcp.tool()
 def get_training_metrics() -> str:
     """Métricas do último treino: rewards/custos/epsilons + info dos 3 agentes."""
+    state = get_state()
     return json.dumps({
-        "treino": tracker.get_training_metrics("iql_treino"),
-        "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
+        "treino": state.tracker.get_training_metrics("iql_treino"),
+        "agentes": {n: ag.get_info() for n, ag in state.iql.agentes.items()},
     }, indent=2)
 
 
 @mcp.tool()
 def get_qtables_info() -> str:
     """Estatísticas das Q-tables dos 3 agentes IQL."""
-    return json.dumps({n: ag.get_info() for n, ag in iql.agentes.items()}, indent=2)
+    state = get_state()
+    return json.dumps({n: ag.get_info() for n, ag in state.iql.agentes.items()}, indent=2)
 
 
 @mcp.tool()
@@ -604,11 +615,12 @@ def get_td_error_series(agente: str = "armazenamento") -> str:
     agente: "armazenamento", "consumo" ou "gerente".
     """
     try:
-        if agente not in iql.agentes:
+        state = get_state()
+        if agente not in state.iql.agentes:
             return json.dumps({
-                "erro": f"agente inválido: {agente}. Use um de {list(iql.agentes)}",
+                "erro": f"agente inválido: {agente}. Use um de {list(state.iql.agentes)}",
             }, indent=2)
-        ag = iql.agentes[agente]
+        ag = state.iql.agentes[agente]
         return json.dumps({
             "agente": agente,
             "n_pontos": len(ag.td_errors),
@@ -621,7 +633,8 @@ def get_td_error_series(agente: str = "armazenamento") -> str:
 @mcp.tool()
 def get_learning_curve(janela_media_movel: int = 20) -> str:
     """Curva de aprendizado (reward e custo por episódio com média móvel)."""
-    return json.dumps(tracker.get_learning_curve("iql_treino",
+    state = get_state()
+    return json.dumps(state.tracker.get_learning_curve("iql_treino",
                                                   janela=janela_media_movel), indent=2)
 
 
@@ -631,19 +644,22 @@ def get_eval_metrics(agente: str = "iql_eval") -> str:
 
     `agente`: "iql_eval" (default), "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente".
     """
-    return json.dumps(tracker.get_eval_metrics(agente), indent=2)
+    state = get_state()
+    return json.dumps(state.tracker.get_eval_metrics(agente), indent=2)
 
 
 @mcp.tool()
 def get_peak_offpeak_stats(agente: str = "iql_eval") -> str:
     """Consumo por carga separado por período tarifário (pico vs fora-pico)."""
-    return json.dumps(tracker.get_peak_offpeak_stats(agente), indent=2)
+    state = get_state()
+    return json.dumps(state.tracker.get_peak_offpeak_stats(agente), indent=2)
 
 
 @mcp.tool()
 def get_battery_dispatch_stats(agente: str = "iql_eval") -> str:
     """Carga/descarga da bateria por tarifa e motivos de descarga bloqueada."""
-    return json.dumps(tracker.get_battery_dispatch_stats(agente), indent=2)
+    state = get_state()
+    return json.dumps(state.tracker.get_battery_dispatch_stats(agente), indent=2)
 
 
 @mcp.tool()
@@ -654,7 +670,8 @@ def get_stats_por_cenario(agente: str = "iql_eval") -> str:
     armazena 'REAL'; para uma análise por cenário use identify_scenarios
     com um trace específico.
     """
-    return json.dumps(tracker.get_stats_por_cenario(agente), indent=2)
+    state = get_state()
+    return json.dumps(state.tracker.get_stats_por_cenario(agente), indent=2)
 
 
 @mcp.tool()
@@ -663,7 +680,8 @@ def get_hourly_violations(agente: str = "iql_eval") -> str:
 
     Útil para o LLM-juiz identificar em quais horas a política falha mais.
     """
-    return json.dumps(tracker.get_hourly_violations(agente), indent=2)
+    state = get_state()
+    return json.dumps(state.tracker.get_hourly_violations(agente), indent=2)
 
 
 @mcp.tool()
@@ -675,7 +693,8 @@ def get_equipment_hourly(agente: str = "iql_eval") -> str:
 
     `agente`: "iql_eval", "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente", "iql_trace".
     """
-    return json.dumps(tracker.get_equipment_hourly(agente), indent=2)
+    state = get_state()
+    return json.dumps(state.tracker.get_equipment_hourly(agente), indent=2)
 
 
 @mcp.tool()
@@ -687,7 +706,8 @@ def get_equipment_stats(agente: str = "iql_eval") -> str:
 
     `agente`: "iql_eval", "rl_llm_mcp", "rl_padrao", "heuristico", "sem_agente", "iql_trace".
     """
-    return json.dumps(tracker.get_equipment_stats(agente), indent=2)
+    state = get_state()
+    return json.dumps(state.tracker.get_equipment_stats(agente), indent=2)
 
 
 @mcp.tool()
@@ -700,6 +720,7 @@ def export_all_data() -> str:
     salvo direto em arquivo.
     """
     try:
+        state = get_state()
         from datetime import datetime, timezone
 
         chaves_eval = ("iql_eval", "rl_llm_mcp", "rl_padrao",
@@ -710,22 +731,22 @@ def export_all_data() -> str:
 
         return json.dumps({
             "gerado_em": datetime.now(timezone.utc).isoformat(),
-            "dataset": DATASET_META,
+            "dataset": state.dataset_meta,
             "config": {k: (sorted(v) if isinstance(v, frozenset) else v)
                        for k, v in CONFIG.items()},
             "tetos_kw": TETOS_KW,
             "bomba_horas_on": sorted(BOMBA_HORAS_ON),
-            "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
-            "soc_propagado_pct": round(float(iql.soc_propagado), 2),
-            "treino": _se_tem(tracker.get_training_metrics("iql_treino")),
-            "curva_aprendizado": _se_tem(tracker.get_learning_curve("iql_treino")),
-            "avaliacoes": {k: _se_tem(tracker.get_eval_metrics(k))
+            "agentes": {n: ag.get_info() for n, ag in state.iql.agentes.items()},
+            "soc_propagado_pct": round(float(state.iql.soc_propagado), 2),
+            "treino": _se_tem(state.tracker.get_training_metrics("iql_treino")),
+            "curva_aprendizado": _se_tem(state.tracker.get_learning_curve("iql_treino")),
+            "avaliacoes": {k: _se_tem(state.tracker.get_eval_metrics(k))
                            for k in chaves_eval},
-            "violacoes_por_hora": {k: _se_tem(tracker.get_hourly_violations(k))
+            "violacoes_por_hora": {k: _se_tem(state.tracker.get_hourly_violations(k))
                                    for k in chaves_eval},
-            "equipamentos_kpis": {k: _se_tem(tracker.get_equipment_stats(k))
+            "equipamentos_kpis": {k: _se_tem(state.tracker.get_equipment_stats(k))
                                   for k in chaves_eval},
-            "equipamentos_hora_a_hora": {k: _se_tem(tracker.get_equipment_hourly(k))
+            "equipamentos_hora_a_hora": {k: _se_tem(state.tracker.get_equipment_hourly(k))
                                          for k in chaves_eval},
         }, indent=2, default=str)
     except Exception as e:
@@ -739,17 +760,18 @@ def export_all_data() -> str:
 @mcp.tool()
 def identify_scenarios() -> str:
     """Índices dos 3 dias extremos do dataset (nublado/ensolarado/alto_consumo)."""
-    cen = identificar_cenarios(DIAS)
+    state = get_state()
+    cen = identificar_cenarios(state.dias)
     enriquecido = {}
     for nome, idx in cen.items():
-        dia = DIAS[idx]
+        dia = state.dias[idx]
         enriquecido[nome] = {
             "dia_idx": idx,
             "data": str(dia["data"].iloc[0])[:10],
             "geracao_total_kwh": round(float(dia["solar_kw"].sum() + dia["eolico_kw"].sum()), 2),
             "consumo_total_kwh": round(float((dia["pivo_kw"] + dia["captacao_kw"]
                                               + dia["sede_kw"] + dia["silo_kw"]).sum()), 2),
-            "categoria": classificar_dia(idx, DIAS),
+            "categoria": classificar_dia(idx, state.dias),
         }
     return json.dumps(enriquecido, indent=2)
 
@@ -757,10 +779,11 @@ def identify_scenarios() -> str:
 @mcp.tool()
 def get_dataset_info() -> str:
     """Informações sobre o dataset carregado (fazenda, n_dias, range de datas, tarifa)."""
+    state = get_state()
     return json.dumps({
-        **DATASET_META,
-        "tarifa_horaria_rs_kwh": [round(float(t), 4) for t in TARIFA_24H],
-        "horas_pico_tarifa": [int(h) for h in range(24) if TARIFA_24H[h] > 0.9],
+        **state.dataset_meta,
+        "tarifa_horaria_rs_kwh": [round(float(t), 4) for t in state.tarifa_24h],
+        "horas_pico_tarifa": [int(h) for h in range(24) if state.tarifa_24h[h] > 0.9],
     }, indent=2)
 
 
@@ -779,10 +802,8 @@ def switch_dataset(dataset_dir: str, id_fazenda: str = "", mes: int = 1) -> str:
         id_fazenda  : id dentro do dataset (vazio = usa o ID_FAZENDA do config)
         mes         : 1-12 recorta um mês; 0 usa a série inteira
     """
-    global DIAS, TARIFA_24H, DATASET_META, env, iql, _dia_atual_idx
-    global _rl_padrao_travado, _run_carregado, _experimento_carregado
-    global _soc_trace, _soc_trace_snapshot
     try:
+        state = get_state()
         from ..data_loader import _carregar_fems
         from ..config import ID_FAZENDA as _ID_DEFAULT
         fid = id_fazenda.strip() or _ID_DEFAULT
@@ -790,27 +811,27 @@ def switch_dataset(dataset_dir: str, id_fazenda: str = "", mes: int = 1) -> str:
         dias_novos, tarifa_nova = _carregar_fems(dataset_dir, mes=mes,
                                                  id_fazenda=fid)
 
-        DIAS, TARIFA_24H = dias_novos, tarifa_nova
-        DATASET_META = {**descrever_base(DIAS, TARIFA_24H, id_fazenda=fid),
+        state.dias, state.tarifa_24h = dias_novos, tarifa_nova
+        state.dataset_meta = {**descrever_base(state.dias, state.tarifa_24h, id_fazenda=fid),
                         "fonte": f"FEMS ({dataset_dir})"}
 
         # Reset completo do estado de análise — nova fazenda, novo problema.
-        iql = IQLSystem(ajustar_decay(CONFIG, N_EPISODIOS_SERVIDOR))
-        _snapshots.clear()
-        _rl_padrao_travado = False
-        _run_carregado = None
-        _experimento_carregado = None
-        _dia_atual_idx = 0
-        _soc_trace = None
-        _soc_trace_snapshot = None
+        state.iql = IQLSystem(ajustar_decay(CONFIG, N_EPISODIOS_SERVIDOR))
+        state.snapshots.clear()
+        state.rl_padrao_travado = False
+        state.run_carregado = None
+        state.experimento_carregado = None
+        state.dia_atual_idx = 0
+        state.soc_trace = None
+        state.soc_trace_snapshot = None
         for chave in ("iql_treino", "iql_eval", "iql_trace", "rl_llm_mcp",
                       "rl_padrao", "heuristico", "sem_agente"):
-            tracker.limpar(chave)
-        env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+            state.tracker.limpar(chave)
+        state.env = FazendaEnergyEnv(state.dias[state.dia_atual_idx], state.tarifa_24h, CONFIG)
 
         return json.dumps({
             "status": "dataset trocado — estado de análise zerado",
-            **DATASET_META,
+            **state.dataset_meta,
             "proximo_passo": "train_rl_e_mcp (ou load_experiment de um modelo "
                              "desta mesma fazenda).",
         }, indent=2)
@@ -822,16 +843,16 @@ def switch_dataset(dataset_dir: str, id_fazenda: str = "", mes: int = 1) -> str:
 def select_day(dia_idx: int) -> str:
     """Seleciona um dia específico do dataset para get_current_state / step_environment."""
     try:
-        global _dia_atual_idx, env
-        if not (0 <= dia_idx < len(DIAS)):
-            return json.dumps({"erro": f"dia_idx fora de [0, {len(DIAS)-1}]"}, indent=2)
-        _dia_atual_idx = dia_idx
-        env = FazendaEnergyEnv(DIAS[dia_idx], TARIFA_24H, CONFIG)
+        state = get_state()
+        if not (0 <= dia_idx < len(state.dias)):
+            return json.dumps({"erro": f"dia_idx fora de [0, {len(state.dias)-1}]"}, indent=2)
+        state.dia_atual_idx = dia_idx
+        state.env = FazendaEnergyEnv(state.dias[dia_idx], state.tarifa_24h, CONFIG)
         return json.dumps({
             "status": "dia selecionado",
             "dia_idx": dia_idx,
-            "data": str(DIAS[dia_idx]["data"].iloc[0])[:10],
-            "categoria": classificar_dia(dia_idx, DIAS),
+            "data": str(state.dias[dia_idx]["data"].iloc[0])[:10],
+            "categoria": classificar_dia(dia_idx, state.dias),
         }, indent=2)
     except Exception as e:
         return _err(e)
@@ -844,11 +865,12 @@ def select_day(dia_idx: int) -> str:
 @mcp.tool()
 def get_current_state() -> str:
     """Estado atual do env (dia selecionado, hora corrente)."""
+    state = get_state()
     return json.dumps({
-        "dia_idx": _dia_atual_idx,
-        "data": str(DIAS[_dia_atual_idx]["data"].iloc[0])[:10],
+        "dia_idx": state.dia_atual_idx,
+        "data": str(state.dias[state.dia_atual_idx]["data"].iloc[0])[:10],
         **{k: (round(float(v), 4) if isinstance(v, (int, float)) else v)
-           for k, v in env.get_full_state().items()},
+           for k, v in state.env.get_full_state().items()},
     }, indent=2)
 
 
@@ -860,26 +882,26 @@ def reset_environment(reset_agents: bool = False, dia_idx: int | None = None) ->
     soc_propagado mantido pelo IQLSystem.
     """
     try:
-        global env, _dia_atual_idx, _soc_trace, _soc_trace_snapshot
+        state = get_state()
         if dia_idx is not None:
-            if not (0 <= dia_idx < len(DIAS)):
-                return json.dumps({"erro": f"dia_idx fora de [0, {len(DIAS)-1}]"}, indent=2)
-            _dia_atual_idx = dia_idx
-        env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
-        env.reset(soc_inicial=iql.soc_propagado)
-        _soc_trace = None
-        _soc_trace_snapshot = None
+            if not (0 <= dia_idx < len(state.dias)):
+                return json.dumps({"erro": f"dia_idx fora de [0, {len(state.dias)-1}]"}, indent=2)
+            state.dia_atual_idx = dia_idx
+        state.env = FazendaEnergyEnv(state.dias[state.dia_atual_idx], state.tarifa_24h, CONFIG)
+        state.env.reset(soc_inicial=state.iql.soc_propagado)
+        state.soc_trace = None
+        state.soc_trace_snapshot = None
 
         if reset_agents:
-            iql.reset_qtables()
-            tracker.limpar()
+            state.iql.reset_qtables()
+            state.tracker.limpar()
 
         return json.dumps({
             "status": "ambiente reiniciado",
             "agentes_reiniciados": reset_agents,
-            "dia_idx": _dia_atual_idx,
+            "dia_idx": state.dia_atual_idx,
             "estado": {k: (round(float(v), 4) if isinstance(v, (int, float)) else v)
-                       for k, v in env.get_full_state().items()},
+                       for k, v in state.env.get_full_state().items()},
         }, indent=2)
     except Exception as e:
         return _err(e)
@@ -893,8 +915,9 @@ def reset_environment(reset_agents: bool = False, dia_idx: int | None = None) ->
 def get_observation() -> str:
     """Observação atual + estado discretizado para um agente externo."""
     try:
-        est = env._estado()
-        s = env.discretizar(est)
+        state = get_state()
+        est = state.env._estado()
+        s = state.env.discretizar(est)
         return json.dumps({
             "obs": {k: (bool(v) if isinstance(v, bool) else
                         round(float(v), 4) if isinstance(v, (int, float)) else v)
@@ -915,6 +938,7 @@ def step_environment(a_arm: int, a_cons: int, a_ger: int) -> str:
     a_ger: 0=conservador(20kW), 1=moderado(30kW), 2=liberal(40kW)
     """
     try:
+        state = get_state()
         if not (0 <= a_arm < N_ACOES_ARMAZENAMENTO):
             return json.dumps({"erro": f"a_arm inválido: {a_arm}"}, indent=2)
         if not (0 <= a_cons <= 7):
@@ -922,16 +946,16 @@ def step_environment(a_arm: int, a_cons: int, a_ger: int) -> str:
         if a_ger not in (0, 1, 2):
             return json.dumps({"erro": f"a_ger inválido: {a_ger}"}, indent=2)
 
-        prox, reward, done, info = env.step(a_arm, a_cons, a_ger)
-        s2 = env.discretizar(prox)
+        prox, reward, done, info = state.env.step(a_arm, a_cons, a_ger)
+        s2 = state.env.discretizar(prox)
         return json.dumps({
             "reward": round(reward, 6),
             "done": done,
             "next_state_discrete": list(s2),
-            "obs": {k: (bool(v) if isinstance(v, bool) else
+            "obs": {k: (bool(v) if isinstance(v, (bool, np.bool_)) else
                         round(float(v), 4) if isinstance(v, (int, float)) else v)
                     for k, v in prox.items()},
-            "info": {k: (bool(v) if isinstance(v, bool) else
+            "info": {k: (bool(v) if isinstance(v, (bool, np.bool_)) else
                          round(float(v), 6) if isinstance(v, (int, float)) else v)
                      for k, v in info.items()},
         }, indent=2)
@@ -943,10 +967,11 @@ def step_environment(a_arm: int, a_cons: int, a_ger: int) -> str:
 def get_actions(explore: bool = False) -> str:
     """Ações escolhidas pelos 3 agentes IQL para o estado atual + Q-values."""
     try:
-        est = env._estado()
-        s = env.discretizar(est)
+        state = get_state()
+        est = state.env._estado()
+        s = state.env.discretizar(est)
         out = {"state_discrete": list(s)}
-        for nome, ag in iql.agentes.items():
+        for nome, ag in state.iql.agentes.items():
             a = ag.agir(s, explorando=explore)
             q = ag.q_table[s]
             top = sorted(enumerate(q.tolist()), key=lambda x: -x[1])[:3]
@@ -971,22 +996,23 @@ def save_qtables(dir_path: str = "", label: str = "") -> str:
     rotular o run. Com `dir_path`, grava só os 3 pickles no diretório dado.
     """
     try:
+        state = get_state()
         if dir_path:
-            iql.save_all(dir_path)
+            state.iql.save_all(dir_path)
             return json.dumps({
                 "status": "Q-tables salvas",
                 "dir": dir_path,
-                "arquivos": [f"qtable_{n}.pkl" for n in iql.agentes],
+                "arquivos": [f"qtable_{n}.pkl" for n in state.iql.agentes],
             }, indent=2)
 
-        if iql.ultimo_hist is None:
+        if state.iql.ultimo_hist is None:
             return json.dumps({
                 "erro": "nenhum treino nesta sessão — rode train_agents() antes, "
                         "ou informe dir_path para salvar só os pickles.",
             }, indent=2)
 
-        run_id = runs.salvar_run(iql.agentes, iql.ultimo_hist,
-                                 fonte_dados=f"MCP · {DATASET_META['id_fazenda']}")
+        run_id = runs.salvar_run(state.iql.agentes, state.iql.ultimo_hist,
+                                 fonte_dados=f"MCP · {state.dataset_meta['id_fazenda']}")
         if label:
             runs.definir_label(run_id, label)
         return json.dumps({
@@ -1008,29 +1034,29 @@ def load_qtables(dir_path: str = "", run_id: str = "") -> str:
     run específico ou `dir_path` para ler 3 pickles soltos.
     """
     try:
-        global _run_carregado
+        state = get_state()
         if dir_path:
-            iql.load_all(dir_path)
+            state.iql.load_all(dir_path)
             origem = dir_path
             hist = None
         else:
             rid = run_id or runs.run_mais_recente()
             if rid is None:
                 return json.dumps({"erro": "nenhum run em outputs/runs/"}, indent=2)
-            hist = runs.carregar_run(rid, iql.agentes)
+            hist = runs.carregar_run(rid, state.iql.agentes)
             origem = rid
         if hist is not None:
-            iql.ultimo_hist = hist
-            iql.soc_propagado = float(hist.get("soc_final_pct", iql.soc_propagado))
-        _run_carregado = {
+            state.iql.ultimo_hist = hist
+            state.iql.soc_propagado = float(hist.get("soc_final_pct", state.iql.soc_propagado))
+        state.run_carregado = {
             "origem": origem,
             "n_episodios": hist.get("n_episodios") if hist else None,
         }
         return json.dumps({
             "status": "Q-tables carregadas",
             "origem": origem,
-            "n_episodios": _run_carregado["n_episodios"],
-            "agentes": {n: ag.get_info() for n, ag in iql.agentes.items()},
+            "n_episodios": state.run_carregado["n_episodios"],
+            "agentes": {n: ag.get_info() for n, ag in state.iql.agentes.items()},
         }, indent=2)
     except Exception as e:
         return _err(e)
@@ -1040,9 +1066,10 @@ def load_qtables(dir_path: str = "", run_id: str = "") -> str:
 def get_financeiro_state() -> str:
     """Estado atual do AgenteFinanceiro do env: saldo de créditos + estresse atual."""
     try:
-        est = env._estado()
+        state = get_state()
+        est = state.env._estado()
         return json.dumps({
-            "saldo_creditos_kwh": round(float(env.fin.saldo_creditos), 4),
+            "saldo_creditos_kwh": round(float(state.env.fin.saldo_creditos), 4),
             "estresse_atual": round(float(est["stress"]), 2),
             "tarifa_atual_rs_kwh": round(float(est["tarifa"]), 4),
             "em_pico_tarifa": est["em_pico_tarifa"],
@@ -1063,11 +1090,11 @@ def snapshot_policy(nome: str = "rl_padrao") -> str:
     sob "rl_padrao" trava o snapshot (como `carregar_rl_padrao`): só
     `liberar_rl_padrao()` permite que train_agents volte a recapturá-lo.
     """
-    global _rl_padrao_travado
     try:
+        state = get_state()
         snap = _congelar_politica(nome)
         if nome == "rl_padrao":
-            _rl_padrao_travado = True
+            state.rl_padrao_travado = True
         return json.dumps({
             "status": "política congelada",
             "nome": nome,
@@ -1095,8 +1122,8 @@ def carregar_rl_padrao(dir_path: str = "", run_id: str = "") -> str:
                    as 3 Q-tables. Tem prioridade sobre run_id.
         run_id   : id de um run em outputs/runs/ do próprio MCP.
     """
-    global _rl_padrao_travado
     try:
+        state = get_state()
         agentes = construir_agentes(CONFIG)
         if dir_path:
             from pathlib import Path
@@ -1125,15 +1152,15 @@ def carregar_rl_padrao(dir_path: str = "", run_id: str = "") -> str:
             runs.carregar_run(rid, agentes)
             origem = rid
 
-        _snapshots["rl_padrao"] = {
+        state.snapshots["rl_padrao"] = {
             n: {s: q.copy() for s, q in ag.q_table.items()}
             for n, ag in agentes.items()
         }
-        _rl_padrao_travado = True
+        state.rl_padrao_travado = True
         return json.dumps({
             "status": "RL padrão carregado e travado",
             "origem": origem,
-            "estados_por_agente": {n: len(qt) for n, qt in _snapshots["rl_padrao"].items()},
+            "estados_por_agente": {n: len(qt) for n, qt in state.snapshots["rl_padrao"].items()},
             "nota": "rode compare_strategies para incluí-lo; train_agents não o sobrescreve.",
         }, indent=2)
     except Exception as e:
@@ -1143,8 +1170,8 @@ def carregar_rl_padrao(dir_path: str = "", run_id: str = "") -> str:
 @mcp.tool()
 def liberar_rl_padrao() -> str:
     """Destrava o 'RL padrão' — o próximo train_agents volta a capturá-lo."""
-    global _rl_padrao_travado
-    _rl_padrao_travado = False
+    state = get_state()
+    state.rl_padrao_travado = False
     return json.dumps({"status": "RL padrão destravado",
                        "nota": "o próximo train_agents (pesos default) recaptura o snapshot."},
                       indent=2)
@@ -1166,25 +1193,26 @@ def save_experiment(label: str = "") -> str:
     com rename_experiment.
     """
     try:
-        if not any(ag.q_table for ag in iql.agentes.values()):
+        state = get_state()
+        if not any(ag.q_table for ag in state.iql.agentes.values()):
             return json.dumps({"erro": "nenhuma política treinada — rode "
                                        "train_agents/train_rl_e_mcp antes."}, indent=2)
-        snap = _snapshots.get("rl_padrao") or _congelar_politica("rl_padrao")
+        snap = state.snapshots.get("rl_padrao") or _congelar_politica("rl_padrao")
 
         custos = {}
         for chave in ("rl_padrao", "rl_llm_mcp"):
-            m = tracker.get_eval_metrics(chave)
+            m = state.tracker.get_eval_metrics(chave)
             if "custo_medio_dia_rs" in m:
                 custos[chave] = round(m["custo_medio_dia_rs"], 2)
 
         exp_id = experiments.salvar(
-            iql.agentes, snap,
+            state.iql.agentes, snap,
             label=label,
-            hist=iql.ultimo_hist,
+            hist=state.iql.ultimo_hist,
             pesos_reward={k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS},
-            fonte_dados=DATASET_META.get("fonte"),
-            soc_propagado=iql.soc_propagado,
-            rl_padrao_travado=_rl_padrao_travado,
+            fonte_dados=state.dataset_meta.get("fonte"),
+            soc_propagado=state.iql.soc_propagado,
+            rl_padrao_travado=state.rl_padrao_travado,
             custos=custos,
         )
         meta = experiments._ler_meta(exp_id)
@@ -1210,42 +1238,42 @@ def load_experiment(exp_id: str = "") -> str:
     mais recente. Avaliações anteriores são descartadas (eram de outra
     política).
     """
-    global _rl_padrao_travado, _run_carregado, _experimento_carregado, env
     try:
+        state = get_state()
         eid = exp_id or experiments.mais_recente()
         if eid is None:
             return json.dumps({"erro": "nenhum experimento salvo em "
                                        f"{experiments.EXP_DIR}"}, indent=2)
 
-        snap, meta, hist = experiments.carregar(eid, iql.agentes)
-        _snapshots["rl_padrao"] = snap
-        _rl_padrao_travado = True
+        snap, meta, hist = experiments.carregar(eid, state.iql.agentes)
+        state.snapshots["rl_padrao"] = snap
+        state.rl_padrao_travado = True
 
         pesos = meta.get("pesos_reward") or {}
         if pesos:
             CONFIG.update(pesos)
-            iql.cfg.update(pesos)
-            env = FazendaEnergyEnv(DIAS[_dia_atual_idx], TARIFA_24H, CONFIG)
+            state.iql.cfg.update(pesos)
+            state.env = FazendaEnergyEnv(state.dias[state.dia_atual_idx], state.tarifa_24h, CONFIG)
 
         if meta.get("soc_propagado_pct") is not None:
-            iql.soc_propagado = float(meta["soc_propagado_pct"])
+            state.iql.soc_propagado = float(meta["soc_propagado_pct"])
         if hist is not None:
-            iql.ultimo_hist = hist
+            state.iql.ultimo_hist = hist
 
         for chave in ("iql_treino", "iql_eval", "rl_llm_mcp", "rl_padrao",
                       "heuristico", "sem_agente"):
-            tracker.limpar(chave)
+            state.tracker.limpar(chave)
 
-        _run_carregado = {"origem": f"experimento:{eid}",
+        state.run_carregado = {"origem": f"experimento:{eid}",
                           "n_episodios": meta.get("n_episodios")}
-        _experimento_carregado = {"exp_id": eid, "label": meta.get("label")}
+        state.experimento_carregado = {"exp_id": eid, "label": meta.get("label")}
 
         avisos = experiments.avisos_fisica(meta)
         fonte_exp = meta.get("fonte_dados")
-        if fonte_exp and fonte_exp != DATASET_META.get("fonte"):
+        if fonte_exp and fonte_exp != state.dataset_meta.get("fonte"):
             avisos.append(
                 f"modelo treinado em outra fonte de dados ({fonte_exp}) — "
-                f"a fazenda ativa é {DATASET_META.get('fonte')}; a comparação "
+                f"a fazenda ativa é {state.dataset_meta.get('fonte')}; a comparação "
                 "não é válida entre fazendas diferentes."
             )
 
@@ -1307,13 +1335,14 @@ def get_analysis_status() -> str:
     os dois ficam sempre iguais (fonte: braço 'rl_llm_mcp').
     """
     try:
-        treino = tracker.get_training_metrics("iql_treino")
-        avaliacao = tracker.get_eval_metrics("rl_llm_mcp")
+        state = get_state()
+        treino = state.tracker.get_training_metrics("iql_treino")
+        avaliacao = state.tracker.get_eval_metrics("rl_llm_mcp")
 
-        treinado = "n_episodios" in treino or _run_carregado is not None
+        treinado = "n_episodios" in treino or state.run_carregado is not None
         avaliado = "custo_medio_dia_rs" in avaliacao
         comparado = avaliado
-        rl_padrao_congelado = "rl_padrao" in _snapshots
+        rl_padrao_congelado = "rl_padrao" in state.snapshots
 
         if not treinado:
             proxima_etapa = "treinar"
@@ -1327,12 +1356,12 @@ def get_analysis_status() -> str:
             "avaliado": avaliado,
             "comparado": comparado,
             "rl_padrao_congelado": rl_padrao_congelado,
-            "rl_padrao_travado": _rl_padrao_travado,
+            "rl_padrao_travado": state.rl_padrao_travado,
             "proxima_etapa": proxima_etapa,
-            "n_episodios": treino.get("n_episodios") or _run_carregado.get("n_episodios") if _run_carregado else treino.get("n_episodios"),
+            "n_episodios": treino.get("n_episodios") or state.run_carregado.get("n_episodios") if state.run_carregado else treino.get("n_episodios"),
             "n_dias_avaliados": avaliacao.get("n_dias"),
-            "run_carregado": _run_carregado,
-            "experimento_carregado": _experimento_carregado,
+            "run_carregado": state.run_carregado,
+            "experimento_carregado": state.experimento_carregado,
         }, indent=2)
     except Exception as e:
         return _err(e)
@@ -1352,21 +1381,22 @@ def health_report() -> str:
     - alertas heurísticos
     """
     try:
-        info_ags = {n: ag.get_info() for n, ag in iql.agentes.items()}
+        state = get_state()
+        info_ags = {n: ag.get_info() for n, ag in state.iql.agentes.items()}
         cobertura = {n: round(info["n_estados_visitados"] / N_ESTADOS_TOTAL * 100, 2)
                      for n, info in info_ags.items()}
 
-        treino = tracker.get_training_metrics("iql_treino")
+        treino = state.tracker.get_training_metrics("iql_treino")
         treino_resumo = {k: v for k, v in treino.items()
                          if k not in ("rewards_hist", "custos_hist", "epsilons")}
 
         # 'rl_llm_mcp' (populado por compare_strategies) é a ÚNICA fonte da
         # avaliação da política atual — evita a duplicidade com 'iql_eval'
         # (que exigia rodar evaluate_agents à parte para o mesmo resultado).
-        eval_cmp  = tracker.get_eval_metrics("rl_llm_mcp")
-        eval_puro = tracker.get_eval_metrics("rl_padrao")
-        eval_heur = tracker.get_eval_metrics("heuristico")
-        eval_sem  = tracker.get_eval_metrics("sem_agente")
+        eval_cmp  = state.tracker.get_eval_metrics("rl_llm_mcp")
+        eval_puro = state.tracker.get_eval_metrics("rl_padrao")
+        eval_heur = state.tracker.get_eval_metrics("heuristico")
+        eval_sem  = state.tracker.get_eval_metrics("sem_agente")
 
         comparacao = None
         if all("custo_medio_dia_rs" in m for m in (eval_cmp, eval_heur, eval_sem)):
@@ -1426,15 +1456,15 @@ def health_report() -> str:
 
         return json.dumps({
             "dataset": {
-                "fazenda": DATASET_META["id_fazenda"],
-                "n_dias": DATASET_META["n_dias"],
-                "data_inicio": DATASET_META["data_inicio"],
-                "data_fim": DATASET_META["data_fim"],
+                "fazenda": state.dataset_meta["id_fazenda"],
+                "n_dias": state.dataset_meta["n_dias"],
+                "data_inicio": state.dataset_meta["data_inicio"],
+                "data_fim": state.dataset_meta["data_fim"],
             },
             "agentes": info_ags,
             "cobertura_pct": cobertura,
             "n_estados_possiveis": N_ESTADOS_TOTAL,
-            "soc_propagado_pct": round(float(iql.soc_propagado), 2),
+            "soc_propagado_pct": round(float(state.iql.soc_propagado), 2),
             "treino": treino_resumo,
             "avaliacao_atual": eval_cmp,
             "comparacao_baselines": comparacao,
@@ -1448,6 +1478,7 @@ def health_report() -> str:
 @mcp.tool()
 def describe_schema() -> str:
     """Esquema completo: estado, ações, restrições HARD, reward, tarifa, tracker_keys."""
+    state = get_state()
     schema = {
         "arquitetura": "IQL (Independent Q-Learning) com 3 agentes cooperativos",
         "agentes": {
@@ -1539,9 +1570,9 @@ def describe_schema() -> str:
             "pen_pico_demanda_por_kw": -CONFIG["w_pico_demanda"],
         },
         "tarifa_tou": {
-            "min_rs_kwh": DATASET_META["tarifa_min_rs_kwh"],
-            "max_rs_kwh": DATASET_META["tarifa_max_rs_kwh"],
-            "horas_pico": DATASET_META["horas_pico"],
+            "min_rs_kwh": state.dataset_meta["tarifa_min_rs_kwh"],
+            "max_rs_kwh": state.dataset_meta["tarifa_max_rs_kwh"],
+            "horas_pico": state.dataset_meta["horas_pico"],
         },
         "tracker_keys_validos": ["iql_treino", "iql_eval", "rl_llm_mcp",
                                   "rl_padrao", "heuristico", "sem_agente", "iql_trace"],
@@ -1589,6 +1620,7 @@ def main(argv: list[str] | None = None) -> None:
     """Sobe o servidor MCP (chamado pelo `server.py` da raiz do projeto)."""
     argv = sys.argv if argv is None else argv
     usar_stdio = "--stdio" in argv or os.getenv("MCP_TRANSPORT", "streamable-http") == "stdio"
+    initialize()
     if usar_stdio:
         mcp.run(transport="stdio")
     else:
