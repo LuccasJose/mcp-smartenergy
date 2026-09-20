@@ -1,0 +1,410 @@
+{
+  "judge.py": {
+    "mtime": 1788138290.9785109,
+    "seen": 1788784448.5335767,
+    "ast_hash": "319ba2c0d1458d827e18aed9e23c61a0",
+    "semantic_hash": "319ba2c0d1458d827e18aed9e23c61a0"
+  },
+  "main.py": {
+    "mtime": 1788138290.9793942,
+    "seen": 1788784448.5335817,
+    "ast_hash": "25b79f6c90356230f744fdcf3ffe600e",
+    "semantic_hash": "25b79f6c90356230f744fdcf3ffe600e"
+  },
+  "scripts/auditar_base.py": {
+    "mtime": 1788138291.016424,
+    "seen": 1788784448.5335836,
+    "ast_hash": "15162e1e7812bcd8bb61fa07216cea72",
+    "semantic_hash": "15162e1e7812bcd8bb61fa07216cea72"
+  },
+  "scripts/avaliar_despacho_bateria.py": {
+    "mtime": 1788138291.018014,
+    "seen": 1788784448.5335844,
+    "ast_hash": "82d4f0e7b0f0b9095b1c2e150089ae76",
+    "semantic_hash": "82d4f0e7b0f0b9095b1c2e150089ae76"
+  },
+  "scripts/make_sample_data.py": {
+    "mtime": 1788138291.0190198,
+    "seen": 1788784448.533585,
+    "ast_hash": "bdd103a14ed4972d85fc44c997aa36f4",
+    "semantic_hash": "bdd103a14ed4972d85fc44c997aa36f4"
+  },
+  "server.py": {
+    "mtime": 1788138291.0190198,
+    "seen": 1788784448.533586,
+    "ast_hash": "9e44a82385002d8c915dc79e645ba5a6",
+    "semantic_hash": "9e44a82385002d8c915dc79e645ba5a6"
+  },
+  "src/smarty_energy/__init__.py": {
+    "mtime": 1788138291.0200245,
+    "seen": 1788784448.5335867,
+    "ast_hash": "08751878c66321fa1483156a25f90288",
+    "semantic_hash": "08751878c66321fa1483156a25f90288"
+  },
+  "src/smarty_energy/agents.py": {
+    "mtime": 1788138291.0210242,
+    "seen": 1788784448.5335875,
+    "ast_hash": "249ba99cf0550162ba11ce3dadba9990",
+    "semantic_hash": "249ba99cf0550162ba11ce3dadba9990"
+  },
+  "src/smarty_energy/battery.py": {
+    "mtime": 1788138291.022025,
+    "seen": 1788784448.533588,
+    "ast_hash": "27c131e3700deca867c76159bc39a7f9",
+    "semantic_hash": "27c131e3700deca867c76159bc39a7f9"
+  },
+  "src/smarty_energy/benchmark.py": {
+    "mtime": 1788138291.022025,
+    "seen": 1788784448.5335886,
+    "ast_hash": "b5b46bfbdc6ee42ca3e5040c74c3a558",
+    "semantic_hash": "b5b46bfbdc6ee42ca3e5040c74c3a558"
+  },
+  "src/smarty_energy/config.py": {
+    "mtime": 1789919373.6102524,
+    "seen": 1789919416.3021493,
+    "ast_hash": "0e451e0f4370faf85d84365a052c7351",
+    "semantic_hash": ""
+  },
+  "src/smarty_energy/dashboard.py": {
+    "mtime": 1788138291.0250936,
+    "seen": 1788784448.53359,
+    "ast_hash": "3d718b9d1c35ab05045fcdaa34d06769",
+    "semantic_hash": "3d718b9d1c35ab05045fcdaa34d06769"
+  },
+  "src/smarty_energy/dashboard_web.py": {
+    "mtime": 1788138291.0271444,
+    "seen": 1788784448.5335908,
+    "ast_hash": "b111ef81f36733f03402ce12ca5053d0",
+    "semantic_hash": "b111ef81f36733f03402ce12ca5053d0"
+  },
+  "src/smarty_energy/data_loader.py": {
+    "mtime": 1788138291.0279307,
+    "seen": 1788784448.5335913,
+    "ast_hash": "e13e35933004d4443f512908e271ddb6",
+    "semantic_hash": "e13e35933004d4443f512908e271ddb6"
+  },
+  "src/smarty_energy/environment.py": {
+    "mtime": 1789919373.6102524,
+    "seen": 1789919416.302154,
+    "ast_hash": "f77829c98b204397c2cdc6c6747510fe",
+    "semantic_hash": ""
+  },
+  "src/smarty_energy/evaluation.py": {
+    "mtime": 1788138291.0305612,
+    "seen": 1788784448.5335925,
+    "ast_hash": "4e56815ba1bf9914f5d7f8415a49f879",
+    "semantic_hash": "4e56815ba1bf9914f5d7f8415a49f879"
+  },
+  "src/smarty_energy/llm_policy.py": {
+    "mtime": 1788138291.0320878,
+    "seen": 1788784448.5335934,
+    "ast_hash": "f646f449597d4ba49ae6952edc8e06fb",
+    "semantic_hash": "f646f449597d4ba49ae6952edc8e06fb"
+  },
+  "src/smarty_energy/mcp/__init__.py": {
+    "mtime": 1788138291.0320878,
+    "seen": 1788784448.533594,
+    "ast_hash": "3d95bf53a50de9c966d2f3fa8579589c",
+    "semantic_hash": "3d95bf53a50de9c966d2f3fa8579589c"
+  },
+  "src/smarty_energy/mcp/dashboard/app.py": {
+    "mtime": 1788138291.033131,
+    "seen": 1788784448.5335946,
+    "ast_hash": "0ecf61110cd186043d307f5900a16831",
+    "semantic_hash": "0ecf61110cd186043d307f5900a16831"
+  },
+  "src/smarty_energy/mcp/dashboard/mcp_client.py": {
+    "mtime": 1788138291.0341306,
+    "seen": 1788784448.5335953,
+    "ast_hash": "13093a24e99fdf2135bc080bed0a5515",
+    "semantic_hash": "13093a24e99fdf2135bc080bed0a5515"
+  },
+  "src/smarty_energy/mcp/dashboard/pages/1_Executar_Analise.py": {
+    "mtime": 1788783682.343784,
+    "seen": 1788784448.5335958,
+    "ast_hash": "0d96a7092c364fe0de1c0947ab8390a6",
+    "semantic_hash": "0d96a7092c364fe0de1c0947ab8390a6"
+  },
+  "src/smarty_energy/mcp/dashboard/pages/2_Visao_Geral.py": {
+    "mtime": 1788138291.0351303,
+    "seen": 1788784448.5335965,
+    "ast_hash": "f8838d8966697be7f8ea60b4379aa728",
+    "semantic_hash": "f8838d8966697be7f8ea60b4379aa728"
+  },
+  "src/smarty_energy/mcp/dashboard/pages/3_Curva_de_Aprendizado.py": {
+    "mtime": 1788138291.036209,
+    "seen": 1788784448.5335977,
+    "ast_hash": "dea59324d7b9fd81c94c101731162d60",
+    "semantic_hash": "dea59324d7b9fd81c94c101731162d60"
+  },
+  "src/smarty_energy/mcp/dashboard/pages/4_Trace_Diario.py": {
+    "mtime": 1788138291.036209,
+    "seen": 1788784448.5335982,
+    "ast_hash": "72d30141ab1422c2e65696ebef6b0064",
+    "semantic_hash": "72d30141ab1422c2e65696ebef6b0064"
+  },
+  "src/smarty_energy/mcp/dashboard/pages/5_Equipamentos.py": {
+    "mtime": 1788138291.0377152,
+    "seen": 1788784448.533599,
+    "ast_hash": "4fcf5276603cef7c8d1d86ae0dee8c8a",
+    "semantic_hash": "4fcf5276603cef7c8d1d86ae0dee8c8a"
+  },
+  "src/smarty_energy/mcp/dashboard/pages/6_LLM_Juiz.py": {
+    "mtime": 1788138291.0377152,
+    "seen": 1788784448.5336,
+    "ast_hash": "38abd2db9e8c82911755dc536dca6ca1",
+    "semantic_hash": "38abd2db9e8c82911755dc536dca6ca1"
+  },
+  "src/smarty_energy/mcp/dashboard/pages/7_Fazendas_FEMS.py": {
+    "mtime": 1788783682.3447862,
+    "seen": 1788784448.533601,
+    "ast_hash": "96c2fd1609707590342d07a11925bfc4",
+    "semantic_hash": "96c2fd1609707590342d07a11925bfc4"
+  },
+  "src/smarty_energy/mcp/dashboard/state.py": {
+    "mtime": 1788783682.345788,
+    "seen": 1788784448.5336015,
+    "ast_hash": "d0d9c98f3fe7e9341115d67a68d6fdba",
+    "semantic_hash": "d0d9c98f3fe7e9341115d67a68d6fdba"
+  },
+  "src/smarty_energy/mcp/experiments.py": {
+    "mtime": 1788783682.3483107,
+    "seen": 1788784448.533602,
+    "ast_hash": "04f067dcafea68dc47fcb06e5df213ba",
+    "semantic_hash": "04f067dcafea68dc47fcb06e5df213ba"
+  },
+  "src/smarty_energy/mcp/judge_core.py": {
+    "mtime": 1788138291.0387208,
+    "seen": 1788784448.5336025,
+    "ast_hash": "690b3dd14087baf0a4b082d087fa918f",
+    "semantic_hash": "690b3dd14087baf0a4b082d087fa918f"
+  },
+  "src/smarty_energy/mcp/server.py": {
+    "mtime": 1789935047.1165204,
+    "seen": 1789935460.282064,
+    "ast_hash": "87217d2da9ac0395a8f19cf03b47a8fe",
+    "semantic_hash": ""
+  },
+  "src/smarty_energy/mcp/tracker.py": {
+    "mtime": 1788138291.0407288,
+    "seen": 1788784448.5336041,
+    "ast_hash": "9edc1f418bb72a790221b3852ba09e54",
+    "semantic_hash": "9edc1f418bb72a790221b3852ba09e54"
+  },
+  "src/smarty_energy/mcp_server.py": {
+    "mtime": 1788138291.0407288,
+    "seen": 1788784448.5336046,
+    "ast_hash": "cd864aa9946e9b9d51df564ecd6b79db",
+    "semantic_hash": "cd864aa9946e9b9d51df564ecd6b79db"
+  },
+  "src/smarty_energy/metrics.py": {
+    "mtime": 1788138291.0421238,
+    "seen": 1788784448.533605,
+    "ast_hash": "0213218db17b50fe36d11f3cd65495fb",
+    "semantic_hash": "0213218db17b50fe36d11f3cd65495fb"
+  },
+  "src/smarty_energy/runs.py": {
+    "mtime": 1788138291.042693,
+    "seen": 1788784448.5336058,
+    "ast_hash": "be3e211e42f764275c2f3ead26fd8bae",
+    "semantic_hash": "be3e211e42f764275c2f3ead26fd8bae"
+  },
+  "src/smarty_energy/training.py": {
+    "mtime": 1788138291.0437276,
+    "seen": 1788784448.533607,
+    "ast_hash": "1d7febb92369cf77410c2598b1958c3b",
+    "semantic_hash": "1d7febb92369cf77410c2598b1958c3b"
+  },
+  "src/smarty_energy/visualization.py": {
+    "mtime": 1788138291.045429,
+    "seen": 1788784448.5336075,
+    "ast_hash": "bbf02fa2b333ede6662e1cdcbd4d7e6e",
+    "semantic_hash": "bbf02fa2b333ede6662e1cdcbd4d7e6e"
+  },
+  "tests/__init__.py": {
+    "mtime": 1788138291.0462718,
+    "seen": 1788784448.533608,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "tests/conftest.py": {
+    "mtime": 1788138291.0462718,
+    "seen": 1788784448.5336087,
+    "ast_hash": "ca28c17de6b0c29b683c0ca790c5469d",
+    "semantic_hash": "ca28c17de6b0c29b683c0ca790c5469d"
+  },
+  "tests/mcp/__init__.py": {
+    "mtime": 1788138291.0478165,
+    "seen": 1788784448.5336092,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "tests/mcp/conftest.py": {
+    "mtime": 1788138291.0478165,
+    "seen": 1788784448.5336099,
+    "ast_hash": "e1732d83394b944bc6630c2b216bb024",
+    "semantic_hash": "e1732d83394b944bc6630c2b216bb024"
+  },
+  "tests/mcp/test_agent.py": {
+    "mtime": 1788138291.0492034,
+    "seen": 1788784448.5336106,
+    "ast_hash": "ccaf44042cb82a041c6a8774f630621d",
+    "semantic_hash": "ccaf44042cb82a041c6a8774f630621d"
+  },
+  "tests/mcp/test_baselines.py": {
+    "mtime": 1788138291.0492034,
+    "seen": 1788784448.5336113,
+    "ast_hash": "ca523dd5720857ee5d5e36ae846e7e2c",
+    "semantic_hash": "ca523dd5720857ee5d5e36ae846e7e2c"
+  },
+  "tests/mcp/test_bateria_pico_hipoteses.py": {
+    "mtime": 1789919373.6147876,
+    "seen": 1789919416.302181,
+    "ast_hash": "22312fa778c78e24c3bce6db06d9e873",
+    "semantic_hash": ""
+  },
+  "tests/mcp/test_env.py": {
+    "mtime": 1789919373.6157818,
+    "seen": 1789919416.3021822,
+    "ast_hash": "7e8ae63c2b86a4b08f389d6ea188a49e",
+    "semantic_hash": ""
+  },
+  "tests/mcp/test_experiments.py": {
+    "mtime": 1789935047.1165204,
+    "seen": 1789935460.2820797,
+    "ast_hash": "7d592f402b118b1946d78c68aca71a75",
+    "semantic_hash": ""
+  },
+  "tests/mcp/test_fisica_unificada.py": {
+    "mtime": 1789935300.9941227,
+    "seen": 1789935460.2820804,
+    "ast_hash": "80ddaf29294805c0c326aefcab0ee84b",
+    "semantic_hash": ""
+  },
+  "tests/mcp/test_switch_dataset.py": {
+    "mtime": 1789935047.1165204,
+    "seen": 1789935460.2820814,
+    "ast_hash": "6dee8a6cd396e2e0d1f6c5c608ba8e8a",
+    "semantic_hash": ""
+  },
+  "tests/mcp/test_tools.py": {
+    "mtime": 1789935047.1165204,
+    "seen": 1789935460.2820823,
+    "ast_hash": "d49601b0c1444a1ac6a3b9aa0f0067a2",
+    "semantic_hash": ""
+  },
+  "tests/mcp/test_tracker.py": {
+    "mtime": 1788138291.0532098,
+    "seen": 1788784448.533616,
+    "ast_hash": "a3456a635692f55d6436be0f52f29803",
+    "semantic_hash": "a3456a635692f55d6436be0f52f29803"
+  },
+  "tests/test_battery.py": {
+    "mtime": 1789934973.1588511,
+    "seen": 1789935460.2820854,
+    "ast_hash": "0c1b6b081e6b9ea33d2230e0756b4a12",
+    "semantic_hash": ""
+  },
+  "tests/test_constraints.py": {
+    "mtime": 1788138291.0542092,
+    "seen": 1788784448.5336177,
+    "ast_hash": "db211f68553c50b5710fe26729b64344",
+    "semantic_hash": "db211f68553c50b5710fe26729b64344"
+  },
+  "tests/test_data_loader.py": {
+    "mtime": 1788138291.055209,
+    "seen": 1788784448.5336182,
+    "ast_hash": "0e57abcb1c1806b180babd275cb6b60e",
+    "semantic_hash": "0e57abcb1c1806b180babd275cb6b60e"
+  },
+  "tests/test_data_loader_fems.py": {
+    "mtime": 1789934973.1588511,
+    "seen": 1789935460.2820897,
+    "ast_hash": "75b8ee675c980309c96b43284c81690c",
+    "semantic_hash": ""
+  },
+  "tests/test_environment.py": {
+    "mtime": 1789934973.1619668,
+    "seen": 1789935460.2820916,
+    "ast_hash": "268bb3468e1c4a6fd83b0bfa56a03733",
+    "semantic_hash": ""
+  },
+  "tests/test_fems_dataset_integridade.py": {
+    "mtime": 1788138291.0595536,
+    "seen": 1788784448.53362,
+    "ast_hash": "845058be36eb1228f23b63b4f5c087dc",
+    "semantic_hash": "845058be36eb1228f23b63b4f5c087dc"
+  },
+  "tests/test_metrics.py": {
+    "mtime": 1788138291.060216,
+    "seen": 1788784448.5336208,
+    "ast_hash": "9534e6f874f7d001df765a56bfec163e",
+    "semantic_hash": "9534e6f874f7d001df765a56bfec163e"
+  },
+  "tests/test_resultados.py": {
+    "mtime": 1788138291.060844,
+    "seen": 1788784448.5336213,
+    "ast_hash": "9bbc1ec9e6e137719c2843cdf1d42a6f",
+    "semantic_hash": "9bbc1ec9e6e137719c2843cdf1d42a6f"
+  },
+  "tests/test_runs.py": {
+    "mtime": 1789934973.1646616,
+    "seen": 1789935460.2820954,
+    "ast_hash": "44ca5bc33bd7f90831ecdda9b88ba883",
+    "semantic_hash": ""
+  },
+  "tests/test_training.py": {
+    "mtime": 1789934973.1664612,
+    "seen": 1789935460.2820961,
+    "ast_hash": "2ba4e951587626ed4a951590e24b0e9a",
+    "semantic_hash": ""
+  },
+  "scripts/verificar_mcp_kit.py": {
+    "mtime": 1789918515.3727453,
+    "seen": 1789919252.8739107,
+    "ast_hash": "3c676487839ae9ea16e81f7ea70be1cd",
+    "semantic_hash": ""
+  },
+  "tests/test_battery_properties.py": {
+    "mtime": 1788788454.6557777,
+    "seen": 1788792299.605735,
+    "ast_hash": "98cb6c00227b24b1e0ebf084592471e8",
+    "semantic_hash": ""
+  },
+  "src/smarty_energy/mcp/state.py": {
+    "mtime": 1789932942.1914976,
+    "seen": 1789933412.2070162,
+    "ast_hash": "5cd7cebe24c4ebb86e508b97306580e0",
+    "semantic_hash": ""
+  },
+  "src/smarty_energy/mcp/dashboard/__init__.py": {
+    "mtime": 1789932942.1914976,
+    "seen": 1789933412.2070003,
+    "ast_hash": "9316128b75c9c41af3fa92e7ff7b18a1",
+    "semantic_hash": ""
+  },
+  "src/smarty_energy/mcp/dashboard/pages/__init__.py": {
+    "mtime": 1789932942.1914976,
+    "seen": 1789933412.2070112,
+    "ast_hash": "fd03c0b3f06e2d916ef1a893b909f656",
+    "semantic_hash": ""
+  },
+  "tests/mcp/test_transport.py": {
+    "mtime": 1789934009.160863,
+    "seen": 1789934359.8228,
+    "ast_hash": "837b1beed94e330b51a3c65ff8368433",
+    "semantic_hash": ""
+  },
+  "scripts/verificar_docs.py": {
+    "mtime": 1789932942.1925042,
+    "seen": 1789933412.2069824,
+    "ast_hash": "2b345e6da424b79b87047cbfe5e96ade",
+    "semantic_hash": ""
+  },
+  "tests/test_docs.py": {
+    "mtime": 1789932942.1925042,
+    "seen": 1789933412.2070405,
+    "ast_hash": "64b5bf743e71717c3ae5ed5341855f2a",
+    "semantic_hash": ""
+  }
+}
