@@ -4,10 +4,13 @@ Fixture sintética: 2 dias × 24h, 2 fazendas, mesmas colunas/nomes que o
 `gerar_dataset.py --completo` do FEMS produz — o teste roda offline.
 """
 
+from unittest.mock import Mock
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from smarty_energy import data_loader
 from smarty_energy.data_loader import _carregar_fems
 
 CARGAS = [
@@ -81,3 +84,67 @@ def test_mes_zero_carrega_tudo(fems_dir):
 def test_fazenda_inexistente_falha(fems_dir):
     with pytest.raises(ValueError, match="FAZ-404"):
         _carregar_fems(str(fems_dir), mes=1, id_fazenda="FAZ-404")
+
+
+def test_carregar_dados_fems_preserva_retorno(monkeypatch, dia_fake, tarifa_fake):
+    esperado = ([dia_fake], tarifa_fake)
+    carregar_fems = Mock(return_value=esperado)
+    baixar_excel = Mock(side_effect=AssertionError("Sheets nao autorizado neste teste"))
+    ler_excel = Mock(side_effect=AssertionError("Excel nao autorizado neste teste"))
+    monkeypatch.setattr(data_loader, "FEMS_DATASET_DIR", "fixture-fems")
+    monkeypatch.setattr(data_loader, "SHEET_ID", "fixture-sheet")
+    monkeypatch.setattr(data_loader, "_carregar_fems", carregar_fems)
+    monkeypatch.setattr(data_loader, "_baixar_excel_drive", baixar_excel)
+    monkeypatch.setattr(data_loader.pd, "read_excel", ler_excel)
+
+    assert data_loader.carregar_dados("ignorado.xlsx") is esperado
+    carregar_fems.assert_called_once_with("fixture-fems")
+    baixar_excel.assert_not_called()
+    ler_excel.assert_not_called()
+
+
+@pytest.mark.parametrize("fems, sheet, path, fonte", [
+    ("fixture-fems", "fixture-sheet", "explicito.xlsx", "fems"),
+    ("", "fixture-sheet", "explicito.xlsx", "sheets"),
+    ("", "", "explicito.xlsx", "excel"),
+    ("", "", None, "excel"),
+])
+def test_prioridade_de_fonte_sem_fallback(monkeypatch, fems, sheet, path, fonte):
+    leitores = {nome: Mock(side_effect=LookupError(nome)) for nome in ("fems", "sheets", "excel")}
+    monkeypatch.setattr(data_loader, "FEMS_DATASET_DIR", fems)
+    monkeypatch.setattr(data_loader, "SHEET_ID", sheet)
+    monkeypatch.setattr(data_loader, "DATA_PATH", "padrao.xlsx")
+    monkeypatch.setattr(data_loader, "_carregar_fems", leitores["fems"])
+    monkeypatch.setattr(data_loader, "_baixar_excel_drive", leitores["sheets"])
+    monkeypatch.setattr(data_loader.pd, "read_excel", leitores["excel"])
+
+    with pytest.raises(LookupError, match=fonte):
+        data_loader.carregar_dados(path)
+
+    if fonte == "fems":
+        leitores[fonte].assert_called_once_with(fems)
+    elif fonte == "sheets":
+        leitores[fonte].assert_called_once_with(sheet)
+    else:
+        leitores[fonte].assert_called_once_with(path or "padrao.xlsx", sheet_name=None)
+    for nome, leitor in leitores.items():
+        if nome != fonte:
+            leitor.assert_not_called()
+
+
+def test_descrever_base_reflete_dataset_sintetico(fems_dir, monkeypatch):
+    dias, tarifa = _carregar_fems(str(fems_dir), mes=1, id_fazenda="FAZ-002")
+    monkeypatch.setattr(data_loader, "FEMS_DATASET_DIR", "fixture-fems")
+
+    meta = data_loader.descrever_base(dias, tarifa, id_fazenda="FAZ-002")
+
+    assert meta == {
+        "n_dias": 2,
+        "id_fazenda": "FAZ-002",
+        "data_inicio": "2025-01-01",
+        "data_fim": "2025-01-02",
+        "tarifa_min_rs_kwh": pytest.approx(0.6813),
+        "tarifa_max_rs_kwh": pytest.approx(1.1039),
+        "horas_pico": [18, 19, 20],
+        "fonte": "FEMS (fixture-fems)",
+    }

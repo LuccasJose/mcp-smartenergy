@@ -102,3 +102,20 @@ def test_descarga_bloqueada_no_soc_minimo_e_no_throughput(cfg):
 
     exhausted = BatteryModel(dict(cfg, bat_throughput_max_kwh=0.0))
     assert exhausted.discharge(1.0, 1.0).blocked_reason == "throughput_esgotado"
+
+
+def test_reset_preserva_soc_informado_e_renova_throughput(cfg):
+    battery = BatteryModel(dict(cfg, bat_throughput_max_kwh=1.0))
+    battery.charge(10.0, "solar")
+    soc_final = battery.soc_pct
+    assert battery.throughput_remaining_kwh == pytest.approx(0.0)
+
+    battery.reset(soc_inicial=soc_final)
+
+    assert battery.soc_pct == pytest.approx(soc_final)
+    assert battery.throughput_kwh == pytest.approx(0.0)
+    assert battery.charge(10.0, "solar").stored_kwh == pytest.approx(1.0)
+
+    battery.reset()
+    assert battery.soc_pct == pytest.approx(cfg["soc_inicial_pct"])
+    assert battery.throughput_kwh == pytest.approx(0.0)

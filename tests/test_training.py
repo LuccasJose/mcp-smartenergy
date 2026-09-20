@@ -25,6 +25,64 @@ def test_espaco_estados_total_confere():
     assert ESPACO_ESTADOS_TOTAL == 3780
 
 
+def test_treino_curto_propaga_soc(dia_fake, tarifa_fake):
+    cfg = dict(CONFIG, n_episodios=3, epsilon_inicial=0.0, epsilon_final=0.0)
+    dia = dia_fake.assign(solar_kw=50.0)
+    ambientes = []
+    inicios = []
+
+    class AmbienteObservado(FazendaEnergyEnv):
+        def reset(self, soc_inicial=None):
+            estado = super().reset(soc_inicial)
+            if soc_inicial is not None:
+                ambientes.append(self)
+                inicios.append(estado["soc"])
+            return estado
+
+    historico = treinar(
+        [dia, dia.copy()], tarifa_fake, construir_agentes(cfg), cfg,
+        env_cls=AmbienteObservado, eval_greedy_cada=0,
+    )
+
+    assert len(ambientes) == 3
+    assert ambientes[0].soc > cfg["soc_inicial_pct"]
+    assert inicios == pytest.approx([
+        cfg["soc_inicial_pct"], ambientes[0].soc, ambientes[1].soc,
+    ])
+    assert historico["soc_final_pct"] == pytest.approx(ambientes[-1].soc)
+    assert historico["n_episodios"] == 3
+
+
+def test_treino_completa_horizonte_e_restaura_checkpoint(monkeypatch, dia_fake, tarifa_fake):
+    cfg = dict(CONFIG, n_episodios=3, epsilon_inicial=0.0, epsilon_final=0.0)
+    agentes = construir_agentes(cfg)
+    custos = iter([1.0, 3.0, 5.0, 5.0])
+    snapshots = []
+
+    def avaliar_sintetico(*args, **kwargs):
+        assert kwargs["propagar_soc"] is True
+        snapshots.append({
+            nome: {estado: valores.copy() for estado, valores in agente.q_table.items()}
+            for nome, agente in agentes.items()
+        })
+        return {"custo_medio_dia_rs": next(custos)}
+
+    monkeypatch.setattr("smarty_energy.training.avaliar_politica", avaliar_sintetico)
+    historico = treinar([dia_fake], tarifa_fake, agentes, cfg, eval_greedy_cada=1)
+
+    assert len(historico["custos"]) == historico["n_episodios"] == 3
+    assert historico["best_ep"] == 1
+    assert historico["best_custo_med"] == 1.0
+    assert historico["custo_greedy_ultimo_ep"] == 5.0
+    assert historico["curva_greedy"] == [(1, 1.0), (2, 3.0), (3, 5.0)]
+    assert len(snapshots) == 4
+    for nome, agente in agentes.items():
+        assert agente.n_updates == 72
+        assert set(agente.q_table) == set(snapshots[0][nome])
+        for estado, esperado in snapshots[0][nome].items():
+            np.testing.assert_array_equal(agente.q_table[estado], esperado)
+
+
 def test_cobertura_estados_reportada(agentes_treinados):
     """A cobertura deve ser reportável e estar em (0, 1].
 
