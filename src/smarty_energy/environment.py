@@ -71,6 +71,7 @@ class FazendaEnergyEnv:
         self.pivo_ativado_hoje = False  # R-PIVO: apenas 1 ativação de 8h por dia
         self.bomba_total_h     = 0      # R-BOMBA: contador para auditoria (schedule fixo)
         self.secador_kwh_ac = 0.0   # Energia acumulada no secador
+        self.pico_importacao_dia = 0.0  # máximo de importação até agora (p/ w_pico_demanda)
         
         return self._estado()
 
@@ -380,6 +381,22 @@ class FazendaEnergyEnv:
                 cfg["pen_reserva_pre_pico"] * deficit_reserva / 100.0 * bat_descarga
             )
 
+        # ── Formulação econômica (transferida do SA) ────────────
+        # Degradação: cada kWh movimentado (carga+descarga) paga o desgaste do
+        # banco — arbitragem só compensa se o spread tarifário superar o ciclo.
+        pen_ciclos = cfg["w_ciclos"] * (bat_carga + bat_descarga)
+        # Peak shaving incremental: penaliza só o AUMENTO do máximo diário de
+        # importação; a soma telescópica no dia equivale a w * pico_diario.
+        inc_pico = max(0.0, importacao - self.pico_importacao_dia)
+        pen_pico_demanda = cfg["w_pico_demanda"] * inc_pico
+        self.pico_importacao_dia = max(self.pico_importacao_dia, importacao)
+        # SOC terminal: devolver a bateria como a encontrou — sem isso, energia
+        # armazenada não tem valor no fim do horizonte e o agente esvazia cedo.
+        pen_soc_final = 0.0
+        if done:
+            deficit_final = max(0.0, cfg["soc_alvo_final_pct"] - self.soc)
+            pen_soc_final = cfg["pen_soc_final"] * deficit_final
+
         # ── Reward cooperativo ────────────────────────────────────
         reward = (
             - cfg["w_custo"]         * custo
@@ -394,6 +411,9 @@ class FazendaEnergyEnv:
             - pen_secador_pico
             - pen_reserva_pre_pico
             - pen_descarga_fora_pico
+            - pen_ciclos
+            - pen_pico_demanda
+            - pen_soc_final
             + bonus_pivo_solar
             + bonus_sec_excedente
             + bonus_carga_solar
@@ -436,6 +456,10 @@ class FazendaEnergyEnv:
             "bonus_carga_pico_geracao": bonus_carga_pico_geracao,
             "pen_descarga_fora_pico": pen_descarga_fora_pico,
             "pen_reserva_pre_pico": pen_reserva_pre_pico,
+            "pen_ciclos": pen_ciclos,
+            "pen_pico_demanda": pen_pico_demanda,
+            "pen_soc_final": pen_soc_final,
+            "pico_importacao_dia": self.pico_importacao_dia,
             "motivo_descarga_bloqueada": motivo_descarga_bloqueada,
             "pcc_violado": pcc_violado,
             "soc_violado": soc_critico,

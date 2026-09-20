@@ -147,7 +147,8 @@ def test_reward_zera_quando_todos_pesos_zerados(dia_fake, tarifa_fake, cfg):
               "pen_secador_pico", "bonus_excedente", "bonus_soc_ok",
               "bonus_pivo_solar", "bonus_sec_excedente", "w_bonus_carga",
               "bonus_descarga_pico",
-              "bonus_carga_pico_geracao", "pen_descarga_fora_pico"):
+              "bonus_carga_pico_geracao", "pen_descarga_fora_pico",
+              "pen_soc_final", "w_ciclos", "w_pico_demanda"):
         cfg_zero[k] = 0.0
     cfg_zero["reward_offset"] = 7.5   # valor arbitrario nao-nulo p/ o teste
 

@@ -44,7 +44,7 @@ def srv(monkeypatch, dia_fake, tarifa_fake):
 def test_reward_weights_chamada_vazia_retorna_estado(srv):
     out = json.loads(srv.configure_reward_weights())
     assert out["status"] == "nenhum peso fornecido"
-    assert len(out["pesos_atuais"]) == 18
+    assert len(out["pesos_atuais"]) == 21
     assert "defaults" in out
 
 

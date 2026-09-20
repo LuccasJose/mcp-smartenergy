@@ -141,6 +141,8 @@ def test_config_chaves_obrigatorias():
         "pen_secador_pico", "bonus_pivo_solar", "bonus_sec_excedente",
         "bonus_descarga_pico", "bonus_carga_pico_geracao",
         "pen_descarga_fora_pico",
+        # Formulação econômica (transferida do SA)
+        "pen_soc_final", "soc_alvo_final_pct", "w_ciclos", "w_pico_demanda",
     ]
     for chave in chaves:
         assert chave in CONFIG, f"Chave ausente em CONFIG: {chave}"

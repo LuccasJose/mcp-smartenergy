@@ -91,6 +91,18 @@ CONFIG = {
     "soc_reserva_pre_pico_pct": 60.0,
     "pen_reserva_pre_pico": 0.0,  # experimento; 0 desativa ate calibracao
 
+    # Formulação econômica transferida do planejador SA (Smart_Energy_SA,
+    # PESOS_ENERGIA). Calibrada no sweep de 2026-09-20 (braço "completo",
+    # 3 seeds × 20k ep): custo e despacho no pico iguais à base, SOC terminal
+    # +20pp (63,8% às 20h+). AVISO da calibração: w_ciclos alto (2.4) SEM a
+    # pen_descarga_fora_pico mata a bateria (SOC cola em 15%) — o custo de
+    # ciclo precisa ficar abaixo do spread tarifário. Zerar os 3 reproduz o
+    # reward anterior.
+    "pen_soc_final": 4.0,     # por ponto pct de SOC abaixo do alvo no FIM do dia
+    "soc_alvo_final_pct": 50.0,  # alvo terminal: devolver a bateria como a encontrou
+    "w_ciclos": 1.2,          # custo de degradação por kWh movimentado (carga+descarga)
+    "w_pico_demanda": 2.0,    # por kW de AUMENTO do pico diário de importação (peak shaving)
+
     # Penalidades Operacionais (proporcionalmente reduzidas)
     "pen_secador_meta": 20.0,   # fallback se rescue não alcançar (defensivo)
     "pen_sede_desvio": 5.0,     # reservado para violações de clamp (defensivo)

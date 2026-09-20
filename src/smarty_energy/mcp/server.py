@@ -106,6 +106,7 @@ _REWARD_WEIGHT_KEYS = (
     "pen_pivo_pico", "pen_secador_pico",
     "bonus_excedente", "bonus_soc_ok", "bonus_descarga_pico",
     "bonus_carga_pico_geracao", "pen_descarga_fora_pico",
+    "pen_soc_final", "w_ciclos", "w_pico_demanda",
     "bonus_pivo_solar", "bonus_sec_excedente",
 )
 _DEFAULT_REWARD_WEIGHTS = {k: CONFIG[k] for k in _REWARD_WEIGHT_KEYS}
@@ -198,6 +199,9 @@ def configure_reward_weights(
     bonus_descarga_pico: float | None = None,
     bonus_carga_pico_geracao: float | None = None,
     pen_descarga_fora_pico: float | None = None,
+    pen_soc_final: float | None = None,
+    w_ciclos: float | None = None,
+    w_pico_demanda: float | None = None,
     bonus_pivo_solar: float | None = None,
     bonus_sec_excedente: float | None = None,
 ) -> str:
@@ -227,6 +231,9 @@ def configure_reward_weights(
             "bonus_descarga_pico": bonus_descarga_pico,
             "bonus_carga_pico_geracao": bonus_carga_pico_geracao,
             "pen_descarga_fora_pico": pen_descarga_fora_pico,
+            "pen_soc_final": pen_soc_final,
+            "w_ciclos": w_ciclos,
+            "w_pico_demanda": w_pico_demanda,
             "bonus_pivo_solar": bonus_pivo_solar,
             "bonus_sec_excedente": bonus_sec_excedente,
         }
@@ -1527,6 +1534,9 @@ def describe_schema() -> str:
             "bonus_soc_30_80": CONFIG["bonus_soc_ok"],
             "bonus_descarga_bateria_pico": CONFIG["bonus_descarga_pico"],
             "pen_descarga_fora_pico": -CONFIG["pen_descarga_fora_pico"],
+            "pen_soc_final_por_pp": -CONFIG["pen_soc_final"],
+            "pen_ciclos_por_kwh": -CONFIG["w_ciclos"],
+            "pen_pico_demanda_por_kw": -CONFIG["w_pico_demanda"],
         },
         "tarifa_tou": {
             "min_rs_kwh": DATASET_META["tarifa_min_rs_kwh"],
@@ -1544,6 +1554,10 @@ def describe_schema() -> str:
             "bonus_descarga_pico",
             "bonus_carga_pico_geracao",
             "pen_descarga_fora_pico",
+            "pen_ciclos",
+            "pen_pico_demanda",
+            "pen_soc_final",
+            "pico_importacao_dia",
             "motivo_descarga_bloqueada",
             "pcc_violado", "soc_violado", "fonte_geracao_kwh", "fonte_bateria_kwh",
             "fonte_rede_kwh", "pivo_kw_consumido", "captacao_kw_consumido",
