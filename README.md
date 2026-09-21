@@ -73,7 +73,7 @@ servidor, em [docs/execucao-mcp.md](docs/execucao-mcp.md).
 
 ---
 
-## Resultados
+## Resultados históricos
 
 O modelo atual usa sete períodos temporais, três níveis de descarga parcial e
 um bônus pequeno para energia de bateria efetivamente entregue no pico. Os
@@ -87,11 +87,13 @@ propagado nos 31 dias da base v8:
 | Descarga no pico | 38,20 kWh/mês | 38,07 kWh/mês | 14,54 kWh |
 | Parcela da descarga no pico | 13,03 % | 13,19 % | 4,52 p.p. |
 
-As restrições de PCC e SoC foram respeitadas em todas as cinco avaliações. O
-despacho no pico melhorou, mas ainda apresenta variância entre seeds; portanto
-esses valores são experimentais e não substituem automaticamente um resultado
-oficial do TCC. O protocolo, runs e dados completos estão em
-[relatos/experimento_despacho_bateria_pico.md](relatos/experimento_despacho_bateria_pico.md).
+O resumo histórico é acompanhado pelo
+[artefato de avaliação multiseed](outputs/avaliacao_despacho_bateria_multiseed.json).
+Esses resultados não foram reexecutados na limpeza documental e não representam
+a validação dos novos [protocolos de divisão](docs/divisoes-dataset.md).
+O relato original foi removido da árvore ativa, com recuperação no histórico
+Git anterior à limpeza e no backup local. Para resultados atuais, registrar
+dados, configuração, seeds e períodos de treino/validação/teste em cada run.
 
 > Referência histórica: o run `2026-06-19_145038` obteve R$ 63,25/dia sob a
 > codificação antiga. Ele não é comparável diretamente à arquitetura atual e
@@ -123,10 +125,10 @@ tcc-darvinposselt/
 ├── server.py               # entry do servidor MCP
 ├── src/smarty_energy/
 │   ├── config.py           # hiperparâmetros, pesos do reward, limites físicos
-│   ├── data_loader.py      # base v8 (Sheets ou Excel local) → DataFrames diários
+│   ├── data_loader.py      # FEMS ou base v8 → DataFrames diários
 │   ├── environment.py      # FazendaEnergyEnv — simulador e restrições HARD
-│   ├── agents.py           # AgenteQL, IQLSystem, heurístico, sem-agente, financeiro
-│   ├── training.py         # loop IQL com early stopping (save-best)
+│   ├── agents/             # API publica; Q-learning, regras, avaliacao e IQLSystem
+│   ├── training.py         # horizonte completo e seleção de checkpoint
 │   ├── evaluation.py       # execução por dia, métricas mensais, cenários
 │   ├── metrics.py          # métricas primárias do plano de testes (4.1/4.2)
 │   ├── runs.py             # versionamento de treinos em outputs/runs/
@@ -136,13 +138,11 @@ tcc-darvinposselt/
 │   ├── dashboard.py        # dashboard Tkinter
 │   ├── dashboard_web.py    # dashboard web (Dash/Plotly)
 │   └── mcp/
-│       ├── server.py       # ~25 ferramentas MCP (LLM-as-a-judge)
+│       ├── server.py       # 45 ferramentas MCP (LLM-as-a-judge)
 │       ├── tracker.py      # métricas por passo/episódio do servidor
 │       └── dashboard/      # cliente Streamlit (Overview, Aprendizado, Trace)
 ├── tests/                  # suíte do pacote (+ tests/mcp/ para a camada MCP)
 ├── docs/                   # documentação Retype
-├── relatos/                # relatórios de validação e walkthrough
-├── notebooks/              # PoC exploratória
 ├── outputs/                # runs, modelos e gráficos gerados
 └── documentos/             # documentos do TCC (.docx)
 ```

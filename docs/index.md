@@ -39,7 +39,7 @@ config e dados:
 Os dois compartilham `outputs/runs/`, então um treino longo feito no pipeline
 pode ser carregado pelo servidor e vice-versa.
 
-## Resultados experimentais atuais
+## Resultados experimentais históricos
 
 A arquitetura atual usa sete períodos temporais, descarga parcial de bateria e
 incentivo leve para descarga efetiva no pico. Em cinco seeds de 20 mil
@@ -52,11 +52,12 @@ episódios, com SoC propagado nos 31 dias da base v8:
 | Descarga no pico | 38,20 kWh/mês | 38,07 kWh/mês | 14,54 kWh |
 | Parcela da descarga no pico | 13,03 % | 13,19 % | 4,52 p.p. |
 
-As restrições de PCC e SoC foram respeitadas nas cinco avaliações. A variância
-entre seeds ainda é relevante, por isso o número oficial do TCC deve ser
-atualizado somente após a confirmação do protocolo experimental. Consulte
-`relatos/experimento_despacho_bateria_pico.md` para runs, parâmetros e dados
-reproduzíveis.
+Artefato preservado no repositório:
+`outputs/avaliacao_despacho_bateria_multiseed.json`. Esses números não foram
+reexecutados durante a limpeza documental nem validam os novos
+[protocolos de divisão](divisoes-dataset.md). Os relatos originais permanecem
+recuperáveis no histórico Git anterior à limpeza; não fazem mais parte da
+documentação ativa. Resultados atuais exigem um protocolo experimental registrado.
 
 > O run histórico `2026-06-19_145038` (R$ 63,25/dia) usava uma codificação de
 > estado e ações de bateria anterior e não é comparável diretamente ao modelo
@@ -75,6 +76,7 @@ descreve como reproduzir e verificar o build local.
 - [Arquitetura](arquitetura.md) — os três agentes, o estado e o reward cooperativo.
 - [Regras de domínio](regras-dominio.md) — regras e exemplos do piloto de bateria e SoC.
 - [Reorganização](reorganizacao.md) — etapas, decisões, rastreabilidade, testes e pendências.
+- [Guia de apresentacao](guia-apresentacao.md) — roteiro de fala, demonstracao e perguntas sobre as mudancas.
 - [Servidor MCP](mcp.md) — catálogo de ferramentas e o loop LLM-as-a-judge.
 - [Componentes](componentes.md) — o que faz cada módulo de `src/smarty_energy/`.
 - [Dados de entrada](dados.md) — a base Excel e o mapeamento de cargas/geração.

@@ -9,7 +9,7 @@ Resumo_Mensal). Este script confere, sem alterar nada:
 
 Uso:
     python scripts/auditar_base.py            # imprime o relatório
-    python scripts/auditar_base.py > relatos/auditoria_base_v8.md
+    python scripts/auditar_base.py > outputs/auditoria_base_v8.md
 
 Requer conexão à internet (baixa a planilha) — mesma fonte do pipeline.
 """

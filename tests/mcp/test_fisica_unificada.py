@@ -68,9 +68,11 @@ def test_contratos_arquitetura_aceitam_codigo_atual_sem_executar(arquitetura_iso
 @pytest.mark.parametrize("indireto", [False, True], ids=["direto", "indireto"])
 @pytest.mark.parametrize("contrato, origem, proibido, regra", [
     ("motor-sem-adaptadores", "battery.py", "smarty_energy.mcp.state", "A-DEP-001"),
+    ("motor-sem-adaptadores", "agents/q_learning.py", "smarty_energy.mcp.state", "A-DEP-001"),
     ("estado-sem-servidor", "mcp/state.py", "smarty_energy.mcp.server", "A-DEP-002"),
     ("backend-sem-clientes", "mcp/server.py", "smarty_energy.mcp.dashboard.state", "A-DEP-003"),
     ("clientes-sem-motor", "mcp/dashboard/pages/4_Trace_Diario.py", "smarty_energy.environment", "A-DEP-004"),
+    ("clientes-sem-motor", "mcp/dashboard/pages/4_Trace_Diario.py", "smarty_energy.agents.system", "A-DEP-004"),
 ])
 def test_contratos_arquitetura_rejeitam_imports(arquitetura_isolada, indireto, contrato, origem, proibido, regra):
     pacote = arquitetura_isolada / "smarty_energy"

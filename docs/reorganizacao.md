@@ -6,6 +6,68 @@ order: 68
 
 # Reorganizacao incremental
 
+## Limpeza documental (21/09/2026)
+
+Escopo aprovado pelo mantenedor: remover os dois rascunhos academicos de
+arquitetura, a PoC em notebook e todos os arquivos da pasta de relatos.
+Foram preservados documentacao operacional, guia de apresentacao, fontes Word,
+dados, modelos e resultados JSON. A refatoracao pendente dos agentes nao foi
+revertida nem misturada com alteracoes de comportamento.
+
+Removidos da arvore ativa: `docs/arquitetura-agentes-dissertacao.md`,
+`docs/arquitetura-dissertacao-compilado.md`, `notebooks/smartenergy_mas_poc.ipynb`
+e nove relatos Markdown, alem do marcador da pasta. Os arquivos versionados
+podem ser consultados no commit `0e51402`, anterior a esta limpeza.
+O relato de integridade de 07/09 nunca commitado tambem foi incluido em um
+backup local fora do repositorio, junto com os demais arquivos removidos:
+13 entradas, todas verificadas por SHA-256 antes das exclusoes.
+
+Terminologia dos agentes, separacao entre orquestrador/ambiente/juiz e leituras
+conceituais foram consolidadas em [Arquitetura](arquitetura.md). Nao foram
+transplantadas como fatos atuais as antigas contagens de estados/acoes/tools,
+garantias de seguranca ou ganhos experimentais. Referencias aos resultados
+historicos apontam agora aos artefatos JSON preservados. Os registros abaixo
+descrevem decisoes de suas respectivas datas, nao a existencia atual de cada arquivo.
+
+## Extracao dos agentes (21/09/2026)
+
+Escopo autorizado apos o commit `0e51402`: separar responsabilidades de
+`smarty_energy.agents` sem alterar algoritmo, politica, dados, formato de runs,
+selecao de checkpoint ou SoC. Configuracao global, modularizacao do servidor,
+limpeza de documentos/notebooks e validacao cientifica ficam fora desta etapa.
+
+**ADR-006: pacote de agentes com fachada publica compativel.** O antigo modulo
+de 525 linhas passa a ser um pacote: `q_learning.py` para algoritmo/topologia,
+`rules.py` para regras financeiras e baselines, `evaluation.py` para o laco
+compartilhado e `system.py` para `IQLSystem`. O `__init__.py` reexporta os sete
+simbolos publicos, sem exigir mudancas nos consumidores existentes.
+
+Criterios de aceitacao: assinaturas e imports publicos preservados; Q-tables,
+historicos e metricas iguais sob as mesmas seeds/dados sinteticos; arquivos
+legados carregaveis; ausencia de ciclos de importacao em processos novos;
+contratos arquiteturais validos, inclusive contra imports proibidos nos novos
+submodulos. Testes do agente, baselines e runs executados antes e depois da
+extracao. Os testes dos agentes e baselines passam a integrar o gate sintetico.
+
+A extracao mecanica comparou os corpos por AST, ajustando apenas imports
+relativos. A comparacao executada contra o codigo de `HEAD:src/smarty_energy/agents.py`
+em `0e51402` confirmou sete assinaturas e paridade exata em tres seeds
+(11, 29, 47), com tres episodios e seis dias sinteticos: Q-tables, historico
+(exceto duracao) e metricas greedy iguais, incluindo ambas as baselines.
+Nao e uma medicao de desempenho cientifico ou uma prova para todos os estados.
+
+Corrigidas apenas as descricoes do IQL que chamavam a selecao legada de
+holdout e o horizonte completo de early stopping; o comportamento foi preservado
+e caracterizado em teste. Nao se deve confundir essa correcao textual com uma
+mudanca de protocolo experimental. Veja [Componentes](componentes.md).
+
+Verificacao local em 21/09/2026: **307 testes passaram em 74,82 s**, com oito
+avisos conhecidos de depreciacao do cliente HTTP. Selecao sintetica explicita
+do gate, incluindo agentes/baselines, bateria, ambiente, runs, divisoes, MCP
+e transportes; nao foi a suite inteira. Quatro contratos arquiteturais aceitos
+e violacoes deliberadas dos submodulos rejeitadas. Nenhum dataset real, treino
+longo, juiz LLM ou chamada paga foi usado. CI remota nao foi verificada.
+
 ## Encerramento local
 
 **Engenharia local concluida no escopo acordado em 20/09/2026.** O mantenedor
@@ -37,8 +99,9 @@ permanecem; scripts internos migram para initialize/get_state conforme os ADRs.
 O mantenedor autorizou a integracao em seis commits e o push somente da branch
 `refactor/reorganizacao-contratos`, incluindo o kit anterior e os quatro
 artefatos Graphify revisados. Nao foi autorizado merge em main nem deploy.
-O relatorio historico `relatos/integridade_codigo_2026-09-07.md` fica fora
-dessa serie, preservado localmente para revisao especifica.
+Naquela entrega, o relato de integridade de 07/09 ficou fora dos commits.
+Sua remocao posterior e a preservacao em backup estao registradas na secao
+de limpeza documental acima.
 
 Ordem aprovada: kit/dependencias; testes do motor; refatoracao MCP; documentacao
 e build; contratos arquiteturais/CI; indice Graphify. A separacao parcial de

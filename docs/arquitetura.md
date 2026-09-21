@@ -47,6 +47,28 @@ não substitui os contratos nem seus testes.
 
 ## Agentes cooperativos
 
+O sistema usa **Independent Q-Learning histerético com recompensa cooperativa**.
+Cada agente mantém sua política tabular; não há negociação nem mensagens
+entre agentes. A coordenação ocorre pelo estado observado e pelo reward
+compartilhado, em um ambiente comum.
+
+`IQLSystem` e o loop de treino orquestram a execução, mas não são um quarto
+agente que aprende a decidir pelos demais. `FazendaEnergyEnv` calcula a
+transição, aplica as regras implementadas e produz estado/reward.
+`AgenteFinanceiro` é um componente determinístico de estresse e créditos,
+não um agente de aprendizado. A estrutura dos módulos está em
+[Componentes](componentes.md).
+
+O espaço nominal de ações não equivale ao controle efetivo: regras do ambiente
+podem ignorar ou limitar ações, como nos bits de bomba e secador. Isso deve
+ser descrito na metodologia, sem afirmar que a existência dessas regras
+comprova toda a segurança física ou a qualidade do aprendizado.
+
+O LLM-juiz é um cliente externo do [MCP de operação e auditoria](mcp.md).
+É distinto do servidor MCP de benchmark, que expõe ações de controle para
+experimentos com LLM. Respostas de ferramentas dão evidências ao juiz, mas
+não garantem que seu texto esteja correto nem substituem testes estatísticos.
+
 Três agentes independentes — cada um com sua própria Q-table — compartilham o
 mesmo **reward cooperativo**. É a mesma arquitetura nos dois modos de uso: o
 pipeline offline e o [servidor MCP](mcp.md) importam o mesmo
@@ -240,3 +262,18 @@ deixada pelo anterior, simulando continuidade real.
 - **Sem agente (C0)** — baseline definido no modelo: bateria em manter, teto
   liberal e início do pivô às 16h, com bomba e secador seguindo seus cronogramas.
   Não é evidência, por si só, de como uma fazenda real opera.
+
+## Referências conceituais
+
+Leituras sugeridas preservadas dos rascunhos acadêmicos removidos. Conferir
+as fontes originais e a adequação à metodologia antes de citá-las; não são
+evidência de validação do código ou dos resultados deste projeto.
+
+- Tan (1993), *Multi-agent reinforcement learning: Independent vs. cooperative agents*.
+- Matignon, Laurent e Le Fort-Piat (2007), *Hysteretic Q-learning: an algorithm for decentralized reinforcement learning in cooperative multi-agent teams*.
+- Oliehoek e Amato (2016), *A Concise Introduction to Decentralized POMDPs*.
+- Alshiekh et al. (2018), *Safe Reinforcement Learning via Shielding*.
+
+Classificar formalmente o sistema como Dec-POMDP ou atribuir garantias de
+shielding exige justificar essas hipóteses. Não inferir tais garantias apenas
+da presença de vários agentes ou de restrições no ambiente.

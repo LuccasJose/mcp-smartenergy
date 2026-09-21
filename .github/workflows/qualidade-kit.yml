@@ -36,6 +36,7 @@ jobs:
           tests/test_docs.py
           tests/test_environment.py tests/test_runs.py
           tests/test_data_loader_fems.py tests/test_data_splits.py
+          tests/mcp/test_agent.py tests/mcp/test_baselines.py
           tests/mcp/test_tools.py tests/mcp/test_switch_dataset.py
           tests/mcp/test_experiments.py tests/mcp/test_fisica_unificada.py
           tests/mcp/test_transport.py tests/mcp/test_data_splits.py

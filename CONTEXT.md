@@ -103,7 +103,7 @@ nao substitui a politica ativa nem altera os runs legados.
 src/smarty_energy/
 ├── config.py        — Hiperparâmetros, pesos do reward, limites, ajustar_decay
 ├── data_loader.py   — FEMS ou base v8 (Sheets/Excel) → DataFrames diários + metadados
-├── agents.py        — AgenteQL, IQLSystem, heurístico, sem-agente, financeiro
+├── agents/          — API publica, Q-learning, regras, avaliacao e orquestracao IQL
 ├── environment.py   — FazendaEnergyEnv (estado → ações → reward)
 ├── training.py      — Loop IQL com seleção de checkpoint greedy (aceita tracker do MCP)
 ├── evaluation.py    — Execução por dia, métricas mensais, cenários
